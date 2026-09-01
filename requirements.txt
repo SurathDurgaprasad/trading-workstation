@@ -1,0 +1,25 @@
+# Direct dependencies actually imported by this project's code, pinned to
+# the versions already installed in venv/ at the time of the Phase 1/2
+# audit-and-extend pass. This file did not exist before; it documents the
+# existing environment rather than introducing new pins.
+#
+# venv/ has many more (transitive) packages than this — this file is the
+# direct-dependency contract, not a full `pip freeze`.
+
+langgraph==1.2.4
+langchain==1.3.4
+langchain-core==1.4.1
+langchain-community==0.4.2
+langchain-chroma==1.1.0
+langchain-ollama==1.1.0
+langchain-text-splitters==1.1.2
+chromadb==1.5.9
+pydantic==2.13.4
+yfinance==1.4.1
+pandas==3.0.3
+numpy==2.4.6
+ollama==0.6.2
+mcp==1.29.1
+
+# test-only
+pytest==9.1.1

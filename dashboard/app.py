@@ -1,0 +1,214 @@
+"""Phase 13 §19 — a minimal local dashboard for the `paper-live` human-
+approval workstation. Built ONLY after the CLI workflow (main.py's
+`paper-live` command) was confirmed reliable, per spec.
+
+Single-user, local-only, no new heavy dependency: Starlette + uvicorn are
+already installed (transitive deps of the `mcp` package's HTTP transport),
+so this adds nothing to requirements.txt. No database, no auth system, no
+Kubernetes/cloud/Postgres/Redis/Kafka — one ASGI process, bound to
+127.0.0.1 by default (see main.py's `dashboard` subcommand).
+
+Every section reads through live/workstation.py — the SAME module
+mcp_server/server.py's Phase 13 tools use — and the two POST actions
+(approve/reject) call live.workstation.approve_pending_signal()/
+reject_pending_signal(), which call the exact same
+LiveSimPipeline.approve_pending()/reject_pending() the CLI's interactive Y/N
+prompt calls. This module contains NO business logic of its own: no risk
+math, no signal generation, no account arithmetic — only HTML rendering and
+routing. Nothing here can execute a real order; no execute_trade/
+place_order/broker-credential path exists anywhere in this codebase.
+
+This dashboard does NOT itself advance the market feed (it never calls
+LiveSimPipeline.process_next()) — that stays the CLI's job (`paper-live`),
+to avoid two different processes racing to drive the same mock feed. The
+dashboard is a read/act SURFACE over the persisted state the CLI (or a
+script) advances; run `python main.py paper-live ...` in another terminal
+to generate bars/signals for this page to show and act on.
+"""
+
+import html
+from datetime import datetime, timezone
+
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, RedirectResponse
+from starlette.routing import Route
+
+import live.workstation as workstation
+
+_REFRESH_SECONDS = 15
+
+
+def _page(body: str) -> str:
+    return f"""<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Paper-Live Workstation (SIMULATED)</title>
+<meta http-equiv="refresh" content="{_REFRESH_SECONDS}">
+<style>
+  body {{ font-family: -apple-system, Segoe UI, sans-serif; background: #0f1115; color: #e6e6e6; margin: 0; padding: 24px; }}
+  .banner {{ background: #7a1f1f; color: #fff; padding: 10px 16px; font-weight: bold; border-radius: 4px; margin-bottom: 16px; }}
+  .kill-active {{ background: #b30000; }}
+  h2 {{ border-bottom: 1px solid #333; padding-bottom: 4px; margin-top: 28px; }}
+  table {{ width: 100%; border-collapse: collapse; margin-top: 8px; }}
+  th, td {{ text-align: left; padding: 6px 10px; border-bottom: 1px solid #262a33; font-size: 14px; }}
+  th {{ color: #9aa4b2; font-weight: 600; }}
+  .tag {{ display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 12px; font-weight: bold; }}
+  .tag-mock {{ background: #33415c; color: #a9c1ff; }}
+  .tag-sim {{ background: #33415c; color: #a9c1ff; }}
+  .tag-long {{ background: #14432a; color: #7be8a4; }}
+  .tag-short {{ background: #4a1f1f; color: #ff9d9d; }}
+  form.inline {{ display: inline; }}
+  button {{ padding: 6px 14px; border-radius: 4px; border: none; font-weight: bold; cursor: pointer; }}
+  button.approve {{ background: #1f7a3f; color: #fff; }}
+  button.reject {{ background: #7a1f1f; color: #fff; }}
+  button.killswitch {{ background: #b30000; color: #fff; }}
+  button.reset {{ background: #33415c; color: #fff; }}
+  input[type=text] {{ background: #1a1d24; border: 1px solid #333; color: #e6e6e6; padding: 4px 8px; border-radius: 3px; }}
+  .muted {{ color: #8a93a3; font-size: 12px; }}
+  .kv {{ display: grid; grid-template-columns: 220px 1fr; row-gap: 4px; max-width: 480px; }}
+</style>
+</head>
+<body>
+<div class="banner">SIMULATED PAPER TRADING &mdash; NOT connected to a live broker or feed. No real order can ever be placed here.</div>
+{body}
+<p class="muted">Auto-refreshes every {_REFRESH_SECONDS}s. This page does not advance the market itself &mdash;
+run <code>python main.py paper-live --symbol ... --interval ... --period ...</code> in a terminal to process bars and generate signals.</p>
+</body>
+</html>"""
+
+
+def _fmt_money(value: float) -> str:
+    return f"{value:,.2f}"
+
+
+async def index(request: Request) -> HTMLResponse:
+    status = workstation.get_live_sim_status()
+    pending = workstation.get_pending_approvals()
+    positions = workstation.get_positions()
+    account = workstation.get_account_state()
+    risk = workstation.get_risk_state()
+    journal = workstation.get_trade_journal()
+
+    kill_banner = ""
+    if status["kill_switch_active"]:
+        reason = html.escape(status["kill_switch_reason"] or "")
+        kill_banner = f'<div class="banner kill-active">KILL SWITCH ACTIVE &mdash; {reason} &mdash; no new signal will be approved or executed.</div>'
+
+    kill_form = (
+        '<form class="inline" method="post" action="/kill-switch/reset">'
+        '<button class="reset" type="submit">Reset kill switch</button></form>'
+        if status["kill_switch_active"] else
+        '<form class="inline" method="post" action="/kill-switch/activate">'
+        '<input type="text" name="reason" placeholder="reason (optional)">'
+        '<button class="killswitch" type="submit">Activate kill switch</button></form>'
+    )
+
+    market_rows = "".join(
+        f"<tr><td>{html.escape(r.symbol)}</td><td><span class='tag tag-{r.signal.side.value.lower()}'>{r.signal.side.value}</span></td>"
+        f"<td>{r.signal.reference_price:.2f}</td><td>{r.signal.generated_at}</td></tr>"
+        for r in pending
+    ) or "<tr><td colspan='4' class='muted'>No pending signals &mdash; nothing to show until paper-live generates one.</td></tr>"
+
+    pending_rows = "".join(
+        f"<tr><td>{html.escape(r.signal_id[:12])}</td><td>{html.escape(r.symbol)}</td>"
+        f"<td><span class='tag tag-{r.signal.side.value.lower()}'>{r.signal.side.value}</span></td>"
+        f"<td>{r.signal.stop_price:.2f}</td><td>{r.signal.target_price:.2f}</td><td>{r.requested_quantity}</td>"
+        f"<td>{html.escape(r.expires_at)}</td>"
+        f"<td>"
+        f"<form class='inline' method='post' action='/approve'><input type='hidden' name='signal_id' value='{html.escape(r.signal_id)}'>"
+        f"<button class='approve' type='submit'>APPROVE</button></form> "
+        f"<form class='inline' method='post' action='/reject'><input type='hidden' name='signal_id' value='{html.escape(r.signal_id)}'>"
+        f"<button class='reject' type='submit'>REJECT</button></form>"
+        f"</td></tr>"
+        for r in pending
+    ) or "<tr><td colspan='8' class='muted'>No signals pending human approval.</td></tr>"
+
+    position_rows = "".join(
+        f"<tr><td>{html.escape(p.symbol)}</td><td>{p.quantity}</td><td>{p.entry_price:.2f}</td>"
+        f"<td>{p.stop_price:.2f}</td><td>{p.target_price:.2f}</td><td>{p.entry_time}</td></tr>"
+        for p in positions
+    ) or "<tr><td colspan='6' class='muted'>No open positions.</td></tr>"
+
+    journal_rows = "".join(
+        f"<tr><td>{e.created_at}</td><td>{html.escape(e.symbol)}</td><td>{html.escape(e.outcome.value)}</td>"
+        f"<td>{html.escape(e.signal_id[:12])}</td></tr>"
+        for e in sorted(journal, key=lambda e: e.created_at, reverse=True)[:25]
+    ) or "<tr><td colspan='4' class='muted'>No journal entries yet.</td></tr>"
+
+    body = f"""
+{kill_banner}
+<h2>KILL SWITCH <span class="tag tag-sim">{'ACTIVE' if status['kill_switch_active'] else 'INACTIVE'}</span></h2>
+{kill_form}
+
+<h2>MARKET <span class="tag tag-mock">MOCK</span> <span class="tag tag-sim">SIMULATED</span></h2>
+<p class="muted">Derived from the latest signal seen for each symbol currently awaiting approval &mdash; not a live quote feed.</p>
+<table><tr><th>Symbol</th><th>Direction</th><th>Reference Price</th><th>As Of</th></tr>{market_rows}</table>
+
+<h2>SIGNALS / PENDING APPROVAL ({status['pending_approvals_count']})</h2>
+<table><tr><th>Signal ID</th><th>Symbol</th><th>Direction</th><th>Stop</th><th>Target</th><th>Qty</th><th>Expires</th><th>Action</th></tr>{pending_rows}</table>
+
+<h2>POSITIONS ({len(positions)} open)</h2>
+<table><tr><th>Symbol</th><th>Qty</th><th>Entry</th><th>Stop</th><th>Target</th><th>Entry Time</th></tr>{position_rows}</table>
+
+<h2>ACCOUNT</h2>
+<div class="kv">
+<div>Cash</div><div>{_fmt_money(account.cash)}</div>
+<div>Equity</div><div>{_fmt_money(account.equity)}</div>
+<div>Open P&amp;L</div><div>{_fmt_money(account.unrealized_pnl)}</div>
+<div>Daily P&amp;L</div><div>{_fmt_money(account.daily_pnl)}</div>
+<div>Drawdown</div><div>{account.current_drawdown_pct:.2f}%</div>
+<div>Consecutive Losses</div><div>{account.consecutive_losses}</div>
+<div>Reconciliation</div><div>{'OK' if status['reconciliation_ok'] else 'FAILED'}</div>
+</div>
+
+<h2>RISK</h2>
+<div class="kv">
+<div>Consecutive Losses</div><div>{risk['consecutive_losses']} / {risk['max_consecutive_losses']} (hard limit {risk['consecutive_loss_hard_limit']})</div>
+<div>Drawdown</div><div>{risk['current_drawdown_pct']:.2f}% / max {risk['max_drawdown_pct']:.2f}%</div>
+<div>Daily P&amp;L</div><div>{_fmt_money(risk['daily_pnl'])} / max loss {risk['max_daily_loss_pct']:.2f}%</div>
+<div>Open Positions</div><div>{risk['open_positions']}</div>
+</div>
+
+<h2>JOURNAL (most recent 25)</h2>
+<table><tr><th>Time</th><th>Symbol</th><th>Outcome</th><th>Signal</th></tr>{journal_rows}</table>
+"""
+    return HTMLResponse(_page(body))
+
+
+async def approve(request: Request) -> RedirectResponse:
+    form = await request.form()
+    signal_id = form.get("signal_id", "")
+    if signal_id:
+        workstation.approve_pending_signal(signal_id, reason="approved via dashboard")
+    return RedirectResponse("/", status_code=303)
+
+
+async def reject(request: Request) -> RedirectResponse:
+    form = await request.form()
+    signal_id = form.get("signal_id", "")
+    if signal_id:
+        workstation.reject_pending_signal(signal_id, reason="rejected via dashboard")
+    return RedirectResponse("/", status_code=303)
+
+
+async def kill_switch_activate(request: Request) -> RedirectResponse:
+    form = await request.form()
+    reason = form.get("reason") or f"dashboard activation at {datetime.now(timezone.utc).isoformat()}"
+    workstation.activate_kill_switch(reason=reason)
+    return RedirectResponse("/", status_code=303)
+
+
+async def kill_switch_reset(request: Request) -> RedirectResponse:
+    workstation.reset_kill_switch()
+    return RedirectResponse("/", status_code=303)
+
+
+app = Starlette(routes=[
+    Route("/", index, methods=["GET"]),
+    Route("/approve", approve, methods=["POST"]),
+    Route("/reject", reject, methods=["POST"]),
+    Route("/kill-switch/activate", kill_switch_activate, methods=["POST"]),
+    Route("/kill-switch/reset", kill_switch_reset, methods=["POST"]),
+])

@@ -1,0 +1,63 @@
+import hashlib
+from datetime import datetime
+from enum import Enum
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class Side(str, Enum):
+    LONG = "LONG"
+    # SHORT is intentionally not implemented yet (see baseline.py) — the enum
+    # already carries the second member so nothing downstream needs to change
+    # shape when a short strategy is added.
+    SHORT = "SHORT"
+
+
+class ReasonCode(str, Enum):
+    TREND_CONFIRMED = "TREND_CONFIRMED"
+    MOMENTUM_CONFIRMED = "MOMENTUM_CONFIRMED"
+    VOLUME_CONFIRMED = "VOLUME_CONFIRMED"
+
+
+class Signal(BaseModel):
+    """A deterministic, machine-readable trade candidate.
+
+    `stop_price`/`target_price` are absolute levels fixed at signal time from
+    the generating bar's close and ATR — NOT the eventual fill price. The
+    execution simulator fills at the *next* bar's open (see
+    backtesting/execution.py), which may already be through one of these
+    levels on a gap; that is handled explicitly there, not silently ignored.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    generated_at: datetime  # the bar this signal was formed on ("bar N")
+    side: Side
+    reference_price: float = Field(description="Close of the generating bar. Informational only, not a fill price.")
+    stop_price: float
+    target_price: float
+    risk_reward: float = Field(gt=0)
+    strategy_name: str
+    reason_codes: list[ReasonCode]
+
+    def stable_id(self) -> str:
+        """A deterministic identity for THIS exact signal occurrence — same
+        symbol/bar/strategy/side/levels always hashes to the same ID, so
+        generating "the same" signal twice (e.g. re-running a strategy over
+        the same bar) yields the same ID rather than a fresh random one.
+        This is what Phase 6's paper-trading idempotency keys off of (spec
+        §8) — no separate ID counter or database sequence needed.
+        """
+        raw = "|".join(
+            [
+                self.symbol,
+                self.generated_at.isoformat(),
+                self.strategy_name,
+                self.side.value,
+                repr(self.reference_price),
+                repr(self.stop_price),
+                repr(self.target_price),
+            ]
+        )
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]

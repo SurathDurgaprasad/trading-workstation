@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "trading-deterministic-core": {
+      "command": "venv/Scripts/python.exe",
+      "args": ["-m", "mcp_server.server"]
+    }
+  }
+}

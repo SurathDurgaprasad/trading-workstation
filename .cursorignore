@@ -1,0 +1,17 @@
+node_modules/
+.venv/
+venv/
+__pycache__/
+dist/
+build/
+.git/
+*.log
+*.sqlite
+*.db
+.cache/
+coverage/
+outputs/
+tmp/
+qdrant_storage/
+models/
+checkpoints/
