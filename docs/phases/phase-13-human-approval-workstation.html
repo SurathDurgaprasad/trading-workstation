@@ -1,0 +1,649 @@
+<title>Phase 13 Workstation Report</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+  :root {
+    --bg: #0b0f14;
+    --surface: #121922;
+    --surface-2: #17202b;
+    --border: #253140;
+    --border-soft: #1c2530;
+    --text: #dbe4ec;
+    --text-muted: #8ca0b3;
+    --text-dim: #5f7284;
+    --accent: #4fd1c5;
+    --accent-soft: #1b3a38;
+    --warn: #e8b84b;
+    --warn-soft: #3a3016;
+    --good: #34d399;
+    --good-soft: #123326;
+    --bad: #f87171;
+    --bad-soft: #3a1a1a;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15.5px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 0 80px 0;
+  }
+
+  ::selection { background: var(--accent-soft); color: var(--accent); }
+
+  a { color: var(--accent); }
+
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 28px; }
+
+  header.hero {
+    border-bottom: 1px solid var(--border);
+    padding: 56px 0 36px 0;
+    background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 14px 0;
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.18;
+    margin: 0 0 14px 0;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  .hero-sub {
+    color: var(--text-muted);
+    font-size: 16.5px;
+    max-width: 62ch;
+    margin: 0 0 28px 0;
+  }
+
+  .status-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .pill {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 6px 12px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .pill-sim { color: var(--warn); background: var(--warn-soft); border-color: #4a3d1c; }
+  .pill-good { color: var(--good); background: var(--good-soft); border-color: #16472f; }
+  .pill-neutral { color: var(--text-muted); background: var(--surface-2); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  nav.toc {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 22px 28px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 18px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  nav.toc a { color: var(--text-dim); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
+  nav.toc span.num { color: var(--text-dim); margin-right: 2px; }
+
+  main { padding-top: 8px; }
+
+  section {
+    padding: 44px 0;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  section:last-of-type { border-bottom: none; }
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .section-num {
+    font-family: var(--mono);
+    color: var(--text-dim);
+    font-size: 14px;
+    min-width: 26px;
+  }
+  h2 {
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+
+  h3 {
+    font-family: var(--sans);
+    font-size: 15.5px;
+    font-weight: 600;
+    color: var(--accent);
+    margin: 26px 0 10px 0;
+  }
+
+  p { margin: 0 0 14px 0; color: var(--text); max-width: 70ch; }
+  p.muted { color: var(--text-muted); }
+
+  ul, ol { margin: 0 0 14px 0; padding-left: 22px; max-width: 68ch; }
+  li { margin-bottom: 6px; }
+
+  code, .mono {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--surface-2);
+    border: 1px solid var(--border-soft);
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: #a8d8f0;
+  }
+
+  .flow {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    color: var(--text-muted);
+    line-height: 1.9;
+    white-space: pre;
+    margin: 16px 0;
+  }
+  .flow .arrow { color: var(--text-dim); }
+  .flow .node { color: var(--accent); }
+  .flow .node-warn { color: var(--warn); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    margin: 14px 0;
+  }
+  .table-wrap { overflow-x: auto; }
+  th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--text-muted);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  td.mono, td code { font-family: var(--mono); }
+  td strong { color: var(--text); font-weight: 500; }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 18px 0;
+  }
+  .stat {
+    background: var(--surface);
+    padding: 16px 18px;
+  }
+  .stat .n {
+    font-family: var(--mono);
+    font-size: 26px;
+    font-weight: 600;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .l {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 18px 20px;
+    margin: 14px 0;
+  }
+  .card h4 {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text);
+    margin: 0 0 8px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .badge {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    letter-spacing: 0.03em;
+  }
+  .badge-fixed { background: var(--good-soft); color: var(--good); }
+  .badge-harness { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+  .badge-new { background: var(--accent-soft); color: var(--accent); }
+
+  .callout {
+    border-left: 3px solid var(--warn);
+    background: var(--warn-soft);
+    padding: 14px 18px;
+    border-radius: 0 6px 6px 0;
+    margin: 18px 0;
+    color: #f0dca3;
+    font-size: 14px;
+  }
+  .callout.good { border-color: var(--good); background: var(--good-soft); color: #a7e8ce; }
+  .callout p { margin: 0; color: inherit; }
+
+  .kv-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; font-size: 14px; margin: 14px 0; }
+  .kv-list dt { color: var(--text-dim); font-family: var(--mono); font-size: 12.5px; padding-top: 2px; }
+  .kv-list dd { margin: 0; color: var(--text); }
+
+  footer.final {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 56px 28px 20px 28px;
+  }
+  .final-banner {
+    background: var(--surface);
+    border: 1px solid var(--warn);
+    border-radius: 8px;
+    padding: 28px 30px;
+    text-align: center;
+  }
+  .final-banner .line {
+    font-family: var(--mono);
+    font-size: 16px;
+    color: var(--warn);
+    font-weight: 600;
+    margin: 6px 0;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="light"]) {
+      --bg: #f7f5f0;
+      --surface: #ffffff;
+      --surface-2: #f0ece3;
+      --border: #ddd6c7;
+      --border-soft: #e6e0d3;
+      --text: #241f16;
+      --text-muted: #6b6252;
+      --text-dim: #9a917d;
+      --accent: #0f766e;
+      --accent-soft: #d7ede9;
+      --warn: #92660a;
+      --warn-soft: #f4e6c1;
+      --good: #157347;
+      --good-soft: #d9f0e3;
+      --bad: #b91c1c;
+      --bad-soft: #f7dcdc;
+    }
+    :root:not([data-theme="light"]) code, :root:not([data-theme="light"]) .mono { color: #0f5c66; }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f5f0;
+    --surface: #ffffff;
+    --surface-2: #f0ece3;
+    --border: #ddd6c7;
+    --border-soft: #e6e0d3;
+    --text: #241f16;
+    --text-muted: #6b6252;
+    --text-dim: #9a917d;
+    --accent: #0f766e;
+    --accent-soft: #d7ede9;
+    --warn: #92660a;
+    --warn-soft: #f4e6c1;
+    --good: #157347;
+    --good-soft: #d9f0e3;
+    --bad: #b91c1c;
+    --bad-soft: #f7dcdc;
+  }
+  :root[data-theme="light"] code, :root[data-theme="light"] .mono { color: #0f5c66; }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Phase 13 &mdash; Final Report</p>
+    <h1>Human-Operated Intraday Workstation</h1>
+    <p class="hero-sub">Completing the human-approval workflow end to end &mdash; market bar through strategy signal, two independent risk checks, an interactive CLI and local dashboard, a persistent kill switch, and broker-shaped reconciliation. Built entirely on Phase 12's simulated pipeline.</p>
+    <div class="status-row">
+      <span class="pill pill-sim"><span class="dot"></span>SIMULATED</span>
+      <span class="pill pill-sim"><span class="dot"></span>MOCK BROKER</span>
+      <span class="pill pill-good"><span class="dot"></span>412 / 413 TESTS PASSING</span>
+      <span class="pill pill-neutral">NO REAL ORDER PATH EXISTS</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#audit"><span class="num">01</span>Audit</a>
+  <a href="#architecture"><span class="num">02</span>Architecture</a>
+  <a href="#lifecycle"><span class="num">03</span>Approval Lifecycle</a>
+  <a href="#broker"><span class="num">04</span>Mock Broker</a>
+  <a href="#reconciliation"><span class="num">05</span>Reconciliation</a>
+  <a href="#killswitch"><span class="num">06</span>Kill Switch</a>
+  <a href="#monitoring"><span class="num">07</span>Position Monitoring</a>
+  <a href="#cli"><span class="num">08</span>CLI</a>
+  <a href="#dashboard"><span class="num">09</span>Dashboard</a>
+  <a href="#mcp"><span class="num">10</span>MCP</a>
+  <a href="#ai"><span class="num">11</span>AI Boundary</a>
+  <a href="#persistence"><span class="num">12</span>Persistence</a>
+  <a href="#failure"><span class="num">13</span>Failure Modes</a>
+  <a href="#restart"><span class="num">14</span>Restart</a>
+  <a href="#idempotency"><span class="num">15</span>Idempotency</a>
+  <a href="#tests"><span class="num">16</span>Tests</a>
+  <a href="#performance"><span class="num">17</span>Performance</a>
+  <a href="#bugs"><span class="num">18</span>Bugs Found</a>
+  <a href="#files"><span class="num">19</span>Files Changed</a>
+  <a href="#remaining"><span class="num">20</span>What Remains</a>
+  <a href="#recommendation"><span class="num">21</span>Recommendation</a>
+</nav>
+
+<main class="wrap">
+
+<section id="audit">
+  <div class="section-head"><span class="section-num">01</span><h2>Forensic audit</h2></div>
+  <p>Phase 12 left a simulated bar-driven pipeline (<code>MockMarketDataSource &rarr; LiveSimPipeline &rarr; PaperTradingEngine</code>) with the <em>domain state</em> for human approval already modeled &mdash; a <code>SignalLifecycleState</code> machine reaching <code>PENDING_HUMAN_APPROVAL</code> &mdash; but no way for a human to actually act on it: no second risk check, no persistence for a pending decision, no CLI prompt, no kill switch, no broker abstraction, no dashboard. 344 of 345 tests passed (one pre-existing, unrelated Ollama-unavailable failure).</p>
+  <p>The audit confirmed the one architectural decision this phase depends on: with <code>require_human_approval=True</code>, the transition <code>RISK_APPROVED &rarr; EXECUTED</code> is <strong>structurally absent</strong> from the lifecycle's legal-transition graph. A signal cannot reach execution by any code path except <code>approve_pending()</code> &mdash; not a runtime check that could have a bug, a missing edge in the graph itself.</p>
+</section>
+
+<section id="architecture">
+  <div class="section-head"><span class="section-num">02</span><h2>Architecture</h2></div>
+  <p>Ten hops, every one of them either unchanged from an earlier phase or new-and-additive this phase:</p>
+  <div class="flow"><span class="node">MARKET BAR</span> <span class="arrow">&rarr;</span> <span class="node">STRATEGY SIGNAL</span> <span class="arrow">&rarr;</span> <span class="node">RISK CHECK #1</span> <span class="arrow">&rarr;</span> <span class="node-warn">AI EXPLANATION</span> (optional) <span class="arrow">&rarr;</span>
+<span class="node">PENDING_HUMAN_APPROVAL</span> <span class="arrow">&rarr;</span> <span class="node-warn">HUMAN APPROVE / REJECT</span> <span class="arrow">&rarr;</span> <span class="node">RISK CHECK #2</span> <span class="arrow">&rarr;</span>
+<span class="node">PAPER EXECUTION</span> <span class="arrow">&rarr;</span> <span class="node">POSITION</span> <span class="arrow">&rarr;</span> <span class="node">JOURNAL</span></div>
+  <p class="muted">Risk check #1 (<code>RiskEngine.evaluate()</code>, no submission) runs the instant a signal is generated, using account state <em>at that moment</em>. Risk check #2 runs again, for real, inside <code>approve_pending()</code> &mdash; against whatever the account looks like <em>at the moment a human decides</em>, which may no longer be the same account. Nothing about the human's decision is trusted to still be valid; it is re-derived.</p>
+  <h3>New this phase</h3>
+  <ul>
+    <li><code>live/state_store.py</code> &mdash; <code>LiveStateStore</code>, a durable audit trail for every signal that ever reached <code>PENDING_HUMAN_APPROVAL</code>, plus the kill switch.</li>
+    <li><code>live/broker.py</code> &mdash; a <code>BrokerAdapter</code> protocol and <code>MockBrokerAdapter</code>, delegating entirely to the existing <code>PaperTradingEngine</code>.</li>
+    <li><code>live/broker_reconciliation.py</code> &mdash; compares our expected state against the (mock) broker's, never repairs.</li>
+    <li><code>live/workstation.py</code> &mdash; the single access layer for the persistent paper-live account and approval state, shared by the MCP server and the dashboard so neither re-implements it.</li>
+    <li><code>main.py paper-live</code> &mdash; the operator-facing CLI.</li>
+    <li><code>dashboard/app.py</code> &mdash; a minimal local web view over the same state.</li>
+  </ul>
+</section>
+
+<section id="lifecycle">
+  <div class="section-head"><span class="section-num">03</span><h2>Approval lifecycle</h2></div>
+  <p><code>live/approval.py</code>'s <code>SignalLifecycleState</code> graph, extended this phase with expiry:</p>
+  <div class="table-wrap"><table>
+    <tr><th>State</th><th>Reachable from</th><th>Meaning</th></tr>
+    <tr><td class="mono">SIGNAL_GENERATED</td><td class="mono">&mdash;</td><td>Strategy fired; nothing evaluated yet.</td></tr>
+    <tr><td class="mono">RISK_APPROVED</td><td class="mono">SIGNAL_GENERATED</td><td>Risk check #1 passed.</td></tr>
+    <tr><td class="mono">RISK_REJECTED</td><td class="mono">RISK_APPROVED, HUMAN_APPROVED</td><td>Terminal. Either check can reject.</td></tr>
+    <tr><td class="mono">AI_EXPLAINED</td><td class="mono">RISK_APPROVED</td><td>Optional; skipped entirely if Ollama is down.</td></tr>
+    <tr><td class="mono">PENDING_HUMAN_APPROVAL</td><td class="mono">RISK_APPROVED, AI_EXPLAINED</td><td>Waiting on a human. Persisted.</td></tr>
+    <tr><td class="mono">APPROVAL_EXPIRED</td><td class="mono">PENDING_HUMAN_APPROVAL</td><td>Terminal. <code>approval_timeout_seconds</code> elapsed, no decision.</td></tr>
+    <tr><td class="mono">HUMAN_APPROVED</td><td class="mono">PENDING_HUMAN_APPROVAL</td><td>Human said yes &mdash; risk check #2 has not run yet.</td></tr>
+    <tr><td class="mono">HUMAN_REJECTED</td><td class="mono">PENDING_HUMAN_APPROVAL</td><td>Terminal.</td></tr>
+    <tr><td class="mono">EXECUTED</td><td class="mono">HUMAN_APPROVED</td><td>Terminal. Only reachable after BOTH risk checks passed.</td></tr>
+  </table></div>
+  <p class="muted">The <code>HUMAN_APPROVED &rarr; RISK_REJECTED</code> edge exists because a human's yes is not the final word &mdash; the account may have moved between the two checks (see &sect;13). <code>RISK_APPROVED &rarr; EXECUTED</code> is not in this graph when human approval is required. It cannot be reached by construction.</p>
+</section>
+
+<section id="broker">
+  <div class="section-head"><span class="section-num">04</span><h2>Mock broker adapter</h2></div>
+  <p><code>BrokerAdapter</code> is a six-method protocol (<code>submit_order</code>, <code>cancel_order</code>, <code>order_status</code>, <code>list_fills</code>, <code>list_positions</code>, <code>get_funds</code>) shaped like what a real broker integration would eventually implement. <code>MockBrokerAdapter</code> is the proof that the abstraction costs nothing: every method is a one-line delegation into the existing <code>PaperTradingEngine</code> &mdash; no execution logic is duplicated anywhere.</p>
+  <p><code>cancel_order</code> raises <code>NotImplementedError</code> with an honest explanation: the paper engine has no <code>CANCELLED</code> order state today. That is a documented Phase 6 scope limit, not something faked to make the interface look complete.</p>
+</section>
+
+<section id="reconciliation">
+  <div class="section-head"><span class="section-num">05</span><h2>Reconciliation</h2></div>
+  <p><code>reconcile_against_broker(engine, broker)</code> reuses Phase 6's <code>ReconciliationReport</code>/<code>ReconciliationIssue</code> types directly. It matches positions by symbol and trades by content &mdash; <code>(symbol, entry, exit, quantity, exit_reason)</code> &mdash; deliberately not by our own internal IDs, since a real broker would never share our ID scheme.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Check</th><th>Detects</th></tr>
+    <tr><td class="mono">missing_position_at_broker</td><td>We think a position is open; the broker disagrees.</td></tr>
+    <tr><td class="mono">unexpected_position_at_broker</td><td>The broker shows a position we never opened.</td></tr>
+    <tr><td class="mono">quantity_mismatch / price_mismatch</td><td>Same position, different numbers.</td></tr>
+    <tr><td class="mono">cash_mismatch</td><td>Account cash disagrees.</td></tr>
+    <tr><td class="mono">trade_missing_at_broker / duplicate_trade_at_broker</td><td>Trade history diverges.</td></tr>
+  </table></div>
+  <p class="muted">It never repairs anything it finds &mdash; a discrepancy is reported, not silently fixed.</p>
+</section>
+
+<section id="killswitch">
+  <div class="section-head"><span class="section-num">06</span><h2>Kill switch</h2></div>
+  <p>A single row in <code>LiveStateStore</code>, checked before every new signal is allowed to reach an order &mdash; in both auto-execute and human-approval modes.</p>
+  <div class="kv-list">
+    <dt>Activate</dt><dd><code>python main.py paper-live --kill-switch --kill-switch-reason "..."</code></dd>
+    <dt>Reset</dt><dd><code>python main.py paper-live --reset-kill-switch</code></dd>
+    <dt>Survives</dt><dd>Process restart &mdash; it's a SQLite row, not in-memory state.</dd>
+    <dt>Does NOT</dt><dd>Touch existing open positions or already-pending approvals. It blocks new ones only.</dd>
+    <dt>Requires</dt><dd>An explicit reset. It never clears itself.</dd>
+  </div>
+</section>
+
+<section id="monitoring">
+  <div class="section-head"><span class="section-num">07</span><h2>Position monitoring</h2></div>
+  <p>Every bar the CLI processes while a position is open prints a compact status line sourced entirely from existing fields &mdash; nothing here recomputes P&amp;L, exposure, or risk:</p>
+  <div class="flow">[AAPL] bar#  65 2021-11-24  close=161.94  BAR_PROCESSED  fresh=True
+  | POSITION qty=116 entry=161.20 stop=156.70 target=169.67 open_pnl=85.78 equity=100,980.14</div>
+  <p class="muted">The dashboard's ACCOUNT and RISK panels read the same <code>Account</code>/<code>RiskConfig</code> fields.</p>
+</section>
+
+<section id="cli">
+  <div class="section-head"><span class="section-num">08</span><h2>The <code>paper-live</code> CLI</h2></div>
+  <p><code>python main.py paper-live --symbol RELIANCE.NS --interval 1m --period 1d</code> &mdash; the primary operator interface. Verified end to end against real cached AAPL data in three modes: interactive approval, <code>--auto-approve</code>/<code>--auto-reject</code> for scripted runs, and the kill-switch activate/blocked/reset cycle.</p>
+  <div class="flow">SIGNAL DETECTED
+  Signal ID: 4b09f24e86b2
+  Symbol:    AAPL
+  Direction: LONG
+  Entry:     165.30
+  Stop:      159.70
+  Target:    176.51
+  Quantity:  89
+  RISK:      APPROVED (risk check #1 passed -- a second, independent
+             check runs again at the moment of your decision)
+
+APPROVE [Y] / REJECT [N]: Y
+  -> APPROVED (APPROVED_PENDING)</div>
+  <p>The AI-explanation step (<code>agents.signal_explainer</code>, unchanged from Phase 4.5) is attempted by default and silently skipped &mdash; never blocking the prompt &mdash; whenever Ollama is unreachable.</p>
+</section>
+
+<section id="dashboard">
+  <div class="section-head"><span class="section-num">09</span><h2>Local dashboard</h2></div>
+  <p><code>python main.py dashboard</code> &mdash; a Starlette app (no new dependency; Starlette/uvicorn/Jinja2/httpx already ship as transitive deps of the <code>mcp</code> package), bound to <code>127.0.0.1</code> by default. Seven sections: MARKET, SIGNALS / PENDING APPROVAL, POSITIONS, ACCOUNT, RISK, JOURNAL, plus a kill-switch control.</p>
+  <p>Every route handler calls straight into <code>live/workstation.py</code> &mdash; the exact same functions the MCP tools and, transitively, the CLI's domain layer use. Approve/Reject buttons post to routes that call <code>approve_pending_signal()</code>/<code>reject_pending_signal()</code>; no route computes a risk decision, a signal, or an account balance itself. Verified live in-browser: seeded a real pending AAPL signal, clicked APPROVE, watched it move into the journal as <code>APPROVED_PENDING</code>.</p>
+  <p class="muted">The dashboard deliberately never calls <code>process_next()</code> &mdash; it doesn't advance the market. That stays the CLI's job, so two processes never race to drive the same feed.</p>
+</section>
+
+<section id="mcp">
+  <div class="section-head"><span class="section-num">10</span><h2>MCP extensions</h2></div>
+  <p>Eight new tools, all funneled through <code>live/workstation.py</code>. Six are read-only; two are approval actions.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Tool</th><th>Kind</th></tr>
+    <tr><td class="mono">get_live_sim_status</td><td>read-only</td></tr>
+    <tr><td class="mono">get_pending_approvals</td><td>read-only</td></tr>
+    <tr><td class="mono">get_positions</td><td>read-only</td></tr>
+    <tr><td class="mono">get_account_state</td><td>read-only</td></tr>
+    <tr><td class="mono">get_risk_state</td><td>read-only</td></tr>
+    <tr><td class="mono">get_trade_journal</td><td>read-only</td></tr>
+    <tr><td class="mono">approve_pending_signal</td><td><strong>action</strong> &mdash; calls <code>LiveSimPipeline.approve_pending()</code></td></tr>
+    <tr><td class="mono">reject_pending_signal</td><td><strong>action</strong> &mdash; calls <code>LiveSimPipeline.reject_pending()</code></td></tr>
+  </table></div>
+  <p>Server total is now <strong>20 tools</strong> (up from 12). No <code>execute_trade</code>, <code>place_order</code>, <code>live_buy</code>, or <code>live_sell</code> tool exists, and a dedicated test asserts no tool name contains <code>execute</code>/<code>place</code>/<code>cancel</code>/<code>buy</code>/<code>sell</code>/<code>broker</code>/<code>withdraw</code>/<code>deposit</code>.</p>
+</section>
+
+<section id="ai">
+  <div class="section-head"><span class="section-num">11</span><h2>AI boundary</h2></div>
+  <p>Unchanged in kind from every prior phase, re-verified here: <code>agents.signal_explainer.explain_signal()</code> returns a <code>SignalExplanation</code> with exactly three fields &mdash; supporting evidence, contradicting evidence, narrative. No field exists for entry, stop, target, quantity, or approval status. The type system makes override impossible, not a prompt instruction the model could ignore.</p>
+  <p>The AI step is never on the critical path: <code>_try_ai_explain()</code> wraps the entire call in a broad exception handler and logs-and-continues on any failure, including Ollama being completely absent.</p>
+</section>
+
+<section id="persistence">
+  <div class="section-head"><span class="section-num">12</span><h2>Persistence</h2></div>
+  <p><code>LiveStateStore</code> opens its own SQLite connection, to its own file, with explicit <code>BEGIN</code>/<code>COMMIT</code> transactions &mdash; never Postgres, Redis, or Kafka, and never a modification to <code>paper/store.py</code>'s schema. Two tables: <code>pending_approvals</code> (one row per signal ever sent to <code>PENDING_HUMAN_APPROVAL</code>, updated in place as its lifecycle advances &mdash; the durable audit trail) and <code>kill_switch</code> (one row, survives restart).</p>
+  <p class="muted">The audit trail per signal: <code>signal_id</code>, <code>strategy_version</code>, <code>risk_config_version</code>, requested and approved quantity, the human's decision and its reason, decision timestamp, and the final execution result.</p>
+</section>
+
+<section id="failure">
+  <div class="section-head"><span class="section-num">13</span><h2>Failure modes (fail-closed)</h2></div>
+  <div class="table-wrap"><table>
+    <tr><th>Scenario</th><th>Result</th></tr>
+    <tr><td>Feed disconnect / stale / out-of-order / duplicate bar</td><td>Signal suppressed or bar rejected (Phase 12, re-verified)</td></tr>
+    <tr><td>Risk check #1 rejects</td><td>No pending approval is ever created</td></tr>
+    <tr><td>Human rejects</td><td>Terminal, no order</td></tr>
+    <tr><td>Approval window elapses</td><td><code>APPROVAL_EXPIRED</code>, cannot later be approved</td></tr>
+    <tr><td>Account state changes after approval, before decision</td><td>Risk check #2 re-rejects, independent of the human's yes</td></tr>
+    <tr><td>Position already open</td><td>Risk check vetoes a second entry &mdash; proven not to fire against a legitimate same-bar close-then-reopen (see &sect;18)</td></tr>
+    <tr><td>Daily-loss / drawdown halt</td><td>Never produces a pending approval</td></tr>
+    <tr><td>Kill switch active</td><td>Every new-order path short-circuits, existing state untouched</td></tr>
+  </table></div>
+</section>
+
+<section id="restart">
+  <div class="section-head"><span class="section-num">14</span><h2>Restart behavior</h2></div>
+  <p>On construction, <code>LiveSimPipeline</code> calls <code>_restore_pending_approvals()</code>, rebuilding every <code>PENDING_HUMAN_APPROVAL</code> signal's in-memory <code>SignalLifecycle</code> from <code>LiveStateStore.list_pending()</code>. A pending approval created, then the process killed, then a fresh process started against the same DB file: the signal is still there, still approvable, still subject to its original expiry.</p>
+</section>
+
+<section id="idempotency">
+  <div class="section-head"><span class="section-num">15</span><h2>Idempotency &amp; the critical security test</h2></div>
+  <p><code>approve_pending(self, signal_id, *, reason=None)</code> &mdash; that is the entire signature. No <code>quantity</code>, <code>stop</code>, <code>target</code>, or <code>price</code> parameter exists to override. A dedicated test calls <code>approve_pending(object(), signal_id="x", quantity=100_000, stop=0, target=999_999)</code> directly and asserts it raises <code>TypeError</code> &mdash; the attack is structurally impossible, not merely rejected at runtime.</p>
+  <p>Every action returns a typed outcome rather than raising or silently no-op'ing: <code>APPROVED | REJECTED | ALREADY_DECIDED | EXPIRED | NOT_FOUND | KILL_SWITCH_ACTIVE</code>. Approving twice, rejecting an already-executed signal, or approving an unknown ID all report cleanly.</p>
+</section>
+
+<section id="tests">
+  <div class="section-head"><span class="section-num">16</span><h2>Test results</h2></div>
+  <div class="stat-grid">
+    <div class="stat"><div class="n">412</div><div class="l">passing</div></div>
+    <div class="stat"><div class="n">1</div><div class="l">pre-existing failure (Ollama unavailable, unrelated)</div></div>
+    <div class="stat"><div class="n">+68</div><div class="l">tests added this phase</div></div>
+    <div class="stat"><div class="n">6:12</div><div class="l">full suite runtime</div></div>
+  </div>
+  <p class="muted">Baseline going in was 344/345 (Phase 12). The one failure is the same one, in the same place, for the same reason, every phase &mdash; a local Ollama server is not running in this environment.</p>
+</section>
+
+<section id="performance">
+  <div class="section-head"><span class="section-num">17</span><h2>Performance</h2></div>
+  <div class="table-wrap"><table>
+    <tr><th>Hop</th><th>Mean</th><th>p50</th><th>Notes</th></tr>
+    <tr><td>Bar processing (<code>process_next()</code>)</td><td class="mono">20.1 ms</td><td class="mono">20.9 ms</td><td>Full indicator recompute over the growing buffer, by design (Phase 12).</td></tr>
+    <tr><td>Approval + risk recheck #2 + paper execution</td><td class="mono">0.66 ms</td><td class="mono">&mdash;</td><td><code>approve_pending()</code> end to end.</td></tr>
+    <tr><td>Pending-approval lookup (disk)</td><td class="mono">0.13 ms</td><td class="mono">&mdash;</td><td><code>LiveStateStore.list_pending()</code>.</td></tr>
+    <tr><td>Dashboard page render</td><td class="mono">8.8 ms</td><td class="mono">5.4 ms</td><td>Real uvicorn process, all 7 sections.</td></tr>
+    <tr><td>MCP <code>get_live_sim_status</code></td><td class="mono">5.1 ms</td><td class="mono">2.5 ms</td><td>Direct call.</td></tr>
+    <tr><td>MCP <code>approve_pending_signal</code></td><td class="mono">1.1 ms</td><td class="mono">1.1 ms</td><td>NOT_FOUND shortcut path.</td></tr>
+  </table></div>
+</section>
+
+<section id="bugs">
+  <div class="section-head"><span class="section-num">18</span><h2>Bugs discovered &amp; fixed</h2></div>
+
+  <div class="card">
+    <h4>Enum serialized via <code>str()</code> instead of <code>.value</code> <span class="badge badge-fixed">production bug &mdash; fixed</span></h4>
+    <p class="muted">Found via the restart test on real AAPL data. <code>_serialize_history</code> wrote <code>"SignalLifecycleState.SIGNAL_GENERATED"</code> instead of <code>"SIGNAL_GENERATED"</code>, which then failed to parse back on restore. Fixed in <code>live/state_store.py</code>; a permanent regression test now round-trips enum states through save/restore.</p>
+  </div>
+
+  <div class="card">
+    <h4>Test invariant too coarse for same-bar close-then-reopen <span class="badge badge-harness">test bug &mdash; not production</span></h4>
+    <p class="muted"><code>test_position_already_open_prevents_a_second_pending_approval</code> asserted no second pending approval could occur while checking position state only at the <em>start</em> of each loop iteration. Traced it: a single <code>process_next()</code> call can close the existing position (its stop/target fills) <em>and</em> generate a fresh, independent signal that legitimately clears risk check #1 in the same call. Fixed the invariant to check whether a trade actually closed within that same bar before treating a new pending approval as a violation.</p>
+  </div>
+
+  <div class="card">
+    <h4>Synthetic flat-price bars never satisfy the strategy <span class="badge badge-harness">test bug &mdash; not production</span></h4>
+    <p class="muted"><code>TrendMomentumBaseline</code> needs <code>SMA20 &gt; SMA50</code>, which a constant-price mock series never produces. Every new test needing a real signal switched to a shared <code>real_aapl_mock_script()</code> helper built from cached AAPL history.</p>
+  </div>
+
+  <div class="card">
+    <h4>Fixed clock vs. multi-year real data <span class="badge badge-harness">test bug &mdash; not production</span></h4>
+    <p class="muted">A fixed 2026 clock against 2021&ndash;2026 AAPL bars, under the default freshness multiplier, correctly-but-inconveniently flagged early bars stale. Fixed with a large test-only <code>FreshnessPolicy</code> multiplier.</p>
+  </div>
+
+  <div class="card">
+    <h4>Windows <code>PermissionError</code> on manual temp-dir cleanup <span class="badge badge-harness">test bug &mdash; not production</span></h4>
+    <p class="muted">Unclosed sqlite3 connections inside a manually-managed <code>tempfile.TemporaryDirectory()</code> block left Windows unable to delete the directory. Switched to pytest's <code>tmp_path</code> fixture throughout.</p>
+  </div>
+
+  <div class="card">
+    <h4>Starlette <code>TestClient</code> cross-thread SQLite reuse <span class="badge badge-harness">test-only artifact</span></h4>
+    <p class="muted"><code>TestClient</code> dispatches each call through a new anyio thread-portal, so a cached sqlite3 connection opened on one call fails on the next ("created in thread X, this is thread Y"). Confirmed this cannot happen in real deployment &mdash; the CLI, MCP server, and dashboard are always separate single-threaded OS processes &mdash; and verified the dashboard against a genuine uvicorn process instead (8.8ms mean, no error). Dashboard tests disable the engine cache locally so each call opens its own connection to the same file, exactly reproducing the real multi-process shape.</p>
+  </div>
+</section>
+
+<section id="files">
+  <div class="section-head"><span class="section-num">19</span><h2>Files changed</h2></div>
+  <h3>New</h3>
+  <ul>
+    <li><code>live/state_store.py</code>, <code>live/broker.py</code>, <code>live/broker_reconciliation.py</code>, <code>live/workstation.py</code></li>
+    <li><code>dashboard/app.py</code>, <code>dashboard/__init__.py</code></li>
+    <li><code>tests/test_live_state_store.py</code>, <code>tests/test_broker.py</code>, <code>tests/test_broker_reconciliation.py</code>, <code>tests/test_human_approval_workflow.py</code>, <code>tests/test_approval_security.py</code>, <code>tests/test_kill_switch_pipeline.py</code>, <code>tests/test_fail_closed_workflow.py</code>, <code>tests/test_mcp_live_workstation.py</code>, <code>tests/test_dashboard.py</code></li>
+  </ul>
+  <h3>Modified</h3>
+  <ul>
+    <li><code>live/approval.py</code> &mdash; added <code>APPROVAL_EXPIRED</code> and the <code>HUMAN_APPROVED &rarr; RISK_REJECTED</code> edge.</li>
+    <li><code>live/pipeline.py</code> &mdash; approval timeout/expiry, persistence, kill-switch check, <code>latest_indicators()</code> accessor.</li>
+    <li><code>main.py</code> &mdash; new <code>paper-live</code> and <code>dashboard</code> subcommands.</li>
+    <li><code>mcp_server/server.py</code> &mdash; 8 new tools, refactored to delegate to <code>live/workstation.py</code> (20 tools total).</li>
+    <li><code>tests/conftest.py</code> &mdash; <code>real_aapl_mock_script()</code> helper.</li>
+    <li><code>tests/test_mcp_paper.py</code>, <code>tests/test_mcp_server.py</code> &mdash; updated hardcoded tool-count assertions (12 &rarr; 20).</li>
+  </ul>
+</section>
+
+<section id="remaining">
+  <div class="section-head"><span class="section-num">20</span><h2>What remains before real broker integration</h2></div>
+  <ul>
+    <li><strong>SEBI's algo-trading framework</strong> (in force since April 1, 2026): static-IP whitelisting, an exchange-assigned Algo-ID, mandatory 2FA/session expiry. A hard blocker for casual home-network live trading, independent of any code in this repository.</li>
+    <li>A real <code>BrokerAdapter</code> implementation (e.g. <code>DhanBrokerAdapter</code>) &mdash; not started, not attempted this phase.</li>
+    <li>A real, licensed market-data feed with genuine LIVE status (everything today is MOCK/SIMULATED replaying cached history).</li>
+    <li>Credential storage and the operational discipline around it &mdash; out of scope until a broker exists to hold credentials for.</li>
+    <li>The strategy itself remains classified <strong>C &mdash; no evidence of a durable edge</strong> (Phase 8&ndash;11). Nothing in this phase changed that, and nothing here was intended to.</li>
+  </ul>
+</section>
+
+<section id="recommendation">
+  <div class="section-head"><span class="section-num">21</span><h2>Recommendation</h2></div>
+  <p>The human-approval workstation is now reliable enough to operate against simulated data: CLI, dashboard, and MCP surfaces all read and act through one shared, tested domain layer; every fail-closed scenario the spec named has a passing test; the critical security property (no client-suppliable execution override) is proven structurally, not just behaviorally.</p>
+  <p>Do not start a Phase 14/15 broker integration until the SEBI compliance blocker above has an actual resolution path outside this codebase &mdash; more simulated infrastructure will not change that constraint. The next useful increment, if any, is operating this exact system against live but still-paper-executed market data, purely to observe the approval workflow under real timing pressure before any conversation about real capital.</p>
+</section>
+
+</main>
+
+<footer class="final">
+  <div class="final-banner">
+    <div class="line">This is still simulated trading.</div>
+    <div class="line">No real broker is connected.</div>
+    <div class="line">No real order can be placed.</div>
+  </div>
+</footer>

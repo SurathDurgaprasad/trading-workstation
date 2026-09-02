@@ -1,0 +1,393 @@
+<title>Phase 12 Live Pipeline Foundation</title>
+<style>
+:root{
+  --bg:#eef1f5; --surface:#ffffff; --surface-2:#e3e7ee; --border:#c7ccd6;
+  --ink:#171a21; --ink-dim:#565d6d; --ink-faint:#848b99;
+  --accent:#2f5fa4; --accent-ink:#1e3f70; --accent-soft:#dbe7f7;
+  --ok:#2f7a4f; --ok-soft:#dcefe1;
+  --risk:#b5402f; --risk-soft:#f7ddd7;
+  --warn:#9d7a1f; --warn-soft:#f2e6c4;
+  --dead:#6b7180; --dead-soft:#e6e8ec;
+  --code-bg:#1b1e27; --code-ink:#dfe3ee;
+  --shadow: 0 1px 2px rgba(23,26,33,0.06), 0 6px 20px -8px rgba(23,26,33,0.18);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12141b; --surface:#191c25; --surface-2:#20242f; --border:#333947;
+    --ink:#e9ebf1; --ink-dim:#aab0bf; --ink-faint:#7a8192;
+    --accent:#7ba6e0; --accent-ink:#7ba6e0; --accent-soft:#1c2c40;
+    --ok:#7bc79a; --ok-soft:#173327;
+    --risk:#e58b7c; --risk-soft:#3a1f1c;
+    --warn:#e0c257; --warn-soft:#3a3216;
+    --dead:#9298a6; --dead-soft:#262a34;
+    --code-bg:#0e1016; --code-ink:#dbe0ec;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 30px -10px rgba(0,0,0,0.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12141b; --surface:#191c25; --surface-2:#20242f; --border:#333947;
+  --ink:#e9ebf1; --ink-dim:#aab0bf; --ink-faint:#7a8192;
+  --accent:#7ba6e0; --accent-ink:#7ba6e0; --accent-soft:#1c2c40;
+  --ok:#7bc79a; --ok-soft:#173327;
+  --risk:#e58b7c; --risk-soft:#3a1f1c;
+  --warn:#e0c257; --warn-soft:#3a3216;
+  --dead:#9298a6; --dead-soft:#262a34;
+  --code-bg:#0e1016; --code-ink:#dbe0ec;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 30px -10px rgba(0,0,0,0.5);
+}
+*{box-sizing:border-box;}
+body{ margin:0; background:var(--bg); color:var(--ink); font-family:"IBM Plex Sans", -apple-system, "Segoe UI", sans-serif; line-height:1.6; font-size:16px; }
+@media (prefers-reduced-motion: reduce){ *{animation-duration:0.001ms !important; transition-duration:0.001ms !important;} }
+a{ color:var(--accent-ink); }
+.layout{ display:grid; grid-template-columns: 260px minmax(0,1fr); max-width:1380px; margin:0 auto; }
+@media (max-width: 900px){ .layout{ grid-template-columns: 1fr; } nav.toc{ position:static; height:auto; border-right:none; border-bottom:1px solid var(--border); } }
+nav.toc{ position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto; padding:28px 18px 40px 24px; border-right:1px solid var(--border); font-size:11.5px; }
+nav.toc .toc-kicker{ font-family:"IBM Plex Mono", monospace; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-faint); font-size:11px; margin-bottom:14px; }
+nav.toc ol{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+nav.toc a{ display:block; color:var(--ink-dim); text-decoration:none; padding:4px 8px; border-radius:5px; }
+nav.toc a:hover{ background:var(--surface-2); color:var(--ink); }
+nav.toc .num{ font-family:"IBM Plex Mono", monospace; color:var(--accent-ink); margin-right:6px; }
+main{ padding:44px 48px 100px; min-width:0; }
+@media (max-width: 640px){ main{ padding:28px 18px 80px; } }
+header.masthead{ border-bottom:1px solid var(--border); padding-bottom:28px; margin-bottom:40px; }
+header.masthead .kicker{ font-family:"IBM Plex Mono", monospace; font-size:12px; letter-spacing:0.14em; text-transform:uppercase; color:var(--accent-ink); margin-bottom:10px; }
+header.masthead h1{ font-size:1.95rem; margin:0 0 10px; text-wrap:balance; letter-spacing:-0.01em; }
+header.masthead p.dek{ color:var(--ink-dim); max-width:78ch; margin:0 0 18px; font-size:1.02rem; }
+.meta-row{ display:flex; flex-wrap:wrap; gap:10px; font-family:"IBM Plex Mono", monospace; font-size:12px; color:var(--ink-faint); }
+.meta-row span{ border:1px solid var(--border); border-radius:999px; padding:4px 10px; background:var(--surface); }
+section{ margin-bottom:56px; scroll-margin-top:20px; }
+section h2{ font-size:1.42rem; display:flex; align-items:baseline; gap:10px; margin:0 0 6px; text-wrap:balance; }
+section h2 .sec-num{ font-family:"IBM Plex Mono", monospace; color:var(--accent-ink); font-size:1rem; border:1px solid var(--accent); border-radius:6px; padding:1px 8px; background:var(--accent-soft); }
+section > .lede{ color:var(--ink-dim); max-width:80ch; margin:0 0 20px; }
+section h3{ font-size:1.02rem; margin:24px 0 10px; }
+p{ max-width:80ch; } ul,ol{ max-width:80ch; }
+.callout{ background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:8px; padding:16px 20px; margin:18px 0; box-shadow:var(--shadow); }
+.callout.ok{ border-left-color:var(--ok); }
+.callout.risk{ border-left-color:var(--risk); }
+.callout.warn{ border-left-color:var(--warn); }
+.callout .callout-label{ font-family:"IBM Plex Mono", monospace; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--accent-ink); margin-bottom:6px; display:block; }
+.callout.ok .callout-label{ color:var(--ok); }
+.callout.risk .callout-label{ color:var(--risk); }
+.callout.warn .callout-label{ color:var(--warn); }
+.callout p:last-child{ margin-bottom:0; }
+.table-wrap{ overflow-x:auto; margin:16px 0; border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow); }
+table{ border-collapse:collapse; width:100%; min-width:480px; background:var(--surface); font-size:0.84rem; }
+th, td{ text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+th{ font-family:"IBM Plex Mono", monospace; font-size:9.5px; letter-spacing:0.03em; text-transform:uppercase; color:var(--ink-faint); background:var(--surface-2); white-space:nowrap; }
+tr:last-child td{ border-bottom:none; }
+td code, p code, li code{ font-family:"IBM Plex Mono", monospace; background:var(--surface-2); border:1px solid var(--border); border-radius:4px; padding:1px 5px; font-size:0.87em; }
+.tabular{ font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono", monospace; }
+.badge{ display:inline-block; font-family:"IBM Plex Mono", monospace; font-size:11px; font-weight:600; padding:2px 9px; border-radius:999px; white-space:nowrap; }
+.badge-pass{ background:var(--ok-soft); color:var(--ok); }
+.badge-warn{ background:var(--warn-soft); color:var(--warn); }
+.badge-risk{ background:var(--risk-soft); color:var(--risk); }
+pre{ background:var(--code-bg); color:var(--code-ink); border-radius:10px; padding:16px 18px; overflow-x:auto; font-family:"IBM Plex Mono", monospace; font-size:0.75rem; line-height:1.55; box-shadow:var(--shadow); margin:16px 0; }
+.grid-cards{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:12px; margin:18px 0; }
+.card{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 16px; box-shadow:var(--shadow); }
+.card .card-num{ font-family:"IBM Plex Mono", monospace; font-size:1.2rem; color:var(--accent-ink); font-variant-numeric:tabular-nums; }
+.card .card-label{ color:var(--ink-dim); font-size:0.76rem; margin-top:4px; }
+.file-list{ font-family:"IBM Plex Mono", monospace; font-size:0.82rem; list-style:none; margin:14px 0; padding:0; display:flex; flex-direction:column; gap:2px; }
+.file-list li{ padding:6px 12px; border-radius:6px; background:var(--surface); border:1px solid var(--border); display:flex; justify-content:space-between; gap:12px; align-items:baseline; flex-wrap:wrap; }
+.file-list .why{ font-family:"IBM Plex Sans", sans-serif; color:var(--ink-dim); font-size:0.78rem; text-align:right; }
+footer{ color:var(--ink-faint); font-size:12px; font-family:"IBM Plex Mono", monospace; border-top:1px solid var(--border); padding-top:20px; margin-top:60px; }
+.finalstatus{ background:var(--risk-soft); border:2px solid var(--risk); border-radius:10px; padding:24px 28px; margin:20px 0; text-align:center; }
+.finalstatus p{ max-width:none; margin:0; font-size:1.15rem; font-weight:600; color:var(--risk); }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<div class="layout">
+<nav class="toc">
+  <div class="toc-kicker">Contents</div>
+  <ol>
+    <li><a href="#status"><span class="num">—</span>Final status</a></li>
+    <li><a href="#audit"><span class="num">1</span>Forensic audit</a></li>
+    <li><a href="#reused"><span class="num">2</span>Reused components</a></li>
+    <li><a href="#new"><span class="num">3</span>New components</a></li>
+    <li><a href="#architecture"><span class="num">4</span>Architecture</a></li>
+    <li><a href="#semantics"><span class="num">5</span>Data-source semantics</a></li>
+    <li><a href="#freshness"><span class="num">6</span>Freshness model</a></li>
+    <li><a href="#mock"><span class="num">7</span>Mock feed behavior</a></li>
+    <li><a href="#failclosed"><span class="num">8</span>Fail-closed behavior</a></li>
+    <li><a href="#cli"><span class="num">9</span>CLI usage</a></li>
+    <li><a href="#mcp"><span class="num">10</span>MCP changes</a></li>
+    <li><a href="#tests"><span class="num">11</span>Test count</a></li>
+    <li><a href="#perf"><span class="num">12</span>Performance</a></li>
+    <li><a href="#bugs"><span class="num">13</span>Bugs found &amp; fixed</a></li>
+    <li><a href="#files"><span class="num">14</span>Files changed</a></li>
+    <li><a href="#missing"><span class="num">15</span>Still missing</a></li>
+    <li><a href="#nobroker"><span class="num">16</span>Why no broker</a></li>
+    <li><a href="#next"><span class="num">17</span>Phase 13 recommendation</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="masthead">
+  <div class="kicker">Live pipeline foundation — Phase 12</div>
+  <h1>A mock feed drives the real deterministic core, end to end</h1>
+  <p class="dek">A <code>MarketDataSource</code> protocol, additive source/freshness metadata on the existing <code>OHLCVBar</code>, a fully-scripted deterministic mock feed, a configurable-per-interval fail-closed freshness guard, a human-approval domain state machine, and a pipeline driver that sequences all of it into the unmodified <code>Strategy → RiskEngine → PaperTradingEngine</code> chain — verified byte-for-byte identical to the existing backtester on real AAPL data, and demonstrated end to end against real 1-minute/5-minute NSE data via the CLI. Two real bugs were found and fixed along the way, both through actual data, not synthetic fixtures.</p>
+  <div class="meta-row">
+    <span>344/345 tests passing (1 pre-existing, unrelated)</span>
+    <span>0 changes to strategy/baseline.py, risk/engine.py, backtesting/execution.py</span>
+    <span>2 defects found and fixed via real data</span>
+    <span>18.5 real bars/sec, 54ms avg latency — ~300x headroom vs. a real 1-minute feed</span>
+  </div>
+</header>
+
+<section id="status">
+<div class="finalstatus">
+<p>This is simulated intraday trading infrastructure.<br>It is NOT connected to a live NSE/BSE feed.<br>It cannot place real orders.</p>
+</div>
+</section>
+
+<section id="audit">
+<h2><span class="sec-num">1</span>Forensic audit</h2>
+<p class="lede">Read directly from the current implementation before any code was written, per this phase's explicit instruction.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Question</th><th>Finding</th></tr>
+<tr><td>How does <code>OHLCVBar</code> currently flow through historical replay?</td><td><code>YahooFinanceProvider.fetch_ohlcv</code> → <code>OHLCV.from_dataframe</code> → <code>compute_indicator_series</code> (one full-DataFrame pass) → <code>Strategy.generate_signal(indicator_series, i, symbol)</code> — a batch pipeline, not a stream.</td></tr>
+<tr><td>How does a bar reach <code>PaperTradingEngine</code>?</td><td>Two entry points already existed and needed no change: <code>process_bar(symbol, bar: paper.engine.Bar)</code> (fills/exits, with Phase 7A's duplicate/out-of-order protection already built in) and <code>submit_signal(signal)</code> (the real <code>RiskEngine</code> gate, atomic, journaled).</td></tr>
+<tr><td>Does <code>PaperSession</code> fit a genuinely streaming, unknown-length feed?</td><td>No — it requires a fully pre-computed <code>indicator_series</code> DataFrame of known length. This was the one real gap: nothing in the repository could consume bars one at a time from an open-ended source. <code>live/pipeline.py</code> fills exactly this gap without touching <code>paper/session.py</code>.</td></tr>
+<tr><td>Is the indicator pipeline interval-aware?</td><td>Yes already — every function in <code>market/indicators.py</code> is period-parameterized, not hardcoded to daily bars; the only actual gap was a live/streaming SOURCE, not the math.</td></tr>
+<tr><td>Smallest safe extension point?</td><td>Add fields to <code>OHLCVBar</code> (additive, defaulted); add a new <code>live/</code> package that only calls into <code>process_bar</code>/<code>submit_signal</code>/<code>RiskEngine.evaluate</code>/<code>compute_indicator_series</code> — all pre-existing, public, unmodified.</td></tr>
+</table>
+</div>
+</section>
+
+<section id="reused">
+<h2><span class="sec-num">2</span>Existing components reused, unmodified</h2>
+<ul>
+<li><code>market.indicators.compute_indicator_series</code> — recomputed on a growing buffer every bar; verified byte-identical to a full-batch computation across all 1,254 real AAPL rows (no divergence found).</li>
+<li><code>paper.engine.PaperTradingEngine.process_bar</code> / <code>.submit_signal</code> — the entire duplicate/out-of-order-bar guarantee (Phase 7A) and RiskEngine gate (Phase 4-6) are reused exactly as they already existed.</li>
+<li><code>risk.engine.RiskEngine.evaluate</code> — called directly (read-only) for the human-approval flow's FIRST risk check, and again inside <code>submit_signal</code> for the mandatory second check after approval — same engine both times, zero risk logic duplicated.</li>
+<li><code>strategy.baseline.TrendMomentumBaseline</code> — used unmodified, still labeled experimental/unproven (Phase 8-11's verdict is unchanged and unrevisited).</li>
+<li><code>backtesting.cache.CachedMarketDataProvider</code>, <code>market.data_provider.get_market_data_provider</code> — reused as-is to build the mock feed's historical replay content.</li>
+<li><code>paper.reconciliation.reconcile</code> — reused unchanged to verify every new test scenario and the MCP tool's ephemeral simulation.</li>
+</ul>
+</section>
+
+<section id="new">
+<h2><span class="sec-num">3</span>New components</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Module</th><th>Purpose</th></tr>
+<tr><td><code>live/contracts.py</code></td><td><code>MarketDataSource</code> Protocol (subscribe/next_bar/is_connected/unsubscribe/close), <code>MarketBarEvent</code>, <code>FeedDisconnectedError</code> — deliberately broker-agnostic</td></tr>
+<tr><td><code>live/freshness.py</code></td><td><code>FreshnessPolicy</code> — threshold = interval-duration × configurable multiplier, floored at a minimum; no hardcoded per-interval magic numbers</td></tr>
+<tr><td><code>live/mock_source.py</code></td><td><code>MockMarketDataSource</code> — fully scripted, deterministic; replays real cached history OR an explicit event script (duplicate/out-of-order/gap/delayed/disconnect/reconnect)</td></tr>
+<tr><td><code>live/approval.py</code></td><td><code>SignalLifecycle</code> / <code>SignalLifecycleState</code> — the human-approval state machine; the RISK_APPROVED→EXECUTED shortcut is structurally ABSENT from the legal-transition graph once <code>require_human_approval=True</code></td></tr>
+<tr><td><code>live/pipeline.py</code></td><td><code>LiveSimPipeline</code> — sequences MarketDataSource → buffer → indicator recompute → Strategy → RiskEngine/PaperTradingEngine, with the freshness guard and approval state wired in</td></tr>
+</table>
+</div>
+<p>Plus: additive <code>DataSource</code>/<code>DataStatus</code> enums and 4 new fields on the existing <code>OHLCVBar</code> (<code>market/data_provider.py</code>); a <code>live-sim</code> CLI subcommand; one new MCP tool.</p>
+</section>
+
+<section id="architecture">
+<h2><span class="sec-num">4</span>Architecture</h2>
+<pre>MarketDataSource (Protocol)              MockMarketDataSource (the only impl)
+        |                                          |
+        v                                          v
+  MarketBarEvent(symbol, OHLCVBar) <----- subscribe/next_bar/is_connected
+        |
+        v
+  LiveSimPipeline: growing per-symbol OHLCVBar buffer
+        |
+        v
+  compute_indicator_series(buffer)  <- market/indicators.py, UNCHANGED
+        |
+        v
+  engine.process_bar(symbol, bar)   <- paper/engine.py, UNCHANGED
+        |  (duplicate -> no-op, out-of-order -> rejected, both Phase 7A)
+        v
+  FreshnessPolicy.check(bar.timestamp, interval, now)
+        |  (stale -> new-signal generation suppressed; process_bar above
+        |   still ran, so open-position stop/target management is unaffected)
+        v
+  strategy.generate_signal(indicator_series, last_index, symbol)  <- UNCHANGED
+        |
+        v
+  require_human_approval=False        require_human_approval=True
+        |                                       |
+        v                                       v
+  engine.submit_signal(signal)          RiskEngine.evaluate() (1st check, read-only)
+  (RiskEngine + order + journal,               |
+   UNCHANGED, today's paper behavior)    PENDING_HUMAN_APPROVAL (held in memory)
+        |                                       |
+        v                              approve_pending() -> engine.submit_signal()
+     EXECUTED                          (RiskEngine 2nd check, THEN order+journal)
+                                               |
+                                        EXECUTED | RISK_REJECTED (if account state changed)</pre>
+</section>
+
+<section id="semantics">
+<h2><span class="sec-num">5</span>Data-source semantics</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Path</th><th>source</th><th>status</th></tr>
+<tr><td>Historical Yahoo fetch (unchanged since Phase 3)</td><td><code>YAHOO</code> (default — every pre-Phase-12 call site unaffected)</td><td><code>HISTORICAL</code> (default)</td></tr>
+<tr><td>Mock feed replay</td><td><code>MOCK</code></td><td><code>SIMULATED</code></td></tr>
+<tr><td>Real broker feed</td><td><code>BROKER</code> (generic — no Dhan-specific value exists; nothing may set <code>status=LIVE</code> today, because no code path produces a real broker connection)</td><td><code>LIVE</code> / <code>DELAYED</code> (reserved, unused)</td></tr>
+</table>
+</div>
+<p>Every bar can answer, precisely: symbol (carried alongside via <code>MarketBarEvent</code>), <code>timestamp</code> (the bar's own market time), <code>source</code>, <code>status</code>, <code>received_at</code> (stamped by <code>MockMarketDataSource</code> at actual delivery time, not at script-construction time), and <code>source_timestamp</code> (defaults to <code>timestamp</code>, reserved for a future feed where the two can genuinely differ).</p>
+</section>
+
+<section id="freshness">
+<h2><span class="sec-num">6</span>Freshness model</h2>
+<pre>threshold_for(interval) = max(interval_duration * multiplier, minimum_threshold)
+default: multiplier=2.0, minimum_threshold=30s</pre>
+<p>A formula, not a lookup table — generalizes to any interval string without a new entry per interval, and is fully overridable per <code>FreshnessPolicy</code> instance (the <code>live-sim</code> CLI exposes <code>--freshness-multiplier</code> directly). <code>FreshnessPolicy.check()</code> normalizes both the bar timestamp and "now" to naive before comparing — see §13's first bug.</p>
+</section>
+
+<section id="mock">
+<h2><span class="sec-num">7</span>Mock feed behavior</h2>
+<p>A fully scripted, deterministic replay engine — nothing wall-clock-dependent unless a test injects a clock. <code>from_cached_history(symbol, interval, period)</code> replays real Yahoo data (re-tagged MOCK/SIMULATED); direct <code>MockScriptEvent</code> lists give exact control over every failure mode: duplicate bars, out-of-order bars, gaps (an absent script entry), delayed bars (<code>received_at</code> stamped far after the bar's own <code>timestamp</code>), and disconnect/reconnect pairs. A bar scripted during a disconnect is LOST (not queued) — the same behavior a real streaming feed has (outages don't replay missed ticks); <code>next_bar()</code> raises <code>FeedDisconnectedError</code> and the script advances, so the very next call resumes from whatever comes after.</p>
+</section>
+
+<section id="failclosed">
+<h2><span class="sec-num">8</span>Fail-closed behavior</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Condition</th><th>Result</th></tr>
+<tr><td>Feed disconnects</td><td><code>FeedDisconnectedError</code> caught by the pipeline, surfaced as <code>FEED_DISCONNECTED</code> — no bar processed, no signal generated, pipeline keeps running (doesn't crash) and resumes normally on reconnect</td></tr>
+<tr><td>Stale bar (age &gt; threshold)</td><td>NEW signal generation suppressed (<code>STALE_SIGNAL_SUPPRESSED</code>); existing open-position stop/target checks still run against that same bar's OHLC — an open position stays monitored even on late data, only NEW entries are refused</td></tr>
+<tr><td>Duplicate bar</td><td><code>DUPLICATE_SKIPPED</code> — Phase 7A's guarantee, unchanged, reused directly</td></tr>
+<tr><td>Out-of-order bar</td><td><code>OutOfOrderBarError</code> caught, surfaced as <code>OUT_OF_ORDER_REJECTED</code> — transaction rolled back, reconciliation stays clean (tested explicitly)</td></tr>
+<tr><td>Invalid timestamp relationship (tz-aware vs. naive)</td><td>Normalized internally by <code>FreshnessPolicy.check()</code> after a real bug was found here (§13)</td></tr>
+</table>
+</div>
+</section>
+
+<section id="cli">
+<h2><span class="sec-num">9</span>CLI usage</h2>
+<pre>python main.py live-sim --symbol RELIANCE.NS --interval 5m --period 5d --max-bars 60
+
+============================================================
+SIMULATED INTRADAY PIPELINE -- NOT LIVE TRADING
+============================================================
+SOURCE:   MOCK (replaying cached history)
+STATUS:   SIMULATED
+SYMBOL:   RELIANCE.NS
+INTERVAL: 5m
+...
+This process places NO real orders and holds NO broker connection.
+============================================================
+[SIMULATED] bar#   1 2026-08-20 09:15:00+05:30  RELIANCE.NS  close=1309.50  outcome=STALE_SIGNAL_SUPPRESSED  fresh=False
+...
+[SIMULATED] Bars processed: 60
+[SIMULATED] Account equity: 100,000.00
+[SIMULATED] Reconciliation: OK</pre>
+<p>Run for real against live-fetched (not cached) 5-minute RELIANCE.NS data during this phase: with the default freshness settings, every bar was correctly flagged <code>STALE_SIGNAL_SUPPRESSED</code>, because even Yahoo's most recent available 5-minute window is hours old relative to true wall-clock time — the fail-closed guard working exactly as designed against real data, not a contrived test. A second run with <code>--freshness-multiplier</code> raised confirmed the full signal/risk/paper flow executes end to end (no signal happened to fire in that particular window — a normal, unremarkable outcome, not evidence of a bug).</p>
+</section>
+
+<section id="mcp">
+<h2><span class="sec-num">10</span>MCP changes</h2>
+<p>One new tool: <code>run_mock_live_simulation_tool(symbol, interval, period, max_bars)</code> — replays cached history through the exact same <code>LiveSimPipeline</code>, against a fresh <strong>in-memory, ephemeral</strong> <code>PaperTradingEngine</code> that is discarded when the call returns. It never opens the persistent <code>paper_trading.db</code> (verified by a test asserting the module-level lazy paper engine stays <code>None</code>), never connects to a real feed or broker, and cannot place a real order. <code>source</code>/<code>status</code> in its response are always <code>"MOCK"</code>/<code>"SIMULATED"</code> — the tool structurally cannot report anything else. Total MCP surface: 12 tools (11 existing + 1). No <code>place_order</code>/<code>execute_trade</code>/<code>live_buy</code>/<code>live_sell</code> tool exists.</p>
+</section>
+
+<section id="tests">
+<h2><span class="sec-num">11</span>Test count</h2>
+<div class="grid-cards">
+  <div class="card"><div class="card-num">289</div><div class="card-label">prior (through Phase 11)</div></div>
+  <div class="card"><div class="card-num">55</div><div class="card-label">new this phase</div></div>
+  <div class="card"><div class="card-num">344</div><div class="card-label">passing of 345 total</div></div>
+  <div class="card"><div class="card-num">1</div><div class="card-label">pre-existing environmental failure (Ollama not running), unrelated</div></div>
+</div>
+<div class="table-wrap">
+<table>
+<tr><th>File</th><th>Tests</th><th>Covers</th></tr>
+<tr><td><code>test_freshness.py</code></td><td class="tabular">12</td><td>threshold formula, fresh/stale boundary, tz normalization (2 regression tests)</td></tr>
+<tr><td><code>test_mock_market_data_source.py</code></td><td class="tabular">13</td><td>ordering, duplicate, out-of-order, gap, delayed, disconnect/reconnect, real-history replay</td></tr>
+<tr><td><code>test_approval_state_machine.py</code></td><td class="tabular">9</td><td>every legal/illegal transition; the structural bypass-prevention guarantee</td></tr>
+<tr><td><code>test_live_pipeline.py</code></td><td class="tabular">17</td><td>the full mandatory list: ordering/duplicate/out-of-order/stale/disconnect/reconnect/1m/5m/15m/determinism/restart/parity/causality/no-LLM/no-broker</td></tr>
+<tr><td><code>test_mcp_live_sim.py</code></td><td class="tabular">2</td><td>the new MCP tool's MOCK/SIMULATED guarantee and persistent-DB isolation</td></tr>
+<tr><td><code>test_cli.py</code> (extended)</td><td class="tabular">+2</td><td><code>live-sim</code> argument parsing, defaults and overrides</td></tr>
+</table>
+</div>
+</section>
+
+<section id="perf">
+<h2><span class="sec-num">12</span>Performance measurements</h2>
+<p class="lede">Measured against a REAL, realistic intraday session (359 real 1-minute RELIANCE.NS bars — one actual NSE trading day) rather than the multi-year daily stress case used only for the parity test.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Bars/second</td><td class="tabular">18.5</td></tr>
+<tr><td>Avg latency per bar</td><td class="tabular">54.0 ms</td></tr>
+<tr><td>p95 latency per bar</td><td class="tabular">92.4 ms</td></tr>
+<tr><td>Max latency per bar (full session, 359-bar buffer)</td><td class="tabular">193.9 ms</td></tr>
+<tr><td>SQLite transaction time (share of total)</td><td class="tabular">0.7%</td></tr>
+<tr><td>Strategy.generate_signal time (share of total)</td><td class="tabular">2.5%</td></tr>
+<tr><td>RiskEngine.evaluate time (share of total)</td><td class="tabular">0.02%</td></tr>
+</table>
+</div>
+<p>The remaining ~97% is the deliberate O(n) full-recompute-per-bar design (<code>compute_indicator_series</code> re-run on the whole accumulated buffer every bar, chosen specifically to avoid writing new incremental-indicator math). Even at its slowest (194ms, at full 359-bar session length), that is roughly 300x faster than the ~60-second real-world gap between live 1-minute bars — no optimization is justified for this phase's target use case (a single trading session, not a multi-year buffer). The AAPL parity test (§7A-style stress case, 1,254 daily bars accumulated) takes ~170s total for that reason alone — an honest, expected cost of the same design choice at an unrealistic-for-live-use buffer length, not a live-path concern.</p>
+</section>
+
+<section id="bugs">
+<h2><span class="sec-num">13</span>Bugs discovered and fixed</h2>
+<div class="callout risk">
+<span class="callout-label">1. Timezone mismatch in FreshnessPolicy.check() — found via the MCP tool's own test</span>
+<p><strong>What:</strong> <code>LiveSimPipeline</code>'s default clock (<code>datetime.now(timezone.utc)</code>, tz-aware) was subtracted directly against historical bar timestamps (tz-naive, per <code>market.data_provider</code>'s established convention) inside <code>FreshnessPolicy.check()</code>, raising <code>TypeError: can't subtract offset-naive and offset-aware datetimes</code>. The original docstring said "callers are responsible for normalizing" — the wrong design choice, since it left every caller with a footgun.</p>
+<p><strong>Fix:</strong> <code>check()</code> now normalizes both timestamps to naive internally (a 2-line <code>_naive()</code> helper, matching <code>paper/engine.py</code>'s own established pattern), removing the burden from callers entirely. Two permanent regression tests added (naive-vs-aware in both directions).</p>
+</div>
+<div class="callout warn">
+<span class="callout-label">2. Test-harness freshness misconfiguration — found via real AAPL parity comparison</span>
+<p><strong>What:</strong> the paper/backtest parity test's first attempt used a fixed "far future" clock with a freshness multiplier (1000x) smaller than the AAPL series' own 1,825-day span — early bars were correctly flagged stale BY THE FRESHNESS GUARD'S OWN LOGIC relative to that fixed clock, producing a completely different (and far worse) trade sequence than the backtester's. This was not a pipeline defect: it was the freshness guard doing exactly its job against a test that hadn't sized its threshold to the data it was replaying.</p>
+<p><strong>Fix:</strong> raised the test's multiplier to safely exceed the whole series span. Re-run: exact parity, byte-for-byte, on all real AAPL trades. Documented in the test itself so the same mistake isn't repeated.</p>
+</div>
+<p>No defect was found in <code>strategy/</code>, <code>risk/</code>, <code>backtesting/</code>, or <code>paper/</code> — both issues were in this phase's own new code and its own test harness, caught by this phase's own real-data testing discipline before being reported as fixed.</p>
+</section>
+
+<section id="files">
+<h2><span class="sec-num">14</span>Exact files changed</h2>
+<h3>New (11)</h3>
+<ul class="file-list">
+<li><code>live/__init__.py</code></li>
+<li><code>live/contracts.py</code><span class="why">MarketDataSource Protocol</span></li>
+<li><code>live/freshness.py</code><span class="why">FreshnessPolicy</span></li>
+<li><code>live/mock_source.py</code><span class="why">MockMarketDataSource</span></li>
+<li><code>live/approval.py</code><span class="why">human-approval state machine</span></li>
+<li><code>live/pipeline.py</code><span class="why">LiveSimPipeline driver</span></li>
+<li><code>tests/test_freshness.py</code></li>
+<li><code>tests/test_mock_market_data_source.py</code></li>
+<li><code>tests/test_approval_state_machine.py</code></li>
+<li><code>tests/test_live_pipeline.py</code></li>
+<li><code>tests/test_mcp_live_sim.py</code></li>
+</ul>
+<h3>Changed (4)</h3>
+<ul class="file-list">
+<li><code>market/data_provider.py</code><span class="why">+DataSource/DataStatus enums, +4 additive OHLCVBar fields</span></li>
+<li><code>main.py</code><span class="why">+live-sim subcommand</span></li>
+<li><code>mcp_server/server.py</code><span class="why">+run_mock_live_simulation_tool</span></li>
+<li><code>tests/test_cli.py</code>, <code>tests/test_mcp_server.py</code>, <code>tests/test_mcp_paper.py</code><span class="why">+2 tests, tool-count updates (11→12)</span></li>
+</ul>
+<p><code>strategy/</code>, <code>risk/</code>, <code>backtesting/</code>, and <code>paper/</code> are byte-for-byte what Phase 11 left them.</p>
+</section>
+
+<section id="missing">
+<h2><span class="sec-num">15</span>What remains missing for real intraday trading</h2>
+<ul>
+<li>Any actual live/streaming data source — <code>MockMarketDataSource</code> is the only <code>MarketDataSource</code> implementation that exists</li>
+<li>A real broker adapter of any kind — authentication, live quotes, order placement/modification/cancellation, fills, positions, holdings, funds</li>
+<li>Live position monitoring against a REAL account, and broker-vs-local reconciliation (today's reconciliation checks internal consistency only, not against an external source of truth)</li>
+<li>A dashboard — the CLI's text output is a foundation-level demonstration, not the target §13 UI</li>
+<li>SEBI compliance mechanics (static-IP resolution, Algo-ID tagging, 2FA/session lifecycle) — entirely unaddressed, deliberately, per this phase's scope</li>
+<li>A UI/API surface for a human to actually call <code>approve_pending()</code>/<code>reject_pending()</code> — the state machine exists and is enforced, but nothing yet presents a pending approval to a person</li>
+</ul>
+</section>
+
+<section id="nobroker">
+<h2><span class="sec-num">16</span>Why no real broker was connected</h2>
+<p>Because this phase's explicit mandate was the foundation, not the integration: build and prove the abstraction (<code>MarketDataSource</code>) against a fully controllable, deterministic mock before writing a single line that depends on network access, credentials, or a specific vendor's API shape. Every failure mode this phase needed to test — duplicate/out-of-order/stale/disconnected data — is far easier to construct and verify deterministically through a scripted mock than through a real feed, and the resulting <code>MarketDataSource</code> contract stays honest about what it actually promises rather than being shaped around one broker's quirks. The prior phase's audit also surfaced a live, current regulatory reason to wait: SEBI's static-IP/Algo-ID/session rules (in force since April 2026) need to be resolved and verified directly with a chosen broker before any real connection is attempted — work that belongs in Phase 15, not folded into this phase's foundation-building scope.</p>
+</section>
+
+<section id="next">
+<h2><span class="sec-num">17</span>Phase 13 recommendation</h2>
+<p>Build live position monitoring and the human-approval surface on top of what this phase proved: unrealized P&amp;L display, stop/target/daily-loss/drawdown/exposure tracking already exist inside <code>Account</code> and just need a presentation layer; a way for a person to actually see and act on a <code>PENDING_HUMAN_APPROVAL</code> signal (even a simple CLI prompt would satisfy the domain model this phase built); and reconciliation logic extended to compare local state against a second, independently-tracked "expected" state (still simulated — a second mock source instance representing "what the broker would say," to rehearse the eventual broker-vs-local check before Phase 15 has to do it for real). No broker, no live feed, no real orders — same posture as this phase, one layer further up the stack.</p>
+</section>
+
+<footer>
+Phase 12 — live pipeline foundation. See the companion <a href="#">Intraday Workstation Gap Analysis</a>, <a href="#">Phase 11 Volume Confirmation</a>, <a href="#">Phase 10 Alpha Discovery</a>, and the full Phase 1-9 platform-engineering report series.
+</footer>
+</main>
+</div>

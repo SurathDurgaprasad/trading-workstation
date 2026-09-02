@@ -1,0 +1,375 @@
+<title>Phase 9 Regime Filter Test</title>
+<style>
+:root{
+  --bg:#eef1f5; --surface:#ffffff; --surface-2:#e3e7ee; --border:#c7ccd6;
+  --ink:#171a21; --ink-dim:#565d6d; --ink-faint:#848b99;
+  --accent:#a4711f; --accent-ink:#5f4113; --accent-soft:#f3e3c8;
+  --ok:#2f7a4f; --ok-soft:#dcefe1;
+  --risk:#b5402f; --risk-soft:#f7ddd7;
+  --warn:#9d7a1f; --warn-soft:#f2e6c4;
+  --dead:#6b7180; --dead-soft:#e6e8ec;
+  --code-bg:#1b1e27; --code-ink:#dfe3ee;
+  --shadow: 0 1px 2px rgba(23,26,33,0.06), 0 6px 20px -8px rgba(23,26,33,0.18);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12141b; --surface:#191c25; --surface-2:#20242f; --border:#333947;
+    --ink:#e9ebf1; --ink-dim:#aab0bf; --ink-faint:#7a8192;
+    --accent:#e0ac53; --accent-ink:#e0ac53; --accent-soft:#3c2f18;
+    --ok:#7bc79a; --ok-soft:#173327;
+    --risk:#e58b7c; --risk-soft:#3a1f1c;
+    --warn:#e0c257; --warn-soft:#3a3216;
+    --dead:#9298a6; --dead-soft:#262a34;
+    --code-bg:#0e1016; --code-ink:#dbe0ec;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 30px -10px rgba(0,0,0,0.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12141b; --surface:#191c25; --surface-2:#20242f; --border:#333947;
+  --ink:#e9ebf1; --ink-dim:#aab0bf; --ink-faint:#7a8192;
+  --accent:#e0ac53; --accent-ink:#e0ac53; --accent-soft:#3c2f18;
+  --ok:#7bc79a; --ok-soft:#173327;
+  --risk:#e58b7c; --risk-soft:#3a1f1c;
+  --warn:#e0c257; --warn-soft:#3a3216;
+  --dead:#9298a6; --dead-soft:#262a34;
+  --code-bg:#0e1016; --code-ink:#dbe0ec;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 30px -10px rgba(0,0,0,0.5);
+}
+*{box-sizing:border-box;}
+body{ margin:0; background:var(--bg); color:var(--ink); font-family:"IBM Plex Sans", -apple-system, "Segoe UI", sans-serif; line-height:1.6; font-size:16px; }
+@media (prefers-reduced-motion: reduce){ *{animation-duration:0.001ms !important; transition-duration:0.001ms !important;} }
+a{ color:var(--accent-ink); }
+.layout{ display:grid; grid-template-columns: 260px minmax(0,1fr); max-width:1360px; margin:0 auto; }
+@media (max-width: 900px){ .layout{ grid-template-columns: 1fr; } nav.toc{ position:static; height:auto; border-right:none; border-bottom:1px solid var(--border); } }
+nav.toc{ position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto; padding:28px 18px 40px 24px; border-right:1px solid var(--border); font-size:12px; }
+nav.toc .toc-kicker{ font-family:"IBM Plex Mono", monospace; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-faint); font-size:11px; margin-bottom:14px; }
+nav.toc ol{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+nav.toc a{ display:block; color:var(--ink-dim); text-decoration:none; padding:4px 8px; border-radius:5px; }
+nav.toc a:hover{ background:var(--surface-2); color:var(--ink); }
+nav.toc .num{ font-family:"IBM Plex Mono", monospace; color:var(--accent-ink); margin-right:6px; }
+main{ padding:44px 48px 100px; min-width:0; }
+@media (max-width: 640px){ main{ padding:28px 18px 80px; } }
+header.masthead{ border-bottom:1px solid var(--border); padding-bottom:28px; margin-bottom:40px; }
+header.masthead .kicker{ font-family:"IBM Plex Mono", monospace; font-size:12px; letter-spacing:0.14em; text-transform:uppercase; color:var(--risk); margin-bottom:10px; }
+header.masthead h1{ font-size:2.05rem; margin:0 0 10px; text-wrap:balance; letter-spacing:-0.01em; }
+header.masthead p.dek{ color:var(--ink-dim); max-width:76ch; margin:0 0 18px; font-size:1.02rem; }
+.meta-row{ display:flex; flex-wrap:wrap; gap:10px; font-family:"IBM Plex Mono", monospace; font-size:12px; color:var(--ink-faint); }
+.meta-row span{ border:1px solid var(--border); border-radius:999px; padding:4px 10px; background:var(--surface); }
+section{ margin-bottom:56px; scroll-margin-top:20px; }
+section h2{ font-size:1.5rem; display:flex; align-items:baseline; gap:10px; margin:0 0 6px; text-wrap:balance; }
+section h2 .sec-num{ font-family:"IBM Plex Mono", monospace; color:var(--accent-ink); font-size:1rem; border:1px solid var(--accent); border-radius:6px; padding:1px 8px; background:var(--accent-soft); }
+section > .lede{ color:var(--ink-dim); max-width:80ch; margin:0 0 20px; }
+section h3{ font-size:1.05rem; margin:26px 0 10px; }
+p{ max-width:80ch; } ul,ol{ max-width:80ch; }
+.callout{ background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:8px; padding:16px 20px; margin:18px 0; box-shadow:var(--shadow); }
+.callout.ok{ border-left-color:var(--ok); }
+.callout.risk{ border-left-color:var(--risk); }
+.callout.warn{ border-left-color:var(--warn); }
+.callout .callout-label{ font-family:"IBM Plex Mono", monospace; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--accent-ink); margin-bottom:6px; display:block; }
+.callout.ok .callout-label{ color:var(--ok); }
+.callout.risk .callout-label{ color:var(--risk); }
+.callout.warn .callout-label{ color:var(--warn); }
+.callout p:last-child{ margin-bottom:0; }
+.table-wrap{ overflow-x:auto; margin:16px 0; border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow); }
+table{ border-collapse:collapse; width:100%; min-width:480px; background:var(--surface); font-size:0.85rem; }
+th, td{ text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+th{ font-family:"IBM Plex Mono", monospace; font-size:10px; letter-spacing:0.03em; text-transform:uppercase; color:var(--ink-faint); background:var(--surface-2); white-space:nowrap; }
+tr:last-child td{ border-bottom:none; }
+td code, p code, li code{ font-family:"IBM Plex Mono", monospace; background:var(--surface-2); border:1px solid var(--border); border-radius:4px; padding:1px 5px; font-size:0.87em; }
+.tabular{ font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono", monospace; }
+.num-neg{ color:var(--risk); } .num-pos{ color:var(--ok); }
+.badge{ display:inline-block; font-family:"IBM Plex Mono", monospace; font-size:11px; font-weight:600; padding:2px 9px; border-radius:999px; white-space:nowrap; }
+.badge-pass{ background:var(--ok-soft); color:var(--ok); }
+.badge-warn{ background:var(--warn-soft); color:var(--warn); }
+.badge-risk{ background:var(--risk-soft); color:var(--risk); }
+pre{ background:var(--code-bg); color:var(--code-ink); border-radius:10px; padding:16px 18px; overflow-x:auto; font-family:"IBM Plex Mono", monospace; font-size:0.76rem; line-height:1.55; box-shadow:var(--shadow); margin:16px 0; }
+.grid-cards{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:12px; margin:18px 0; }
+.card{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 16px; box-shadow:var(--shadow); }
+.card .card-num{ font-family:"IBM Plex Mono", monospace; font-size:1.25rem; color:var(--accent-ink); font-variant-numeric:tabular-nums; }
+.card.pos .card-num{ color: var(--ok); }
+.card.neg .card-num{ color: var(--risk); }
+.card .card-label{ color:var(--ink-dim); font-size:0.78rem; margin-top:4px; }
+footer{ color:var(--ink-faint); font-size:12px; font-family:"IBM Plex Mono", monospace; border-top:1px solid var(--border); padding-top:20px; margin-top:60px; }
+.verdict{ background:var(--risk-soft); border:1px solid var(--risk); border-radius:10px; padding:20px 24px; margin:20px 0; }
+.verdict .verdict-label{ font-family:"IBM Plex Mono", monospace; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--risk); display:block; margin-bottom:8px; }
+.verdict p{ max-width:none; margin:0 0 10px; font-size:1.02rem; }
+.verdict p:last-child{ margin-bottom:0; }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<div class="layout">
+<nav class="toc">
+  <div class="toc-kicker">Contents</div>
+  <ol>
+    <li><a href="#verdict"><span class="num">—</span>Verdict</a></li>
+    <li><a href="#control"><span class="num">1</span>Control reproduction</a></li>
+    <li><a href="#candidates"><span class="num">2</span>Candidate hypotheses</a></li>
+    <li><a href="#rationale"><span class="num">3</span>Rationale</a></li>
+    <li><a href="#causality"><span class="num">4</span>Causality analysis</a></li>
+    <li><a href="#fullperiod"><span class="num">5</span>Full-period comparison</a></li>
+    <li><a href="#persymbol"><span class="num">6</span>Per-symbol comparison</a></li>
+    <li><a href="#cost"><span class="num">7</span>Cost sensitivity</a></li>
+    <li><a href="#walkforward"><span class="num">8</span>Walk-forward</a></li>
+    <li><a href="#oos"><span class="num">9</span>Out-of-sample</a></li>
+    <li><a href="#regime"><span class="num">10</span>Causal regime analysis</a></li>
+    <li><a href="#drawdown"><span class="num">11</span>Drawdown analysis</a></li>
+    <li><a href="#uncertainty"><span class="num">12</span>Statistical uncertainty</a></li>
+    <li><a href="#tradecount"><span class="num">13</span>Trade-count impact</a></li>
+    <li><a href="#parity"><span class="num">14</span>Paper/backtest parity</a></li>
+    <li><a href="#repro"><span class="num">15</span>Reproducibility</a></li>
+    <li><a href="#changes"><span class="num">16</span>Software changes</a></li>
+    <li><a href="#tests"><span class="num">17</span>Test count</a></li>
+    <li><a href="#classification"><span class="num">18</span>Classification</a></li>
+    <li><a href="#notproven"><span class="num">19</span>What this does NOT prove</a></li>
+    <li><a href="#next"><span class="num">20</span>Recommendation</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="masthead">
+  <div class="kicker">Regime filter hypothesis test — Phase 9</div>
+  <h1>The regime edge Phase 8 found doesn't survive being made causal</h1>
+  <p class="dek">Three small, pre-specified, real-time-computable regime filters were laid over the frozen Phase 8 control strategy — never modifying it. None improved risk-adjusted performance out-of-sample, none survived realistic costs, and reconstructing Phase 8's own regime breakdown causally (using only information available at each trade's entry, instead of a full quarter's retrospective return) shows the original "strong-uptrend is great" finding was largely an artifact of a look-ahead-tainted, retrospective label. This is Phase 9's central, mechanistic finding: not just that the filters failed, but a specific, well-evidenced reason why.</p>
+  <div class="meta-row">
+    <span>0 changes to strategy/baseline.py, risk/, or paper execution</span>
+    <span>Control reproduced exactly on all 12 symbols</span>
+    <span>3 candidates tested, 0 confirmed</span>
+    <span>257/258 tests passing (1 pre-existing, unrelated)</span>
+    <span>Classification: C</span>
+  </div>
+</header>
+
+<section id="verdict">
+<div class="verdict">
+  <span class="verdict-label">Bottom line</span>
+  <p><strong>Classification C — the regime-filter hypothesis is rejected.</strong> None of the 3 pre-specified candidates (broad-trend SMA200, low-volatility-regime, and their combination) produced a full-period, cost-surviving, out-of-sample improvement over the unmodified control. Every candidate's 95% bootstrap CI on mean R-multiple overlaps the control's and straddles zero — none is statistically distinguishable from control or from no edge.</p>
+  <p>The deeper finding: re-computing Phase 8's own regime breakdown <em>causally</em> (trailing 63-bar return known at the moment of entry, not a full quarter's start-to-end return applied retroactively to every trade inside it) collapses the effect Phase 8 reported. Trades causally labeled "strong uptrend" showed mean R = −0.105, barely different from "sideways" trades' −0.258 — nothing like Phase 8's retrospective +0.30R vs −0.30R gap. The original regime signal was not fully available at the time a trade would have needed to act on it.</p>
+</div>
+</section>
+
+<section id="control">
+<h2><span class="sec-num">1</span>Control reproduction (spec: "run the control first")</h2>
+<p class="lede">The exact Phase 8 <code>TrendMomentumBaseline</code>, run unmodified on the same 12-symbol universe. To keep the control and candidates on identical data, two harmless extra columns (<code>sma_200</code>, <code>atr_median_100</code>) were added to each symbol's indicator series before any backtest — the control strategy reads only its own named columns and ignores the extras.</p>
+<div class="callout ok">
+<span class="callout-label">Exact match, all 12 symbols</span>
+<p>Every control metric (trade count, net PnL, win rate, expectancy R) on the augmented series matched Phase 8's original numbers exactly — 218 pooled trades, net PnL −$7,547.20. This confirms the added columns have zero effect on the control and that this phase's comparison starts from a verified-identical baseline.</p>
+</div>
+</section>
+
+<section id="candidates">
+<h2><span class="sec-num">2</span>Exact candidate hypotheses</h2>
+<p class="lede">Exactly 3 candidates — within spec's 3-5 limit — each implemented as a <code>FilteredStrategy</code> (<code>strategy/regime_filters.py</code>) that calls the UNCHANGED control strategy first and can only SUPPRESS its signal, never alter or invent one. Not registered in <code>strategy/registry.py</code> — deliberately unreachable from the CLI, a research artifact only.</p>
+<pre>Candidate A — broad_trend_sma200:   allow signal only if close > SMA(200)
+Candidate B — low_volatility_regime: allow signal only if ATR14 <= rolling_median(ATR14, 100 bars)
+Candidate C — trend_and_low_vol:    A AND B</pre>
+</section>
+
+<section id="rationale">
+<h2><span class="sec-num">3</span>Rationale (stated before any result was inspected)</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Candidate</th><th>Rationale</th></tr>
+<tr><td>A — SMA200</td><td>Phase 8 found strong-uptrend quarters profitable, sideways ones not; SMA20/50 is a short-horizon crossover that can flip inside a broader non-trending regime. Price-vs-SMA200 is one of the most standard, non-cherry-picked "primary trend" checks in technical analysis.</td></tr>
+<tr><td>B — ATR-vs-rolling-median</td><td>Phase 8 found low-volatility quarters profitable (+0.34R), high-volatility ones not (−0.28R). A causal, adaptive, per-symbol proxy built only from the ATR column the strategy already computes.</td></tr>
+<tr><td>C — combination</td><td>Phase 8's cross-tab suggested trend and volatility are each independently informative; directly tests requiring both — spec's own explicit candidate concept #6.</td></tr>
+</table>
+</div>
+<h3>Explicitly considered and excluded</h3>
+<ul>
+<li><strong>ADX / trend-strength.</strong> Spec gated this on "if already supported cleanly" — <code>market/indicators.py</code> has no ADX implementation. Building a new, nontrivial indicator (Wilder's ADX has several easy-to-get-wrong smoothing steps) purely to test one candidate, under this phase's explicit small-N constraint, was judged not worth the added correctness risk versus the two well-established, already-partially-supported concepts (long SMA, ATR) chosen instead.</li>
+<li><strong>Higher-timeframe (weekly) trend confirmation.</strong> Correctly aligning a resampled weekly bar to a daily decision without leaking the still-in-progress current week is a genuine causality trap — exactly the class of bug spec §"THE FILTER MUST NOT CHEAT" warns about. Rather than risk a subtle look-ahead bug under this phase's time budget, it was excluded and is named here as a candidate for a future phase, not silently dropped.</li>
+</ul>
+</section>
+
+<section id="causality">
+<h2><span class="sec-num">4</span>Causality / look-ahead analysis</h2>
+<p class="lede">Both regime columns are pure rolling-window functions of price/ATR history up to and including each row's own bar — the identical causal-by-construction pattern already audited in Phase 8's look-ahead tests. Verified three ways, all in <code>tests/test_regime_filters.py</code> (11 new tests, all passing):</p>
+<ul>
+<li>Structural: <code>sma_200</code>/<code>atr_median_100</code> computed on a truncated series match the full series' value at the same row exactly.</li>
+<li>Signal-level: mutating every bar strictly after bar T (price, ATR, and the regime columns themselves) never changes the filter's allow/suppress decision at bar T.</li>
+<li>Composition: a filtered signal is either <code>None</code> or byte-identical to what the unchanged inner strategy itself produced — the filter cannot invent or alter a signal, only suppress it.</li>
+</ul>
+<p><strong>Real-time implementability, explicitly answered for each candidate:</strong> yes for all three — every input (trailing close prices, trailing ATR values) is knowable at the exact bar the signal is generated, with no dependency on anything not yet observed.</p>
+</section>
+
+<section id="fullperiod">
+<h2><span class="sec-num">5</span>Full-period comparison (spec's controlled-comparison table)</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Metric</th><th>Control</th><th>A — SMA200</th><th>B — Low-vol</th><th>C — Combo</th></tr>
+<tr><td>Trades</td><td class="tabular">218</td><td class="tabular">182</td><td class="tabular">127</td><td class="tabular">105</td></tr>
+<tr><td>Win rate %</td><td class="tabular">34.9</td><td class="tabular">34.6</td><td class="tabular">33.9</td><td class="tabular">32.4</td></tr>
+<tr><td>Net PnL</td><td class="tabular num-neg">-7,547.20</td><td class="tabular num-neg">-8,357.80</td><td class="tabular num-neg">-6,667.96</td><td class="tabular num-neg">-7,986.19</td></tr>
+<tr><td>Mean R</td><td class="tabular">-0.169</td><td class="tabular">-0.139</td><td class="tabular">-0.189</td><td class="tabular">-0.185</td></tr>
+<tr><td>Median trade</td><td class="tabular">-322.48</td><td class="tabular">-353.18</td><td class="tabular">-315.20</td><td class="tabular">-346.65</td></tr>
+<tr><td>Profit factor</td><td class="tabular">0.887</td><td class="tabular">0.852</td><td class="tabular">0.827</td><td class="tabular">0.762</td></tr>
+<tr><td>Max consec. losses (pooled)</td><td class="tabular">6</td><td class="tabular">6</td><td class="tabular">6</td><td class="tabular">6</td></tr>
+<tr><td>Positive symbols / 12</td><td class="tabular">4</td><td class="tabular">4</td><td class="tabular">4</td><td class="tabular">4</td></tr>
+</table>
+</div>
+<p>No candidate improves net PnL, mean R, or profit factor over control at the pooled, full-period, baseline-cost level. Positive-symbol count is identical (4/12) across all four variants — the filters redistribute which symbols/trades occur without changing how many end up net positive.</p>
+</section>
+
+<section id="persymbol">
+<h2><span class="sec-num">6</span>Per-symbol comparison</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Candidate</th><th>Beats control on net PnL</th><th>Beats control on expectancy R</th></tr>
+<tr><td>A — SMA200</td><td class="tabular">7/12</td><td class="tabular">6/12</td></tr>
+<tr><td>B — Low-vol</td><td class="tabular">7/12</td><td class="tabular">6/12</td></tr>
+<tr><td>C — Combo</td><td class="tabular">5/12</td><td class="tabular">6/12</td></tr>
+</table>
+</div>
+<p>Roughly coin-flip odds of improving any individual symbol — not the broad-based, consistent improvement spec §"SYMBOL ROBUSTNESS" requires before a candidate could be taken seriously. No candidate improves the majority of symbols while also improving the pooled aggregate; the two never align.</p>
+</section>
+
+<section id="cost">
+<h2><span class="sec-num">7</span>Cost sensitivity</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Cost tier</th><th>Control</th><th>A — SMA200</th><th>B — Low-vol</th><th>C — Combo</th></tr>
+<tr><td>Zero cost (gross)</td><td class="tabular num-pos">242.38 (242)</td><td class="tabular num-pos">600.66 (182)</td><td class="tabular num-neg">-1,807.94 (127)</td><td class="tabular num-neg">-3,139.10 (106)</td></tr>
+<tr><td>Baseline</td><td class="tabular num-neg">-7,547.20 (218)</td><td class="tabular num-neg">-8,357.80 (182)</td><td class="tabular num-neg">-6,667.96 (127)</td><td class="tabular num-neg">-7,986.19 (105)</td></tr>
+<tr><td>Moderate 2x</td><td class="tabular num-neg">-17,525.03 (217)</td><td class="tabular num-neg">-17,740.71 (183)</td><td class="tabular num-neg">-13,680.01 (126)</td><td class="tabular num-neg">-13,408.02 (102)</td></tr>
+<tr><td>Adverse slippage</td><td class="tabular num-neg">-12,123.82 (217)</td><td class="tabular num-neg">-12,758.51 (182)</td><td class="tabular num-neg">-9,967.31 (127)</td><td class="tabular num-neg">-10,417.77 (104)</td></tr>
+</table>
+</div>
+<div class="callout warn">
+<span class="callout-label">B and C's "improvement" under higher costs is a trade-count artifact, not quality</span>
+<p>B and C look relatively less-bad than control at the moderate/adverse cost tiers — but they also trade 42-52% less often, so they simply pay less total cost in dollar terms. Judged by profit factor and mean R (which normalize for trade count), neither is actually higher-quality than control (see §5) — the apparent cost-tier "resilience" is mostly an accounting consequence of trading less, not evidence the filter selects better trades. Candidate A is unambiguously worse than control at every non-zero cost tier despite a modest zero-cost improvement, confirming its thin edge does not survive realistic frictions.</p>
+</div>
+</section>
+
+<section id="walkforward">
+<h2><span class="sec-num">8</span>Walk-forward (60/20/20, chronological, unchanged split methodology)</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Period</th><th>Control</th><th>A — SMA200</th><th>B — Low-vol</th><th>C — Combo</th></tr>
+<tr><td>Development</td><td class="tabular num-neg">-8,441.76 (154) R=-0.242</td><td class="tabular num-neg">-8,287.85 (116) R=-0.179</td><td class="tabular num-neg">-1,231.38 (82) R=-0.155</td><td class="tabular num-neg">-2,723.22 (64) R=-0.142</td></tr>
+<tr><td>Validation</td><td class="tabular num-neg">-1,428.19 (66) R=-0.105</td><td class="tabular num-pos">601.70 (58) R=-0.018</td><td class="tabular num-neg">-5,677.97 (34) R=-0.319</td><td class="tabular num-neg">-2,872.83 (29) R=-0.188</td></tr>
+<tr><td>Out-of-sample</td><td class="tabular num-neg">-1,294.59 (70) R=0.061</td><td class="tabular num-neg">-1,465.50 (62) R=0.072</td><td class="tabular num-neg">-1,973.97 (19) R=-0.238</td><td class="tabular num-neg">-3,020.34 (14) R=-0.344</td></tr>
+</table>
+</div>
+<p>(R values here are trade-count-weighted means across symbols, a different aggregation than Phase 8's simple per-symbol average — internally consistent across control/candidates in this table, not a direct like-for-like restatement of the Phase 8 report's own walk-forward numbers.)</p>
+</section>
+
+<section id="oos">
+<h2><span class="sec-num">9</span>Out-of-sample — the most important result (spec's own framing)</h2>
+<div class="callout risk">
+<span class="callout-label">No candidate improves out-of-sample</span>
+<p>Control's OOS mean R (+0.061) is actually the best of the four variants. Candidate A's OOS dollar PnL is slightly worse than control's despite a marginally higher R (a function of differing trade counts, not a real edge). Candidates B and C are worse on both PnL and R out-of-sample, and their OOS trade counts (19 and 14) are too thin to support any claim either way — exactly the "trade count collapsed, classify as inconclusive on this cut" scenario spec §"STATISTICAL DISCIPLINE" anticipates. Candidate A's validation-period improvement (+601.70 vs control's −1,428.19) does not carry through to out-of-sample — a textbook example of why OOS, not validation, is the decisive cut.</p>
+</div>
+</section>
+
+<section id="regime">
+<h2><span class="sec-num">10</span>Causal regime analysis — the central finding</h2>
+<p class="lede">Phase 8 classified whole ~63-bar quarters by their FULL start-to-end return and applied that label to every trade inside the quarter — including trades entered near the quarter's start, before the quarter's eventual direction was knowable. Phase 9 reclassifies each trade using only its own TRAILING 63-bar return, known at the exact moment of entry — causal by construction, exactly matching spec's explicit warning not to "turn the Phase 8 retrospective regime labels into a trading signal."</p>
+<div class="table-wrap">
+<table>
+<tr><th>Regime (causal, at entry)</th><th>Control trades</th><th>Control net PnL</th><th>Control win %</th><th>Control mean R</th></tr>
+<tr><td>strong_up</td><td class="tabular">103</td><td class="tabular num-neg">-3,574.90</td><td class="tabular">35.9</td><td class="tabular">-0.105</td></tr>
+<tr><td>sideways</td><td class="tabular">111</td><td class="tabular num-neg">-5,036.29</td><td class="tabular">33.3</td><td class="tabular">-0.258</td></tr>
+</table>
+</div>
+<div class="table-wrap">
+<table>
+<tr><th></th><th>Phase 8 (retrospective, quarter-end label)</th><th>Phase 9 (causal, trailing-at-entry)</th></tr>
+<tr><td>strong_up mean R</td><td class="tabular num-pos">+0.300</td><td class="tabular num-neg">-0.105</td></tr>
+<tr><td>sideways mean R</td><td class="tabular num-neg">-0.295</td><td class="tabular num-neg">-0.258</td></tr>
+<tr><td>Gap (strong_up minus sideways)</td><td class="tabular">0.595R</td><td class="tabular">0.153R</td></tr>
+</table>
+</div>
+<p>The gap shrinks from 0.595R to 0.153R once the label is made causal — both regimes are now negative, and the difference between them is small next to the pooled standard deviation of R (≈1.65, from Phase 8's distribution analysis). <strong>This is the mechanistic explanation for why all three real-time-implementable candidates failed</strong>: they were built to approximate a signal (trend/volatility regime) whose Phase 8 incarnation partly depended on information — the quarter's own future return — that would not have been available at the time a live system needed to decide.</p>
+</section>
+
+<section id="drawdown">
+<h2><span class="sec-num">11</span>Drawdown analysis</h2>
+<p>Pooled maximum consecutive losing trades is identical across all four variants (6) — the RiskEngine's consecutive-loss hard limit (Phase 4.5, unchanged) caps this the same way regardless of which signals reach it. No candidate materially changed the loss-streak profile; the filters reduce trade count but not the shape of losing runs.</p>
+</section>
+
+<section id="uncertainty">
+<h2><span class="sec-num">12</span>Statistical uncertainty</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Variant</th><th>n</th><th>Mean R</th><th>95% bootstrap CI</th></tr>
+<tr><td>Control</td><td class="tabular">218</td><td class="tabular">-0.169</td><td class="tabular">[-0.385, +0.041]</td></tr>
+<tr><td>A — SMA200</td><td class="tabular">182</td><td class="tabular">-0.139</td><td class="tabular">[-0.337, +0.060]</td></tr>
+<tr><td>B — Low-vol</td><td class="tabular">127</td><td class="tabular">-0.189</td><td class="tabular">[-0.451, +0.079]</td></tr>
+<tr><td>C — Combo</td><td class="tabular">105</td><td class="tabular">-0.186</td><td class="tabular">[-0.443, +0.079]</td></tr>
+</table>
+</div>
+<p>All four intervals overlap heavily and each straddles zero — none of the three candidates is statistically distinguishable from control, and none is distinguishable from "no edge." Smaller samples (B, C) produce correspondingly wider, less informative intervals, on top of already showing no improvement in the point estimate.</p>
+</section>
+
+<section id="tradecount">
+<h2><span class="sec-num">13</span>Trade-count impact</h2>
+<p>Trade count fell from 218 (control) to 182 (A, −16%), 127 (B, −42%), and 105 (C, −52%). Counterintuitively, at the per-symbol level a filter can occasionally INCREASE a symbol's trade count relative to control (INFY.NS under candidate A: 18 trades vs. control's 8) — a real, correctly-understood consequence of the single-position-per-symbol constraint: suppressing an early signal can free the account to take a later signal that control's own <code>RiskEngine</code> would otherwise have vetoed as <code>POSITION_ALREADY_OPEN</code>. The formal per-signal guarantee (a filtered signal is either absent or byte-identical to the inner strategy's own signal at that exact bar) still holds and is tested — it is aggregate trade count, a path-dependent downstream effect, that is not guaranteed to only decrease.</p>
+</section>
+
+<section id="parity">
+<h2><span class="sec-num">14</span>Paper/backtest parity — system-integrity check</h2>
+<p class="lede">Extended to candidate A (chosen only as the least-unpromising of three broadly rejected candidates, purely to exercise the pipeline — not an endorsement) on AAPL, its clearest full-period case.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>Backtest trades vs. paper-replay trades</td><td><span class="badge badge-pass">25 = 25, business values identical</span></td></tr>
+<tr><td>Final equity, backtest vs. paper</td><td><span class="badge badge-pass">103,135.13 = 103,135.13</span></td></tr>
+<tr><td>Paper-store reconciliation</td><td><span class="badge badge-pass">OK</span></td></tr>
+</table>
+</div>
+<p>Confirms the <code>FilteredStrategy</code> composition drops cleanly into the existing paper-trading pipeline with zero changes to <code>paper/engine.py</code> or <code>risk/engine.py</code> — exactly as the <code>Strategy</code> protocol is designed to allow.</p>
+</section>
+
+<section id="repro">
+<h2><span class="sec-num">15</span>Reproducibility</h2>
+<p>The full control-plus-3-candidate experiment was run twice against the (already-populated) local cache. <strong>Byte-identical output both times</strong> — no caveat this time (Phase 8's live-fetch-vs-cache-read artifact was avoided by confirming the cache was warm before either comparison run).</p>
+</section>
+
+<section id="changes">
+<h2><span class="sec-num">16</span>Software changes</h2>
+<ul class="table-wrap" style="list-style:none; padding:16px 20px; margin:16px 0;">
+<li><code>strategy/regime_filters.py</code> (new) — the 3 candidate predicates and the <code>FilteredStrategy</code> composition wrapper. NOT registered in <code>strategy/registry.py</code>.</li>
+<li><code>tests/test_regime_filters.py</code> (new) — 11 tests: protocol conformance, suppress-only guarantee, causality, column non-mutation.</li>
+</ul>
+<p>Nothing else changed. <code>strategy/baseline.py</code>, <code>market/indicators.py</code>, <code>risk/</code>, <code>paper/</code>, <code>backtesting/</code>, and <code>mcp_server/</code> are byte-for-byte what Phase 8 left them — confirmed by the exact control reproduction in §1.</p>
+</section>
+
+<section id="tests">
+<h2><span class="sec-num">17</span>Exact test count</h2>
+<div class="grid-cards">
+  <div class="card"><div class="card-num">247</div><div class="card-label">prior (through Phase 8)</div></div>
+  <div class="card"><div class="card-num">11</div><div class="card-label">new this phase</div></div>
+  <div class="card pos"><div class="card-num">257</div><div class="card-label">passing of 258 total</div></div>
+  <div class="card"><div class="card-num">1</div><div class="card-label">pre-existing environmental failure (Ollama not running), unrelated</div></div>
+</div>
+</section>
+
+<section id="classification">
+<h2><span class="sec-num">18</span>Final classification</h2>
+<div class="verdict">
+<span class="verdict-label">C — hypothesis rejected</span>
+<p>None of the 3 pre-specified, causal, real-time-implementable regime filters produced a full-period, cost-surviving, out-of-sample-confirmed, statistically-distinguishable-from-control improvement. The one candidate with any positive signal (A, at zero cost and in the validation window) failed to carry that improvement into out-of-sample or under realistic costs. The causal regime-breakdown analysis (§10) supplies a specific, mechanistic reason: Phase 8's retrospective regime observation was itself partly a look-ahead artifact, not a fully tradeable signal.</p>
+</div>
+</section>
+
+<section id="notproven">
+<h2><span class="sec-num">19</span>What this does NOT prove</h2>
+<ul>
+<li><strong>This does not prove no regime filter could ever help.</strong> It tests exactly 3 pre-specified, simply-motivated candidates — not the space of all possible regime constructions.</li>
+<li><strong>This does not prove the causal-vs-retrospective gap fully explains Phase 8's finding.</strong> It is the most direct, tested explanation available and is consistent with all the data gathered, but other factors (sample noise, symbol mix) were not separately isolated.</li>
+<li><strong>This does not prove the underlying TrendMomentumBaseline strategy is unfixable.</strong> It only tests whether THIS family of regime gates rescues it — Phase 8's own verdict on the ungated strategy stands independently.</li>
+<li><strong>Candidate A's zero-cost and validation-period improvements are not evidence of a real edge.</strong> They did not survive the two tests spec explicitly weights most heavily — realistic costs and out-of-sample — and are reported for completeness, not as a partial success.</li>
+<li><strong>None of this was tested on data or symbols chosen after seeing results.</strong> The universe, period, and candidate definitions were fixed before any candidate backtest ran (verified: the control reproduction in §1 used data fetched/cached before any candidate code existed in this conversation).</li>
+</ul>
+</section>
+
+<section id="next">
+<h2><span class="sec-num">20</span>Recommendation for Phase 10</h2>
+<p>Do not carry any of the 3 candidates forward for confirmation — none cleared the bar spec itself set (OOS improvement, cost survival, statistical distinguishability, symbol breadth). The one substantive, reusable output of this phase is methodological rather than a trading candidate: the causal-vs-retrospective regime-labeling gap (§10) is a generally applicable lesson for any future regime-conditioning work on this platform, and should be treated as a standing constraint — any future "does regime X help" hypothesis must be specified and tested causally from the start, the way this phase's <code>FilteredStrategy</code> pattern now makes straightforward to do correctly. Absent a new, differently-motivated hypothesis, the appropriate next step is the same one Phase 8 already recommended: treat the platform's proven engineering correctness as the deliverable, and apply this same rigor to any future strategy candidate before considering live deployment of any kind.</p>
+</section>
+
+<footer>
+Phase 9 — regime filter hypothesis test. Machine-readable result: <code>phase9_validation_result.json</code> (sent alongside this report). See the companion <a href="#">Phase 8 Strategy Validation</a>, <a href="#">Phase 7B TradingView Investigation</a>, <a href="#">Phase 7A Continuous Replay Report</a>, <a href="#">Phase 6 Paper Trading Report</a>.
+</footer>
+</main>
+</div>

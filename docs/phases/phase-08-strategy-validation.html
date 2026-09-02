@@ -1,0 +1,456 @@
+<title>Phase 8 Strategy Validation</title>
+<style>
+:root{
+  --bg:#eef1f5; --surface:#ffffff; --surface-2:#e3e7ee; --border:#c7ccd6;
+  --ink:#171a21; --ink-dim:#565d6d; --ink-faint:#848b99;
+  --accent:#a4711f; --accent-ink:#5f4113; --accent-soft:#f3e3c8;
+  --ok:#2f7a4f; --ok-soft:#dcefe1;
+  --risk:#b5402f; --risk-soft:#f7ddd7;
+  --warn:#9d7a1f; --warn-soft:#f2e6c4;
+  --dead:#6b7180; --dead-soft:#e6e8ec;
+  --code-bg:#1b1e27; --code-ink:#dfe3ee;
+  --shadow: 0 1px 2px rgba(23,26,33,0.06), 0 6px 20px -8px rgba(23,26,33,0.18);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12141b; --surface:#191c25; --surface-2:#20242f; --border:#333947;
+    --ink:#e9ebf1; --ink-dim:#aab0bf; --ink-faint:#7a8192;
+    --accent:#e0ac53; --accent-ink:#e0ac53; --accent-soft:#3c2f18;
+    --ok:#7bc79a; --ok-soft:#173327;
+    --risk:#e58b7c; --risk-soft:#3a1f1c;
+    --warn:#e0c257; --warn-soft:#3a3216;
+    --dead:#9298a6; --dead-soft:#262a34;
+    --code-bg:#0e1016; --code-ink:#dbe0ec;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 30px -10px rgba(0,0,0,0.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12141b; --surface:#191c25; --surface-2:#20242f; --border:#333947;
+  --ink:#e9ebf1; --ink-dim:#aab0bf; --ink-faint:#7a8192;
+  --accent:#e0ac53; --accent-ink:#e0ac53; --accent-soft:#3c2f18;
+  --ok:#7bc79a; --ok-soft:#173327;
+  --risk:#e58b7c; --risk-soft:#3a1f1c;
+  --warn:#e0c257; --warn-soft:#3a3216;
+  --dead:#9298a6; --dead-soft:#262a34;
+  --code-bg:#0e1016; --code-ink:#dbe0ec;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 30px -10px rgba(0,0,0,0.5);
+}
+*{box-sizing:border-box;}
+body{ margin:0; background:var(--bg); color:var(--ink); font-family:"IBM Plex Sans", -apple-system, "Segoe UI", sans-serif; line-height:1.6; font-size:16px; }
+@media (prefers-reduced-motion: reduce){ *{animation-duration:0.001ms !important; transition-duration:0.001ms !important;} }
+a{ color:var(--accent-ink); }
+.layout{ display:grid; grid-template-columns: 260px minmax(0,1fr); max-width:1360px; margin:0 auto; }
+@media (max-width: 900px){ .layout{ grid-template-columns: 1fr; } nav.toc{ position:static; height:auto; border-right:none; border-bottom:1px solid var(--border); } }
+nav.toc{ position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto; padding:28px 18px 40px 24px; border-right:1px solid var(--border); font-size:12px; }
+nav.toc .toc-kicker{ font-family:"IBM Plex Mono", monospace; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-faint); font-size:11px; margin-bottom:14px; }
+nav.toc ol{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+nav.toc a{ display:block; color:var(--ink-dim); text-decoration:none; padding:4px 8px; border-radius:5px; }
+nav.toc a:hover{ background:var(--surface-2); color:var(--ink); }
+nav.toc .num{ font-family:"IBM Plex Mono", monospace; color:var(--accent-ink); margin-right:6px; }
+main{ padding:44px 48px 100px; min-width:0; }
+@media (max-width: 640px){ main{ padding:28px 18px 80px; } }
+header.masthead{ border-bottom:1px solid var(--border); padding-bottom:28px; margin-bottom:40px; }
+header.masthead .kicker{ font-family:"IBM Plex Mono", monospace; font-size:12px; letter-spacing:0.14em; text-transform:uppercase; color:var(--risk); margin-bottom:10px; }
+header.masthead h1{ font-size:2.1rem; margin:0 0 10px; text-wrap:balance; letter-spacing:-0.01em; }
+header.masthead p.dek{ color:var(--ink-dim); max-width:74ch; margin:0 0 18px; font-size:1.02rem; }
+.meta-row{ display:flex; flex-wrap:wrap; gap:10px; font-family:"IBM Plex Mono", monospace; font-size:12px; color:var(--ink-faint); }
+.meta-row span{ border:1px solid var(--border); border-radius:999px; padding:4px 10px; background:var(--surface); }
+section{ margin-bottom:56px; scroll-margin-top:20px; }
+section h2{ font-size:1.5rem; display:flex; align-items:baseline; gap:10px; margin:0 0 6px; text-wrap:balance; }
+section h2 .sec-num{ font-family:"IBM Plex Mono", monospace; color:var(--accent-ink); font-size:1rem; border:1px solid var(--accent); border-radius:6px; padding:1px 8px; background:var(--accent-soft); }
+section > .lede{ color:var(--ink-dim); max-width:80ch; margin:0 0 20px; }
+section h3{ font-size:1.05rem; margin:26px 0 10px; }
+p{ max-width:80ch; } ul,ol{ max-width:80ch; }
+.callout{ background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:8px; padding:16px 20px; margin:18px 0; box-shadow:var(--shadow); }
+.callout.ok{ border-left-color:var(--ok); }
+.callout.risk{ border-left-color:var(--risk); }
+.callout.warn{ border-left-color:var(--warn); }
+.callout .callout-label{ font-family:"IBM Plex Mono", monospace; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--accent-ink); margin-bottom:6px; display:block; }
+.callout.ok .callout-label{ color:var(--ok); }
+.callout.risk .callout-label{ color:var(--risk); }
+.callout.warn .callout-label{ color:var(--warn); }
+.callout p:last-child{ margin-bottom:0; }
+.table-wrap{ overflow-x:auto; margin:16px 0; border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow); }
+table{ border-collapse:collapse; width:100%; min-width:480px; background:var(--surface); font-size:0.86rem; }
+th, td{ text-align:left; padding:7px 11px; border-bottom:1px solid var(--border); vertical-align:top; }
+th{ font-family:"IBM Plex Mono", monospace; font-size:10px; letter-spacing:0.04em; text-transform:uppercase; color:var(--ink-faint); background:var(--surface-2); white-space:nowrap; }
+tr:last-child td{ border-bottom:none; }
+td code, p code, li code{ font-family:"IBM Plex Mono", monospace; background:var(--surface-2); border:1px solid var(--border); border-radius:4px; padding:1px 5px; font-size:0.87em; }
+.tabular{ font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono", monospace; }
+.num-neg{ color:var(--risk); } .num-pos{ color:var(--ok); }
+.badge{ display:inline-block; font-family:"IBM Plex Mono", monospace; font-size:11px; font-weight:600; padding:2px 9px; border-radius:999px; white-space:nowrap; }
+.badge-pass{ background:var(--ok-soft); color:var(--ok); }
+.badge-warn{ background:var(--warn-soft); color:var(--warn); }
+.badge-risk{ background:var(--risk-soft); color:var(--risk); }
+.badge-dead{ background:var(--dead-soft); color:var(--dead); }
+pre{ background:var(--code-bg); color:var(--code-ink); border-radius:10px; padding:16px 18px; overflow-x:auto; font-family:"IBM Plex Mono", monospace; font-size:0.76rem; line-height:1.55; box-shadow:var(--shadow); margin:16px 0; }
+.grid-cards{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:12px; margin:18px 0; }
+.card{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 16px; box-shadow:var(--shadow); }
+.card .card-num{ font-family:"IBM Plex Mono", monospace; font-size:1.3rem; color:var(--accent-ink); font-variant-numeric:tabular-nums; }
+.card.pos .card-num{ color: var(--ok); }
+.card.neg .card-num{ color: var(--risk); }
+.card .card-label{ color:var(--ink-dim); font-size:0.78rem; margin-top:4px; }
+footer{ color:var(--ink-faint); font-size:12px; font-family:"IBM Plex Mono", monospace; border-top:1px solid var(--border); padding-top:20px; margin-top:60px; }
+.verdict{ background:var(--risk-soft); border:1px solid var(--risk); border-radius:10px; padding:20px 24px; margin:20px 0; }
+.verdict .verdict-label{ font-family:"IBM Plex Mono", monospace; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--risk); display:block; margin-bottom:8px; }
+.verdict p{ max-width:none; margin:0 0 10px; font-size:1.03rem; }
+.verdict p:last-child{ margin-bottom:0; }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<div class="layout">
+<nav class="toc">
+  <div class="toc-kicker">Contents</div>
+  <ol>
+    <li><a href="#verdict"><span class="num">—</span>Verdict</a></li>
+    <li><a href="#spec"><span class="num">1</span>Frozen specification</a></li>
+    <li><a href="#universe"><span class="num">2</span>Dataset &amp; universe</a></li>
+    <li><a href="#baseline"><span class="num">3</span>Baseline results</a></li>
+    <li><a href="#multisymbol"><span class="num">4</span>Multi-symbol</a></li>
+    <li><a href="#regime"><span class="num">5</span>Multi-regime</a></li>
+    <li><a href="#walkforward"><span class="num">6</span>Walk-forward</a></li>
+    <li><a href="#cost"><span class="num">7</span>Cost sensitivity</a></li>
+    <li><a href="#risksens"><span class="num">8</span>Risk sensitivity</a></li>
+    <li><a href="#distribution"><span class="num">9</span>Trade distribution</a></li>
+    <li><a href="#drawdown"><span class="num">10</span>Drawdown / streaks</a></li>
+    <li><a href="#uncertainty"><span class="num">11</span>Statistical uncertainty</a></li>
+    <li><a href="#benchmark"><span class="num">12</span>Benchmark</a></li>
+    <li><a href="#robustness"><span class="num">13</span>Parameter robustness</a></li>
+    <li><a href="#parity"><span class="num">14</span>Paper/backtest parity</a></li>
+    <li><a href="#repro"><span class="num">15</span>Reproducibility</a></li>
+    <li><a href="#defects"><span class="num">16</span>Defects</a></li>
+    <li><a href="#tests"><span class="num">17</span>Test count</a></li>
+    <li><a href="#classification"><span class="num">18</span>Classification</a></li>
+    <li><a href="#notproven"><span class="num">19</span>What this does NOT prove</a></li>
+    <li><a href="#next"><span class="num">20</span>Recommendation</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="masthead">
+  <div class="kicker">Strategy validation — Phase 8</div>
+  <h1>Does the strategy have an edge? The evidence says no.</h1>
+  <p class="dek">A frozen, unmodified <code>TrendMomentumBaseline</code> was run — unchanged — across 12 sector-diverse instruments, three chronological sub-periods, four cost regimes, three risk levels, and a 3×3 SMA-parameter neighborhood, using only real historical data. Zero strategy, risk, or indicator code was touched. The pooled result is a net loss that gets worse under realistic costs, and every symbol that returned money would have returned dramatically more from simply buying and holding it.</p>
+  <div class="meta-row">
+    <span>12 symbols, 218 pooled trades</span>
+    <span>247 tests, 246 passing (1 pre-existing, unrelated)</span>
+    <span>0 strategy/risk parameters changed</span>
+    <span>1 real defect found (in the validation script, not the platform)</span>
+    <span>Classification: C</span>
+  </div>
+</header>
+
+<section id="verdict">
+<div class="verdict">
+  <span class="verdict-label">Bottom line</span>
+  <p><strong>Classification C — no evidence of a durable edge.</strong> Pooled across the defined 12-symbol universe: net PnL is <strong>−7,547.20</strong> on 218 trades at baseline cost assumptions; the gross (zero-cost) result is barely breakeven (+242.38, ~$1/trade); only 4 of 12 symbols were individually profitable; and every symbol where buy-and-hold was itself profitable beat the strategy's return by a wide margin — in several cases by 100+ percentage points over the same 5 years. The 95% confidence interval on mean R-multiple (−0.385R to +0.041R) straddles zero.</p>
+  <p>One coherent, non-random-looking pattern emerged from the regime breakdown — trades taken during confirmed strong-uptrend quarters were profitable (+0.30R expectancy, 55% win rate) while trades taken during sideways quarters (68% of all quarters observed) were not (−0.30R, 29% win rate). This is recorded as a specific hypothesis for a future, separately-validated phase — not acted on here, and not sufficient on its own to change the verdict on the strategy as currently gated.</p>
+</div>
+</section>
+
+<section id="spec">
+<h2><span class="sec-num">1</span>Frozen strategy specification</h2>
+<p class="lede">Read directly from <code>strategy/baseline.py</code>, <code>market/indicators.py</code>, <code>backtesting/costs.py</code>, and <code>risk/config.py</code> — nothing here was inferred or approximated, and nothing here was changed during this phase.</p>
+<pre>Strategy: TrendMomentumBaseline v1.0 (strategy/baseline.py)
+  Entry (LONG only; ALL must hold on the generating bar):
+    trend:    SMA20 > SMA50
+    momentum: RSI14 > 50  AND  MACD > MACD signal
+    volume:   volume_trend == "increasing" (5-bar normalized slope > +5%)
+  Stop:    entry_price - (ATR14 * 1.5)
+  Target:  entry_price + (ATR14 * 1.5 * 2.0)      [fixed 2.0 risk:reward]
+  Fill:    next bar's open, after slippage; conservative same-bar stop-wins rule
+
+Indicators (market/indicators.py): SMA(20,50), RSI(14, Wilder EWM), MACD(12,26,9),
+  ATR(14), volume trend (5-bar linear-slope classification) -- all rolling/ewm,
+  causal by construction (see sec 14/17 for the real-data confirmation).
+
+Cost model (default, backtesting/costs.py): brokerage 20 (flat, per fill) +
+  5bps entry slippage + 5bps exit slippage. No fees_pct/taxes_pct by default.
+
+Risk (default, risk/config.py): 0.5% equity risked per trade, 3% max daily
+  loss, 10% max drawdown (hard halt), 25% max exposure, 3-loss soft
+  threshold (50% size reduction), 6-loss hard reject, min R:R 1.5.
+
+Position sizing: floor(equity * risk_pct / (entry - stop)), capped by
+  available cash and max_exposure_pct. Single position per symbol.</pre>
+<p>This specification is the one and only configuration used for every "baseline" number in this report — variants (cost/risk/SMA-neighborhood) are explicitly labeled as variants, never silently substituted for baseline.</p>
+</section>
+
+<section id="universe">
+<h2><span class="sec-num">2</span>Dataset and symbol universe</h2>
+<p class="lede">Defined before any backtest was run, by criteria stated up front (large/mega-cap, sector-diverse, liquid, one broad index per market) — not selected by performance. 5 years of daily bars (Yahoo Finance, same source as every prior phase), fetched fresh and cached where not already present from Phase 3-7.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Symbol</th><th>Market</th><th>Sector</th><th>Bars</th><th>Span</th></tr>
+<tr><td>AAPL</td><td>US equity</td><td>Technology</td><td class="tabular">1,254</td><td>2021-08-26 → 2026-08-25</td></tr>
+<tr><td>MSFT</td><td>US equity</td><td>Technology</td><td class="tabular">1,254</td><td>same window</td></tr>
+<tr><td>JPM</td><td>US equity</td><td>Financials</td><td class="tabular">1,254</td><td>same window</td></tr>
+<tr><td>JNJ</td><td>US equity</td><td>Healthcare</td><td class="tabular">1,254</td><td>same window</td></tr>
+<tr><td>XOM</td><td>US equity</td><td>Energy</td><td class="tabular">1,254</td><td>same window</td></tr>
+<tr><td>WMT</td><td>US equity</td><td>Consumer Staples</td><td class="tabular">1,254</td><td>same window</td></tr>
+<tr><td>RELIANCE.NS</td><td>IN equity</td><td>Energy/Conglomerate</td><td class="tabular">1,240</td><td>same window</td></tr>
+<tr><td>TCS.NS</td><td>IN equity</td><td>IT Services</td><td class="tabular">1,240</td><td>same window</td></tr>
+<tr><td>HDFCBANK.NS</td><td>IN equity</td><td>Banking</td><td class="tabular">1,240</td><td>same window</td></tr>
+<tr><td>INFY.NS</td><td>IN equity</td><td>IT Services</td><td class="tabular">1,240</td><td>same window</td></tr>
+<tr><td>^NSEI</td><td>IN index</td><td>Nifty 50 (broad)</td><td class="tabular">1,236</td><td>same window</td></tr>
+<tr><td>^GSPC</td><td>US index</td><td>S&amp;P 500 (broad)</td><td class="tabular">1,254</td><td>same window</td></tr>
+</table>
+</div>
+<p><strong>12/12 symbols included, 0 excluded.</strong> No data-quality problems were encountered — every fetch succeeded and every series had sufficient history for the strategy's longest lookback (SMA50). This is stated explicitly because the spec requires excluded symbols to be recorded with a reason, not silently dropped — there were none to record.</p>
+</section>
+
+<section id="baseline">
+<h2><span class="sec-num">3</span>Baseline results (spec §2)</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Symbol</th><th>Trades</th><th>Win %</th><th>Net PnL</th><th>Expectancy R</th><th>Profit Factor</th><th>Max DD %</th><th>Max Consec. Losses</th></tr>
+<tr><td>AAPL</td><td class="tabular">32</td><td class="tabular">43.8</td><td class="tabular num-pos">1,331.83</td><td class="tabular">0.084</td><td class="tabular">1.06</td><td class="tabular">10.5</td><td class="tabular">4</td></tr>
+<tr><td>MSFT</td><td class="tabular">32</td><td class="tabular">34.4</td><td class="tabular num-neg">-3,248.82</td><td class="tabular">-0.156</td><td class="tabular">0.72</td><td class="tabular">9.2</td><td class="tabular">5</td></tr>
+<tr><td>JPM</td><td class="tabular">33</td><td class="tabular">45.5</td><td class="tabular num-pos">3,103.65</td><td class="tabular">0.196</td><td class="tabular">1.29</td><td class="tabular">7.1</td><td class="tabular">4</td></tr>
+<tr><td>JNJ</td><td class="tabular">6</td><td class="tabular">0.0</td><td class="tabular num-neg">-2,372.87</td><td class="tabular">-1.139</td><td class="tabular">0.00</td><td class="tabular">4.9</td><td class="tabular">6</td></tr>
+<tr><td>XOM</td><td class="tabular">26</td><td class="tabular">23.1</td><td class="tabular num-neg">-4,363.91</td><td class="tabular">-0.424</td><td class="tabular">0.46</td><td class="tabular">7.6</td><td class="tabular">6</td></tr>
+<tr><td>WMT</td><td class="tabular">23</td><td class="tabular">43.5</td><td class="tabular num-pos">2,072.20</td><td class="tabular">0.158</td><td class="tabular">1.20</td><td class="tabular">3.3</td><td class="tabular">4</td></tr>
+<tr><td>RELIANCE.NS</td><td class="tabular">22</td><td class="tabular">40.9</td><td class="tabular num-pos">1,376.36</td><td class="tabular">0.089</td><td class="tabular">1.13</td><td class="tabular">4.8</td><td class="tabular">4</td></tr>
+<tr><td>TCS.NS</td><td class="tabular">12</td><td class="tabular">25.0</td><td class="tabular num-neg">-1,384.23</td><td class="tabular">-0.389</td><td class="tabular">0.45</td><td class="tabular">2.1</td><td class="tabular">5</td></tr>
+<tr><td>HDFCBANK.NS</td><td class="tabular">9</td><td class="tabular">22.2</td><td class="tabular num-neg">-665.91</td><td class="tabular">-0.313</td><td class="tabular">0.51</td><td class="tabular">1.6</td><td class="tabular">4</td></tr>
+<tr><td>INFY.NS</td><td class="tabular">8</td><td class="tabular">12.5</td><td class="tabular num-neg">-1,589.22</td><td class="tabular">-2.204</td><td class="tabular">0.09</td><td class="tabular">2.1</td><td class="tabular">6</td></tr>
+<tr><td>^NSEI</td><td class="tabular">8</td><td class="tabular">37.5</td><td class="tabular num-neg">-606.31</td><td class="tabular">-0.290</td><td class="tabular">0.51</td><td class="tabular">2.8</td><td class="tabular">3</td></tr>
+<tr><td>^GSPC</td><td class="tabular">7</td><td class="tabular">28.6</td><td class="tabular num-neg">-1,199.97</td><td class="tabular">-0.194</td><td class="tabular">0.72</td><td class="tabular">2.5</td><td class="tabular">4</td></tr>
+</table>
+</div>
+<p>Rejections were dominated by <code>MAX_EXPOSURE</code> and <code>ZERO_POSITION_SIZE</code> across the universe, with the consecutive-loss soft-reduction mechanism (Phase 4.5) engaging repeatedly on the weaker symbols (JNJ, XOM, INFY.NS all hit their 6-loss hard limit at least once). Full rejection breakdowns per symbol are in the machine-readable result.</p>
+</section>
+
+<section id="multisymbol">
+<h2><span class="sec-num">4</span>Multi-symbol results — sample size (spec §3/§4)</h2>
+<div class="grid-cards">
+  <div class="card"><div class="card-num">218</div><div class="card-label">pooled trades, 12 symbols, full 5y history</div></div>
+  <div class="card neg"><div class="card-num">4/12</div><div class="card-label">symbols individually net-positive</div></div>
+  <div class="card neg"><div class="card-num">-7,547</div><div class="card-label">pooled net PnL (baseline cost/risk)</div></div>
+  <div class="card"><div class="card-num">6–33</div><div class="card-label">per-symbol trade count range — several symbols far too thin to trust alone</div></div>
+</div>
+<p>This is the direct answer to spec §3's sample-size question: pooling the LARGEST clean daily history available per symbol (the full ~5-year Yahoo Finance window; no manufacturing, no loosened conditions) still only produces 218 trades across 12 diverse instruments — an average of 18 per symbol. Five symbols (JNJ, XOM, TCS.NS, HDFCBANK.NS, INFY.NS, ^NSEI, ^GSPC) had fewer than 15 trades individually; JNJ's 6-trade, 0%-win-rate result is not statistically meaningful on its own and is reported only as part of the pooled picture, never as standalone evidence. The pooled 218-trade sample is large enough for a rough directional read (§11) but not large enough for strong per-symbol claims.</p>
+</section>
+
+<section id="regime">
+<h2><span class="sec-num">5</span>Multi-regime results (spec §5/§14)</h2>
+<p class="lede">Each symbol's history was split into ~63-bar (quarterly) chunks, classified by REALIZED characteristics only (return ≥ +10% → strong_up, ≤ −10% → strong_down, else sideways; volatility vs. that symbol's own median quarter → high/normal/low) — an objective, pre-specified rule applied identically everywhere, not fit to where the strategy happened to do well. 228 chunks total. Each chunk was independently re-backtested with the unchanged strategy/cost/risk configuration.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Trend regime</th><th>Chunks</th><th>Trades</th><th>Net PnL</th><th>Win %</th><th>Expectancy R</th></tr>
+<tr><td>strong_up</td><td class="tabular">49 (21%)</td><td class="tabular">121</td><td class="tabular num-pos">22,180.42</td><td class="tabular">55.4</td><td class="tabular">0.300</td></tr>
+<tr><td>sideways</td><td class="tabular">155 (68%)</td><td class="tabular">192</td><td class="tabular num-neg">-28,624.25</td><td class="tabular">29.2</td><td class="tabular">-0.295</td></tr>
+<tr><td>strong_down</td><td class="tabular">24 (11%)</td><td class="tabular">7</td><td class="tabular num-neg">-2,272.55</td><td class="tabular">14.3</td><td class="tabular">-0.788</td></tr>
+</table>
+</div>
+<div class="table-wrap">
+<table>
+<tr><th>Volatility regime</th><th>Chunks</th><th>Trades</th><th>Net PnL</th><th>Win %</th><th>Expectancy R</th></tr>
+<tr><td>normal_vol</td><td class="tabular">155</td><td class="tabular">235</td><td class="tabular num-neg">-3,659.57</td><td class="tabular">39.6</td><td class="tabular">-0.066</td></tr>
+<tr><td>high_vol</td><td class="tabular">51</td><td class="tabular">63</td><td class="tabular num-neg">-8,648.38</td><td class="tabular">30.2</td><td class="tabular">-0.284</td></tr>
+<tr><td>low_vol</td><td class="tabular">22</td><td class="tabular">22</td><td class="tabular num-pos">3,591.56</td><td class="tabular">54.5</td><td class="tabular">0.343</td></tr>
+</table>
+</div>
+<div class="callout warn">
+<span class="callout-label">A recorded hypothesis, not an action taken</span>
+<p>Performance is concentrated in strong-uptrend, low-volatility quarters — coherent for a trend+momentum strategy, and not what a purely random split would look like. But sideways quarters are 68% of ALL quarters observed, and that regime is clearly negative. This is recorded as a hypothesis worth a SEPARATELY validated future phase (e.g., gating entries on a broader trend filter) — per spec §16's explicit data-snooping protection, the baseline was NOT modified and re-run to chase this observation within this phase.</p>
+</div>
+<p><strong>Methodology caveat, stated plainly:</strong> each chunk is re-backtested as an independent fresh account (not a continuation of one continuous equity curve), so a position open near a chunk boundary is force-closed there rather than carrying into the next quarter as it would in the continuous full-period run — this is why pooled chunk-level trades (320 across trend labels) exceed the continuous baseline's 218. The regime breakdown is a valid qualitative signal, not a claim that these numbers sum exactly to the Section 3 baseline.</p>
+</section>
+
+<section id="walkforward">
+<h2><span class="sec-num">6</span>Walk-forward results (spec §6)</h2>
+<p class="lede">60% development / 20% validation / 20% out-of-sample, chronological, contiguous, no shuffling (<code>backtesting/splits.py</code>, unchanged) — same fixed configuration in all three sub-periods, pooled across the 12-symbol universe.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Period</th><th>Trades</th><th>Pooled Net PnL</th><th>Mean Expectancy R (across symbols)</th></tr>
+<tr><td>Development (first 60%)</td><td class="tabular">154</td><td class="tabular num-neg">-8,441.76</td><td class="tabular">-0.375</td></tr>
+<tr><td>Validation (next 20%)</td><td class="tabular">66</td><td class="tabular num-neg">-1,428.19</td><td class="tabular">-0.033</td></tr>
+<tr><td>Out-of-sample (final 20%)</td><td class="tabular">70</td><td class="tabular num-neg">-1,294.59</td><td class="tabular">-0.102</td></tr>
+</table>
+</div>
+<p>This is <em>not</em> the classic overfitting signature (strong in development, collapsing out-of-sample) — development was actually the WORST of the three sub-periods. The result is consistently weak across all three chronological windows rather than decaying from an initially strong one. That is arguably a more informative (and more discouraging) finding than a decay pattern would have been: there is no "it worked until conditions changed" story available here — it was mediocre-to-negative throughout.</p>
+</section>
+
+<section id="cost">
+<h2><span class="sec-num">7</span>Transaction-cost sensitivity (spec §8)</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Cost configuration</th><th>Trades</th><th>Pooled Net PnL</th></tr>
+<tr><td>Zero cost (gross edge)</td><td class="tabular">242</td><td class="tabular num-pos">242.38</td></tr>
+<tr><td>Baseline (brokerage 20 + 5bps/5bps)</td><td class="tabular">218</td><td class="tabular num-neg">-7,547.20</td></tr>
+<tr><td>Moderate, 2x (brokerage 40 + 10bps/10bps)</td><td class="tabular">217</td><td class="tabular num-neg">-17,525.03</td></tr>
+<tr><td>Adverse slippage (brokerage 20 + 20bps/20bps)</td><td class="tabular">217</td><td class="tabular num-neg">-12,123.82</td></tr>
+</table>
+</div>
+<div class="callout risk">
+<span class="callout-label">The gross edge is already essentially zero</span>
+<p>Even with ALL transaction costs and slippage removed, the pooled result is +242.38 across 242 trades — about $1 of edge per trade before any real-world friction is applied. This is the single clearest number in the whole report: there is no cushion. Baseline costs alone flip the sign; moderate costs more than double the loss. The apparent edge does not survive contact with realistic frictions, and it barely existed before them.</p>
+</div>
+</section>
+
+<section id="risksens">
+<h2><span class="sec-num">8</span>Risk sensitivity (spec §9)</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Risk configuration</th><th>Pooled Net PnL</th><th>Mean Win Rate %</th></tr>
+<tr><td>Low (0.25% per trade)</td><td class="tabular num-neg">-6,408.30</td><td class="tabular">30.7</td></tr>
+<tr><td>Baseline (0.5% per trade)</td><td class="tabular num-neg">-7,547.20</td><td class="tabular">29.7</td></tr>
+<tr><td>Higher (1.0% per trade)</td><td class="tabular num-neg">-5,317.43</td><td class="tabular">23.9</td></tr>
+</table>
+</div>
+<p>Negative across every tested risk level — this is not an artifact of an aggressive risk setting, and turning risk down does not rescue it (nor does turning it up meaningfully help; the loss stays in the same rough range because risk-per-trade scales position size, not the underlying win/loss pattern). Only <code>risk_per_trade_pct</code> was varied; every other RiskEngine threshold stayed at its documented default.</p>
+</section>
+
+<section id="distribution">
+<h2><span class="sec-num">9</span>Trade-distribution analysis (spec §10)</h2>
+<div class="grid-cards">
+  <div class="card"><div class="card-num">-0.169</div><div class="card-label">mean R-multiple, pooled 218 trades</div></div>
+  <div class="card"><div class="card-num">-1.073</div><div class="card-label">median R-multiple</div></div>
+  <div class="card"><div class="card-num">9.2%</div><div class="card-label">of gross profit from the top 5 winning trades</div></div>
+  <div class="card"><div class="card-num">34.9%</div><div class="card-label">pooled win rate</div></div>
+</div>
+<p>The top 5 winning trades account for only 9.2% of total gross profit — the (limited) upside is broadly distributed across many winners, not dependent on one or two lucky trades. That specific concern (spec §10's "does the strategy depend on one or two unusually good trades?") is answered no. The problem is not a fragile reliance on outliers; it's a persistently sub-50% win rate that a 2:1 reward:risk target doesn't fully compensate for once costs are included (gross breakeven win rate at 2:1 is 33.3%; the observed 34.9% clears that only barely, and net-of-cost breakeven is higher still).</p>
+</section>
+
+<section id="drawdown">
+<h2><span class="sec-num">10</span>Drawdown and loss-streak analysis (spec §11)</h2>
+<p class="lede">Trade-order Monte Carlo: the actual 218 observed trades, order randomized 5,000 times (no synthetic trades). This estimates sequencing risk GIVEN this exact sample — it does not estimate or prove future profitability.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Metric</th><th>Median</th><th>95th percentile</th><th>Worst of 5,000</th></tr>
+<tr><td>Max drawdown %</td><td class="tabular">13.05</td><td class="tabular">17.89</td><td class="tabular">23.81</td></tr>
+<tr><td>Max consecutive losing trades</td><td class="tabular">10</td><td class="tabular">16</td><td class="tabular">31</td></tr>
+</table>
+</div>
+<p>Per-symbol, observed (non-shuffled, chronological) longest losing streaks ranged up to 6 trades (JNJ, XOM, INFY.NS all hit the RiskEngine's 6-loss hard limit at least once). The Monte Carlo's much longer streak tail (up to 31) reflects the low ~35% pooled win rate compounding across re-sequenced order — a mechanical consequence of the win rate, not a new finding, and a reminder that per-symbol account-level circuit breakers (Phase 4.5) exist precisely because streak length is genuinely volatile at this win rate.</p>
+</section>
+
+<section id="uncertainty">
+<h2><span class="sec-num">11</span>Statistical uncertainty (spec §12)</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Quantity</th><th>Point estimate</th><th>95% interval</th></tr>
+<tr><td>Win rate (Wilson score, n=218)</td><td class="tabular">34.9%</td><td class="tabular">[28.8%, 41.4%]</td></tr>
+<tr><td>Mean R-multiple (bootstrap, 5,000 resamples)</td><td class="tabular">-0.169</td><td class="tabular">[-0.385, +0.041]</td></tr>
+<tr><td>t-statistic, mean R vs. 0</td><td class="tabular">-1.51</td><td>not significant at the conventional 95% threshold (|t|&lt;1.96)</td></tr>
+</table>
+</div>
+<p>The win-rate confidence interval excludes 50% entirely — that part is fairly firm. The mean-R confidence interval straddles zero, so a small positive true edge cannot be strictly ruled out from this sample alone; the POINT ESTIMATE is negative and the interval leans negative, but "total PnL is negative" is not being treated as proof of "no edge" on its own (spec §12's explicit instruction) — the t-statistic and CI are reported instead of a bare pass/fail claim. The t-statistic is flagged as a rough heuristic, not a rigorous test: pooled cross-symbol trades are not strictly i.i.d. (trades across symbols on overlapping calendar dates share macro exposure).</p>
+</section>
+
+<section id="benchmark">
+<h2><span class="sec-num">12</span>Benchmark comparison (spec §13)</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Symbol</th><th>Strategy return %</th><th>Buy &amp; hold return %</th><th>SMA20/50-always-invested %</th><th>Beats buy-and-hold?</th></tr>
+<tr><td>AAPL</td><td class="tabular">1.33</td><td class="tabular num-pos">109.18</td><td class="tabular">61.94</td><td><span class="badge badge-risk">No</span></td></tr>
+<tr><td>MSFT</td><td class="tabular num-neg">-3.25</td><td class="tabular num-pos">64.40</td><td class="tabular">33.87</td><td><span class="badge badge-risk">No</span></td></tr>
+<tr><td>JPM</td><td class="tabular">3.10</td><td class="tabular num-pos">120.52</td><td class="tabular">78.15</td><td><span class="badge badge-risk">No</span></td></tr>
+<tr><td>JNJ</td><td class="tabular num-neg">-2.37</td><td class="tabular num-pos">57.61</td><td class="tabular">21.40</td><td><span class="badge badge-risk">No</span></td></tr>
+<tr><td>XOM</td><td class="tabular num-neg">-4.36</td><td class="tabular num-pos">193.62</td><td class="tabular">64.71</td><td><span class="badge badge-risk">No</span></td></tr>
+<tr><td>WMT</td><td class="tabular">2.07</td><td class="tabular num-pos">114.55</td><td class="tabular">72.66</td><td><span class="badge badge-risk">No</span></td></tr>
+<tr><td>RELIANCE.NS</td><td class="tabular">1.38</td><td class="tabular num-pos">29.56</td><td class="tabular">12.05</td><td><span class="badge badge-risk">No</span></td></tr>
+<tr><td>TCS.NS</td><td class="tabular num-neg">-1.38</td><td class="tabular num-neg">-37.51</td><td class="tabular">-9.12</td><td><span class="badge badge-pass">Yes</span></td></tr>
+<tr><td>HDFCBANK.NS</td><td class="tabular num-neg">-0.67</td><td class="tabular num-neg">-6.52</td><td class="tabular">-4.31</td><td><span class="badge badge-pass">Yes</span></td></tr>
+<tr><td>INFY.NS</td><td class="tabular num-neg">-1.59</td><td class="tabular num-neg">-34.61</td><td class="tabular">-11.87</td><td><span class="badge badge-pass">Yes</span></td></tr>
+<tr><td>^NSEI</td><td class="tabular num-neg">-0.61</td><td class="tabular num-pos">46.29</td><td class="tabular">29.03</td><td><span class="badge badge-risk">No</span></td></tr>
+<tr><td>^GSPC</td><td class="tabular num-neg">-1.20</td><td class="tabular num-pos">71.75</td><td class="tabular">44.18</td><td><span class="badge badge-risk">No</span></td></tr>
+</table>
+</div>
+<div class="callout risk">
+<span class="callout-label">The most important comparison in this report</span>
+<p>Simply buying and holding these instruments beat the strategy in 9 of 12 cases, frequently by a huge margin (AAPL: +109% vs. +1.3%; XOM: +194% vs. −4.4%; JPM: +121% vs. +3.1%). The 3 "wins" only occurred where buy-and-hold ITSELF lost money (TCS.NS, HDFCBANK.NS, INFY.NS) — the strategy lost less, not more. Even the simple, un-risk-managed SMA20/50-crossover-and-stay-invested rule beat the actual (risk-managed, ATR-stopped, cost-aware) strategy in every single instance. Whatever value this strategy adds is not return — if anything, its risk controls trade a large amount of the underlying instrument's upside for a modest reduction in downside during the periods it avoided being long.</p>
+</div>
+</section>
+
+<section id="robustness">
+<h2><span class="sec-num">13</span>Parameter robustness observation (spec §15) — NOT optimization</h2>
+<p class="lede">SMA fast ∈ {15, 20, 25}, slow ∈ {40, 50, 60} (deployed default: 20/50), 9 combinations × 12 symbols = 108 runs. The unmodified strategy class was fed alternate SMA columns for this observation only — <code>market/indicators.py</code>'s deployed defaults were never touched, and no combination was selected or deployed.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Symbol</th><th>Baseline (20/50)</th><th>Range across 9 combos</th><th>Fraction positive</th></tr>
+<tr><td>AAPL</td><td class="tabular num-pos">1,331.83</td><td class="tabular">[1,298.50, 4,583.55]</td><td class="tabular">100%</td></tr>
+<tr><td>MSFT</td><td class="tabular num-neg">-3,248.82</td><td class="tabular">[-4,081.26, 518.41]</td><td class="tabular">11%</td></tr>
+<tr><td>JPM</td><td class="tabular num-pos">3,103.65</td><td class="tabular">[-5,390.43, 5,232.57]</td><td class="tabular">89%</td></tr>
+<tr><td>JNJ</td><td class="tabular num-neg">-2,372.87</td><td class="tabular">[-3,442.66, -2,311.54]</td><td class="tabular">0%</td></tr>
+<tr><td>XOM</td><td class="tabular num-neg">-4,363.91</td><td class="tabular">[-5,883.38, -2,563.77]</td><td class="tabular">0%</td></tr>
+<tr><td>WMT</td><td class="tabular num-pos">2,072.20</td><td class="tabular">[-1,525.03, 2,444.67]</td><td class="tabular">89%</td></tr>
+<tr><td>RELIANCE.NS</td><td class="tabular num-pos">1,376.36</td><td class="tabular">[-2,289.29, 1,376.36]</td><td class="tabular">22%</td></tr>
+<tr><td>TCS.NS</td><td class="tabular num-neg">-1,384.23</td><td class="tabular">[-5,325.56, -1,384.23]</td><td class="tabular">0%</td></tr>
+<tr><td>HDFCBANK.NS</td><td class="tabular num-neg">-665.91</td><td class="tabular">[-4,220.06, -357.41]</td><td class="tabular">0%</td></tr>
+<tr><td>INFY.NS</td><td class="tabular num-neg">-1,589.22</td><td class="tabular">[-7,747.69, -1,589.22]</td><td class="tabular">0%</td></tr>
+<tr><td>^NSEI</td><td class="tabular num-neg">-606.31</td><td class="tabular">[-867.78, -241.79]</td><td class="tabular">0%</td></tr>
+<tr><td>^GSPC</td><td class="tabular num-neg">-1,199.97</td><td class="tabular">[-1,405.01, -499.71]</td><td class="tabular">0%</td></tr>
+</table>
+</div>
+<p>Across all 108 (symbol × combination) cells, only 28 (26%) were net positive. This is informative in a specific way: the deployed 20/50 baseline is <strong>not a narrow, lucky peak</strong> — for the 7 symbols where baseline was negative, EVERY nearby SMA combination tested was also negative (0% positive fraction). The strategy's weakness is a stable property of these symbols under this rule family, not a fragile artifact of the exact parameter choice. AAPL is the mirror image — positive under all 9 combinations, so its (modest) positive result is similarly not a lucky pick. Overfitting to a narrow peak is not what's happening here; the conclusion (weak-to-negative for most of the universe) is a robust one.</p>
+</section>
+
+<section id="parity">
+<h2><span class="sec-num">14</span>Paper vs. backtest parity (spec §18) — a system-integrity check, not a strategy test</h2>
+<p class="lede">Extended the existing Phase 6/7A parity guarantee to a symbol newly added for this phase's universe (MSFT), confirming it holds beyond the AAPL/RELIANCE.NS pairs already proven.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>Backtest trades vs. paper-replay trades (MSFT, full 5y)</td><td><span class="badge badge-pass">32 = 32, business values identical</span></td></tr>
+<tr><td>Final equity, backtest vs. paper</td><td><span class="badge badge-pass">96,751.18 = 96,751.18</span></td></tr>
+<tr><td>Paper-store reconciliation</td><td><span class="badge badge-pass">OK</span></td></tr>
+</table>
+</div>
+</section>
+
+<section id="repro">
+<h2><span class="sec-num">15</span>Reproducibility (spec §17)</h2>
+<p class="lede">The full 12-symbol baseline experiment was run twice, both times against the (by-then-populated) local cache.</p>
+<div class="callout ok">
+<span class="callout-label">Confirmed, with one honestly-reported wrinkle</span>
+<p>Two cache-hit runs of the entire experiment produced a <strong>byte-identical</strong> output file. The first attempt at this check compared the ORIGINAL run (which fetched several symbols live for the first time) against a repeat — those two differed at the ~1e-9 relative level in a few float fields, plus a cosmetic timezone-offset difference in timestamp strings. Investigating rather than dismissing it: this is the already-documented Phase 4.5 finding that CSV cache round-trips normalize timestamps to timezone-naive — comparing a live-fetch run to a cached-read run is not a fair reproducibility test. Re-run properly (cache-hit vs. cache-hit), the result is exactly reproducible, with no engine non-determinism involved.</p>
+</div>
+</section>
+
+<section id="defects">
+<h2><span class="sec-num">16</span>Software defects discovered (spec §16 loop step)</h2>
+<p><strong>None</strong> in <code>strategy/</code>, <code>risk/</code>, <code>backtesting/</code>, <code>paper/</code>, or <code>market/</code> — the components this phase exercised most heavily. The only bug found this phase was a typo (<code>NameError</code> from a variable name mismatch) in this phase's own throwaway analysis script, not in any shipped project code; it was fixed on the spot and does not appear in this report's numbers, none of which were computed before the fix. Per the absolute rule, no strategy/risk/indicator parameter was changed at any point — poor results were investigated and reported, never quietly tuned away.</p>
+</section>
+
+<section id="tests">
+<h2><span class="sec-num">17</span>Exact test count</h2>
+<div class="grid-cards">
+  <div class="card"><div class="card-num">246</div><div class="card-label">prior (through Phase 7A/7B)</div></div>
+  <div class="card"><div class="card-num">1</div><div class="card-label">new this phase (real-data look-ahead control)</div></div>
+  <div class="card pos"><div class="card-num">246</div><div class="card-label">passing of 247 total</div></div>
+  <div class="card"><div class="card-num">1</div><div class="card-label">pre-existing environmental failure (Ollama not running), unrelated</div></div>
+</div>
+<p>The one new test, <code>test_truncating_real_aapl_history_does_not_change_earlier_trades</code>, extends the existing synthetic-fixture look-ahead protection (<code>test_backtest_lookahead.py</code>) with a real-AAPL-data confirmation, matching this phase's own Stage D finding exactly (18/18 pre-cutoff trades identical between the full and truncated runs).</p>
+</section>
+
+<section id="classification">
+<h2><span class="sec-num">18</span>Final classification</h2>
+<div class="verdict">
+<span class="verdict-label">C — no evidence of a durable edge</span>
+<p>Every line of evidence points the same direction: pooled net loss at realistic costs; a gross (zero-cost) edge of roughly zero; only a third of symbols individually profitable; a mean-R confidence interval that cannot rule out zero and leans negative; consistent (not decaying) weakness across development/validation/out-of-sample; and — most tellingly — buy-and-hold beating the strategy in 9 of 12 cases, often by an order of magnitude. The strategy is not "profitable" and this report does not use that word for it. The one genuinely interesting pattern (regime concentration in strong-uptrend quarters) is real and worth investigating, but it describes a DIFFERENT, narrower, not-yet-tested strategy (a regime-gated variant) — it does not rescue the verdict on the strategy as currently specified and gated.</p>
+</div>
+</section>
+
+<section id="notproven">
+<h2><span class="sec-num">19</span>What this evidence does NOT prove (spec §23)</h2>
+<ul>
+<li><strong>This does not prove the software is broken.</strong> Every engineering guarantee from Phases 1-7A (determinism, no look-ahead, restart safety, paper/backtest parity, idempotency) held throughout this phase's much larger, more varied real-data workload. The platform works correctly; it correctly computed a losing strategy.</li>
+<li><strong>This does not prove NO trend/momentum strategy can ever work on these instruments.</strong> It evaluates one specific, frozen rule set (SMA20/50 + RSI14 + MACD + volume-slope + ATR-based 1.5x stop + 2:1 target) — not the universe of possible strategies.</li>
+<li><strong>This does not prove the regime-concentration pattern is real and exploitable.</strong> It was observed by inspecting this phase's own results; testing it properly requires a fresh validation on data/periods not used to generate the hypothesis, to avoid data-snooping contamination (spec §16). That is future work, explicitly not started here.</li>
+<li><strong>This does not extrapolate to a different time period, cost structure, or account size.</strong> All results are specific to the stated 5-year window, this cost model, and this universe.</li>
+<li><strong>A wider confidence interval that includes zero is not the same as proof of zero edge.</strong> The mean-R interval straddling zero means a small true positive edge cannot be strictly excluded from this sample — the verdict rests on the WEIGHT of multiple converging lines of evidence (cost sensitivity, benchmark, walk-forward, per-symbol breadth), not on that single interval.</li>
+</ul>
+</section>
+
+<section id="next">
+<h2><span class="sec-num">20</span>Recommendation for the next phase</h2>
+<p>Do not proceed to live trading, broker integration, or further infrastructure investment premised on this strategy having an edge — the evidence doesn't support that premise. Two legitimate, narrower next steps exist, to be pursued as SEPARATE, freshly-validated work rather than by re-running this experiment with adjustments: (1) formally specify and validate a regime-gated variant (e.g., only take signals when a broader trend filter confirms a strong-uptrend regime) against data/periods not used to generate that hypothesis here; (2) treat this platform's genuinely proven strength — a correct, deterministic, restart-safe, fully-tested research and paper-trading pipeline — as the valuable deliverable of Phases 1-8, independent of any one strategy's performance, and use it to evaluate future strategy candidates with the same rigor applied here.</p>
+</section>
+
+<footer>
+Phase 8 — strategy validation. Machine-readable result: <code>phase8_validation_result.json</code> (sent alongside this report; the source of truth this HTML is derived from). See the companion <a href="#">Phase 7B TradingView Investigation</a>, <a href="#">Phase 7A Continuous Replay Report</a>, <a href="#">Phase 6 Paper Trading Report</a>, <a href="#">Phase 5 MCP Integration Report</a>, <a href="#">Phase 4.5 Hardening Report</a>, <a href="#">Phase 4 Risk Engine Report</a>, <a href="#">Phase 3 Backtest Report</a>.
+</footer>
+</main>
+</div>

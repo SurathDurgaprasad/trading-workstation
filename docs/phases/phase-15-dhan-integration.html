@@ -1,0 +1,365 @@
+<title>Phase 15 Dhan Integration</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+  :root {
+    --bg: #0b0f14; --surface: #121922; --surface-2: #17202b; --border: #253140; --border-soft: #1c2530;
+    --text: #dbe4ec; --text-muted: #8ca0b3; --text-dim: #5f7284;
+    --accent: #4fd1c5; --accent-soft: #1b3a38;
+    --warn: #e8b84b; --warn-soft: #3a3016;
+    --good: #34d399; --good-soft: #123326;
+    --bad: #f87171; --bad-soft: #3a1a1a;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15.5px; line-height: 1.65; margin: 0; padding: 0 0 80px 0; }
+  ::selection { background: var(--accent-soft); color: var(--accent); }
+  a { color: var(--accent); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 28px; }
+  header.hero { border-bottom: 1px solid var(--border); padding: 56px 0 36px 0; background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%); }
+  .eyebrow { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px 0; }
+  h1 { font-family: var(--mono); font-weight: 600; font-size: clamp(26px, 4vw, 38px); line-height: 1.18; margin: 0 0 14px 0; text-wrap: balance; letter-spacing: -0.01em; }
+  .hero-sub { color: var(--text-muted); font-size: 16.5px; max-width: 66ch; margin: 0 0 28px 0; }
+  .status-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill { font-family: var(--mono); font-size: 12.5px; font-weight: 500; letter-spacing: 0.02em; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
+  .pill-sim { color: var(--warn); background: var(--warn-soft); border-color: #4a3d1c; }
+  .pill-good { color: var(--good); background: var(--good-soft); border-color: #16472f; }
+  .pill-bad { color: var(--bad); background: var(--bad-soft); border-color: #5a2323; }
+  .pill-neutral { color: var(--text-muted); background: var(--surface-2); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  nav.toc { max-width: 960px; margin: 0 auto; padding: 22px 28px; display: flex; flex-wrap: wrap; gap: 4px 18px; font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--border-soft); }
+  nav.toc a { color: var(--text-dim); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
+  main { padding-top: 8px; }
+  section { padding: 44px 0; border-bottom: 1px solid var(--border-soft); }
+  section:last-of-type { border-bottom: none; }
+  .section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  .section-num { font-family: var(--mono); color: var(--text-dim); font-size: 14px; min-width: 26px; }
+  h2 { font-family: var(--mono); font-size: 19px; font-weight: 600; margin: 0; color: var(--text); letter-spacing: -0.01em; }
+  h3 { font-family: var(--sans); font-size: 15.5px; font-weight: 600; color: var(--accent); margin: 26px 0 10px 0; }
+  p { margin: 0 0 14px 0; color: var(--text); max-width: 74ch; }
+  p.muted { color: var(--text-muted); }
+  ul, ol { margin: 0 0 14px 0; padding-left: 22px; max-width: 72ch; }
+  li { margin-bottom: 6px; }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; background: var(--surface-2); border: 1px solid var(--border-soft); padding: 1px 6px; border-radius: 3px; color: #a8d8f0; }
+  .flow { font-family: var(--mono); font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; overflow-x: auto; color: var(--text-muted); line-height: 1.9; white-space: pre; margin: 16px 0; }
+  .flow .node { color: var(--accent); }
+  .flow .node-warn { color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 14px 0; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.mono, td code { font-family: var(--mono); }
+  td strong { color: var(--text); font-weight: 500; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin: 18px 0; }
+  .stat { background: var(--surface); padding: 16px 18px; }
+  .stat .n { font-family: var(--mono); font-size: 24px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; margin: 14px 0; }
+  .card h4 { font-family: var(--mono); font-size: 13.5px; color: var(--text); margin: 0 0 8px 0; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+  .badge { font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.03em; white-space: nowrap; }
+  .badge-verified { background: var(--good-soft); color: var(--good); }
+  .badge-fixed { background: var(--good-soft); color: var(--good); }
+  .badge-harness { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+  .badge-confirm { background: var(--bad-soft); color: var(--bad); }
+  .callout { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 14px 18px; border-radius: 0 6px 6px 0; margin: 18px 0; color: #f0dca3; font-size: 14px; }
+  .callout.good { border-color: var(--good); background: var(--good-soft); color: #a7e8ce; }
+  .callout.accent { border-color: var(--accent); background: var(--accent-soft); color: #bdf2ec; }
+  .callout p { margin: 0; color: inherit; }
+  .kv-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; font-size: 14px; margin: 14px 0; }
+  .kv-list dt { color: var(--text-dim); font-family: var(--mono); font-size: 12.5px; padding-top: 2px; }
+  .kv-list dd { margin: 0; color: var(--text); }
+  .finalgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin: 18px 0; }
+  .finalgrid .cell { background: var(--surface); padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .finalgrid .label { font-family: var(--mono); font-size: 13px; color: var(--text-muted); }
+  .finalgrid .value { font-family: var(--mono); font-size: 14px; font-weight: 700; }
+  .value.yes-good { color: var(--good); }
+  .value.no-bad { color: var(--bad); }
+  footer.final { max-width: 960px; margin: 0 auto; padding: 56px 28px 20px 28px; }
+  .final-banner { background: var(--surface); border: 1px solid var(--warn); border-radius: 8px; padding: 28px 30px; text-align: center; }
+  .final-banner .line { font-family: var(--mono); font-size: 16px; color: var(--warn); font-weight: 600; margin: 6px 0; }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="light"]) {
+      --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+      --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+      --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+    }
+    :root:not([data-theme="light"]) code, :root:not([data-theme="light"]) .mono { color: #0f5c66; }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+    --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+    --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+  }
+  :root[data-theme="light"] code, :root[data-theme="light"] .mono { color: #0f5c66; }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Phase 15 &mdash; Dhan Live Integration, Read-Only First</p>
+    <h1>Real Market Data, Zero Real Orders</h1>
+    <p class="hero-sub">A real DhanHQ v2 WebSocket feed now flows through the unchanged strategy, risk engine, and human-approval pipeline into paper execution. No Dhan account was connected this session &mdash; every packet, endpoint, and instrument mapping was verified against current official documentation and a real, publicly downloadable instrument file, but no live network call was ever made against api-feed.dhan.co.</p>
+    <div class="status-row">
+      <span class="pill pill-bad"><span class="dot"></span>REAL MARKET DATA: NOT TESTED LIVE</span>
+      <span class="pill pill-good"><span class="dot"></span>PAPER EXECUTION: YES</span>
+      <span class="pill pill-good"><span class="dot"></span>HUMAN APPROVAL: YES</span>
+      <span class="pill pill-neutral">519/520 TESTS PASSING</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#git">Git</a>
+  <a href="#verify">Dhan verification</a>
+  <a href="#apis">APIs used</a>
+  <a href="#auth">Auth</a>
+  <a href="#architecture">Architecture</a>
+  <a href="#symbols">Symbol mapping</a>
+  <a href="#candle">Tick/candle</a>
+  <a href="#freshness">Freshness</a>
+  <a href="#connection">Connection</a>
+  <a href="#account">Account read-only</a>
+  <a href="#dashboard">Dashboard/CLI/MCP</a>
+  <a href="#security">Security</a>
+  <a href="#tests">Tests</a>
+  <a href="#realtests">What was/wasn't tested live</a>
+  <a href="#performance">Performance</a>
+  <a href="#bugs">Bugs</a>
+  <a href="#files">Files</a>
+  <a href="#remaining">What remains</a>
+  <a href="#phase16">Phase 16</a>
+</nav>
+
+<main class="wrap">
+
+<section id="git">
+  <div class="section-head"><span class="section-num">01</span><h2>Git state</h2></div>
+  <div class="kv-list">
+    <dt>Local HEAD</dt><dd class="mono">1bfe90a</dd>
+    <dt>origin/main</dt><dd class="mono">1bfe90a (identical)</dd>
+    <dt>Branch</dt><dd class="mono">main (developed on phase-15-dhan-integration, fast-forward merged)</dd>
+    <dt>Working tree</dt><dd>Clean</dd>
+  </div>
+  <p class="muted">Fast-forward merge, no force-push, no history rewritten. 35 files changed, 2,977 insertions.</p>
+</section>
+
+<section id="verify">
+  <div class="section-head"><span class="section-num">02</span><h2>Dhan API verification (2026-09-01/02, current docs)</h2></div>
+  <p>Re-verified directly against <code>docs.dhanhq.co</code> and <code>dhanhq.co/docs/v2</code> (both JS-rendered SPAs, read via live browser rendering, not a static fetch) rather than trusting Phase 14's research notes. One real correction found:</p>
+  <div class="callout accent"><p><strong>Phase 14's notes described only the full 3-step OAuth "API key &amp; secret" flow.</strong> The current docs make clear that's the flow for <em>partner platforms</em> serving other users. For a single individual trader (this project's actual shape), Dhan offers a much simpler path: generate a 24-hour access token directly from <code>web.dhan.co</code>, or via a TOTP-based <code>POST /app/generateAccessToken</code> endpoint, plus a <code>/RenewToken</code> API to refresh an active token without regenerating. <code>live/dhan/config.py</code> is built around this simpler individual-trader flow.</p></div>
+  <div class="table-wrap"><table>
+    <tr><th>Item</th><th>Status</th></tr>
+    <tr><td>WebSocket URL, query-param auth, ping/pong (10s/40s), 5 connections/5000 instruments</td><td><span class="badge badge-verified">VERIFIED</span></td></tr>
+    <tr><td>Binary response header (8 bytes) + Ticker/Quote/OI/Full/Disconnect packet layouts, byte-exact</td><td><span class="badge badge-verified">VERIFIED</span></td></tr>
+    <tr><td>Feed Request/Response codes, Exchange Segment enum (Annexure)</td><td><span class="badge badge-verified">VERIFIED</span></td></tr>
+    <tr><td>Individual access-token generation + RenewToken + TOTP endpoint</td><td><span class="badge badge-verified">VERIFIED</span></td></tr>
+    <tr><td>Instrument master CSV (public, unauthenticated) &mdash; downloaded for real, RELIANCE.NS confirmed as NSE_EQ / Security ID 2885</td><td><span class="badge badge-verified">VERIFIED against real data</span></td></tr>
+    <tr><td>GET /fundlimit, /positions, /holdings response shapes (including Dhan's own "availabelBalance" typo)</td><td><span class="badge badge-verified">VERIFIED</span></td></tr>
+    <tr><td>MIS auto-squareoff exact timing; whether individual users need any separate algo-registration step</td><td><span class="badge badge-confirm">REQUIRES CONFIRMATION</span> &mdash; undocumented publicly, same gap Phase 14 found</td></tr>
+  </table></div>
+</section>
+
+<section id="apis">
+  <div class="section-head"><span class="section-num">03</span><h2>Exact APIs used</h2></div>
+  <ul>
+    <li><code>wss://api-feed.dhan.co?version=2&amp;token=...&amp;clientId=...&amp;authType=2</code> &mdash; live tick feed, Ticker mode only.</li>
+    <li><code>GET https://api.dhan.co/v2/fundlimit</code>, <code>/positions</code>, <code>/holdings</code> &mdash; read-only.</li>
+    <li><code>https://images.dhan.co/api-data/api-scrip-master.csv</code> &mdash; public, unauthenticated instrument master.</li>
+  </ul>
+  <p class="muted">No order-placement endpoint (<code>/orders</code>, <code>/super/orders</code>, <code>/forever</code>) is referenced anywhere in <code>live/dhan/</code> &mdash; enforced by a structural test, not just by not having written the code.</p>
+</section>
+
+<section id="auth">
+  <div class="section-head"><span class="section-num">04</span><h2>Authentication approach</h2></div>
+  <p><code>DHAN_CLIENT_ID</code> / <code>DHAN_ACCESS_TOKEN</code> read from the process environment only, at the moment a real call is about to be made &mdash; never at import time, never hardcoded. <code>.env.example</code> documents the variable names with empty values; the real <code>.env</code> pattern was already excluded by Phase 13's <code>.gitignore</code>. <code>DhanCredentials.__repr__</code> masks both fields so a stray <code>print()</code> or debugger session can't leak them.</p>
+</section>
+
+<section id="architecture">
+  <div class="section-head"><span class="section-num">05</span><h2>Market-data architecture</h2></div>
+  <div class="flow">Dhan WebSocket (binary tick)
+      |
+<span class="node">wire.parse_packet()</span>  -- exact byte layout, raises on anything malformed
+      |
+<span class="node">CandleBuilder</span>  -- tick -> OHLCVBar, epoch-floored buckets, documented semantics
+      |
+OHLCVBar (source=DHAN, status=LIVE)  -- UNCHANGED type
+      |
+<span class="node">Existing MarketDataSource protocol</span>  -- UNCHANGED
+      |
+Existing LiveSimPipeline -> Strategy -> RiskEngine -> Human Approval -> Paper Execution  -- ALL UNCHANGED</div>
+  <p>The only pipeline-level change: <code>NO_NEW_BAR</code> (see &sect;20). Strategy and RiskEngine were not touched at all.</p>
+</section>
+
+<section id="symbols">
+  <div class="section-head"><span class="section-num">06</span><h2>Symbol mapping</h2></div>
+  <p><code>live/dhan/instruments.py</code> never treats a Yahoo symbol as a broker identifier. <code>"RELIANCE.NS"</code> is parsed for its exchange suffix, then looked up in the real instrument master by <code>(exchange, segment, trading_symbol)</code> &mdash; disambiguating equity from futures/options sharing the same underlying name. Confirmed against the real downloaded file: <code>NSE,E,2885,EQUITY,...,RELIANCE,...</code> &mdash; Security ID <strong>2885</strong>.</p>
+</section>
+
+<section id="candle">
+  <div class="section-head"><span class="section-num">07</span><h2>Tick/candle handling</h2></div>
+  <p>Dhan streams ticks, not candles (confirmed &mdash; no candle-shaped feed mode exists in the documented Request Codes). <code>CandleBuilder</code>'s semantics are stated explicitly, not left implicit: bucket boundaries floored to the interval from the Unix epoch; open/high/low/close from the tick sequence; volume summed only from what each tick actually carries (Ticker packets carry none &mdash; <code>0.0</code> is used honestly rather than fabricated); a bar is only emitted the instant a tick from the <em>next</em> bucket arrives &mdash; no wall-clock timer forces one out early, and a silent bucket with no ticks produces no bar at all (never a manufactured flat candle).</p>
+</section>
+
+<section id="freshness">
+  <div class="section-head"><span class="section-num">08</span><h2>Freshness</h2></div>
+  <p>Reused <code>live.freshness.FreshnessPolicy</code> completely unchanged. Tested through the real pipeline: a live Dhan-sourced bar within threshold reaches <code>BAR_PROCESSED</code> normally; a bar timestamped far outside threshold reaches <code>STALE_SIGNAL_SUPPRESSED</code>; duplicate/out-of-order protection (also unchanged, living in <code>PaperTradingEngine</code>) applies identically to Dhan-sourced bars. No second freshness system was created.</p>
+</section>
+
+<section id="connection">
+  <div class="section-head"><span class="section-num">09</span><h2>Connection management &amp; disconnect behavior</h2></div>
+  <p>connect &rarr; authenticate (via the URL's own query params) &rarr; subscribe &rarr; receive &rarr; on disconnect, bounded exponential backoff (default base 1s, cap 30s) up to <code>max_reconnect_attempts</code> (default 5) &rarr; a terminal <code>FAILED</code> state, never an unbounded retry loop. Once <code>FAILED</code>, <code>next_bar()</code> raises <code>FeedDisconnectedError</code> on every subsequent call &mdash; proven with a test that forces every reconnect attempt to fail and confirms the connect function is called <em>exactly</em> <code>max_reconnect_attempts</code> times, not more.</p>
+  <p>No price is ever manufactured or reused stale during a disconnect: <code>CandleBuilder</code> simply stops receiving ticks; the pipeline's own freshness gate and the <code>FEED_DISCONNECTED</code> result together prevent new signals until a fresh, valid bar actually arrives.</p>
+</section>
+
+<section id="account">
+  <div class="section-head"><span class="section-num">10</span><h2>Read-only account integration &amp; reconciliation</h2></div>
+  <div class="callout accent"><p><strong>Real design deviation from Phase 14's proposal, and the reason:</strong> Phase 13's <code>BrokerAdapter</code> protocol returns paper-shaped types (<code>risk.account.Account</code>, <code>paper.models.Position</code>) because <code>MockBrokerAdapter</code> only ever delegated to <code>PaperTradingEngine</code>. A real Dhan funds/positions response doesn't map onto those types without either dropping real Dhan fields or fabricating paper-only ones (<code>daily_start_equity</code>, <code>consecutive_losses</code>) that have no broker equivalent &mdash; doing that would violate this phase's own instruction to <strong>never mix broker and paper account state</strong>. So <code>DhanAccountReader</code> does <em>not</em> implement <code>BrokerAdapter</code>; it has its own honestly-typed read methods (<code>DhanFundLimit</code>, <code>DhanPosition</code>, <code>DhanHolding</code>), rendered under their own "DHAN ACCOUNT" heading wherever they appear, never merged with "PAPER ACCOUNT."</p></div>
+  <p><strong>Reconciliation:</strong> the existing <code>reconcile_against_broker()</code> (Phase 13) was <em>not</em> extended to call <code>DhanAccountReader</code> this phase &mdash; it still expects a <code>BrokerAdapter</code>-shaped object, which <code>DhanAccountReader</code> deliberately isn't. Real Dhan-vs-paper reconciliation is explicitly listed under &sect;18 as unbuilt, not silently skipped.</p>
+</section>
+
+<section id="dashboard">
+  <div class="section-head"><span class="section-num">11</span><h2>Dashboard, CLI, and MCP changes</h2></div>
+  <h3>CLI</h3>
+  <p><code>paper-live --source dhan</code> (default remains <code>mock</code>) builds a real <code>DhanMarketDataSource</code> instead of the mock replay; everything downstream &mdash; approval, kill switch, paper execution &mdash; is the exact same code path. The banner now shows the real source/status labels and, for <code>--source dhan</code>, the current IST market session (PRE_OPEN/OPEN/CLOSED, explicitly noted as not holiday-aware). A missing-credentials run fails with one clear line, never a traceback.</p>
+  <h3>Dashboard</h3>
+  <p>A new MARKET FEED section reads <code>live.state_store</code>'s new <code>feed_status</code> table &mdash; the only way a <em>separate process</em> (the dashboard) can honestly know what the feed most recently delivered, since the live connection itself lives inside whatever process is running <code>paper-live</code>. Never fabricated: with no bar processed yet, it says so explicitly rather than defaulting to MOCK/SIMULATED.</p>
+  <h3>MCP</h3>
+  <p>Three new read-only tools: <code>get_live_market_status</code> (the same feed_status data), <code>get_dhan_account_funds</code>, <code>get_dhan_account_positions</code> &mdash; both real, read-only GETs, each failing with a clean <code>ToolError</code> if credentials aren't configured. Server total: <strong>23 tools</strong> (up from 20). No <code>place_order</code>/<code>modify_order</code>/<code>cancel_order</code> tool exists anywhere.</p>
+</section>
+
+<section id="security">
+  <div class="section-head"><span class="section-num">12</span><h2>Security</h2></div>
+  <ul>
+    <li>Credentials: environment variables only, read lazily, never logged, masked in <code>repr()</code>.</li>
+    <li><code>.gitignore</code> already excluded <code>.env*</code>/<code>*.key</code>/<code>*.pem</code> from Phase 13; found and fixed a real bug in it this phase &mdash; the <code>.env.*</code> pattern was also swallowing <code>.env.example</code> (which has no real values and should be tracked); added an explicit <code>!.env.example</code> negation.</li>
+    <li>A dedicated test scans every <em>git-tracked</em> file for a JWT-shaped pattern (Dhan access tokens are JWTs starting <code>eyJ</code>) before any push &mdash; a lightweight secret-scan gate, not just a promise.</li>
+    <li>No order-mutating method is reachable from anywhere: <code>DisabledDhanOrderExecutor</code>'s three methods (<code>place_order</code>/<code>modify_order</code>/<code>cancel_order</code>) raise <code>RealOrderPlacementDisabledError</code> unconditionally, and a structural test confirms no order-placement URL path string appears anywhere in <code>live/dhan/</code>'s source.</li>
+  </ul>
+</section>
+
+<section id="tests">
+  <div class="section-head"><span class="section-num">13</span><h2>Test count</h2></div>
+  <div class="stat-grid">
+    <div class="stat"><div class="n">519</div><div class="l">passing</div></div>
+    <div class="stat"><div class="n">1</div><div class="l">pre-existing failure (Ollama, unrelated &mdash; unchanged since Phase 12)</div></div>
+    <div class="stat"><div class="n">+107</div><div class="l">tests added this phase</div></div>
+    <div class="stat"><div class="n">10</div><div class="l">new Dhan-specific test files</div></div>
+  </div>
+  <p class="muted">Categories per spec &sect;23: unit (wire parsing, symbol mapping, tick/bar conversion, timestamps, freshness, connection states), integration (Dhan adapter &rarr; OHLCVBar &rarr; existing pipeline), failure (disconnect, malformed message, duplicate, out-of-order, stale, auth failure, reconnect exhaustion), security (credentials never in logs/DB/git, no real order method reachable), and full regression (all 412+ prior tests still pass).</p>
+</section>
+
+<section id="realtests">
+  <div class="section-head"><span class="section-num">14</span><h2>What was and wasn't tested with real Dhan connectivity</h2></div>
+  <div class="callout"><p><strong>No live Dhan connection was made this session.</strong> No Dhan account credentials were available or requested. Be precise about what "verified" means here:</p></div>
+  <div class="table-wrap"><table>
+    <tr><th>Tested against real Dhan</th><th>How</th></tr>
+    <tr><td>Wire format, endpoints, auth flow, response shapes</td><td>Read directly from current official docs (browser-rendered, dated 2026-09-01/02)</td></tr>
+    <tr><td>Instrument mapping (RELIANCE.NS &rarr; Security ID 2885)</td><td>Downloaded the real, public <code>api-scrip-master.csv</code> and looked it up &mdash; genuine data, no live connection needed</td></tr>
+    <tr><td>WebSocket connection, authentication, live tick delivery</td><td><strong>NOT tested</strong> &mdash; requires a real <code>DHAN_ACCESS_TOKEN</code>, not available this session</td></tr>
+    <tr><td>Real REST calls (funds/positions/holdings)</td><td><strong>NOT tested</strong> &mdash; same reason</td></tr>
+    <tr><td>Everything else (parsing, candle building, reconnect logic, pipeline wiring)</td><td>Tested against a fake, injected transport reproducing Dhan's exact documented wire format &mdash; proves the code is correct against the spec, not that the spec matches production behavior on the day</td></tr>
+  </table></div>
+  <p>Spec &sect;18/&sect;19/&sect;25 (a controlled real-market read-only test, then a real-feed-into-paper-execution run) are the natural next action once real credentials are provided &mdash; deliberately not attempted without them.</p>
+</section>
+
+<section id="performance">
+  <div class="section-head"><span class="section-num">15</span><h2>Performance</h2></div>
+  <div class="table-wrap"><table>
+    <tr><th>Hop</th><th>Measured</th><th>Note</th></tr>
+    <tr><td><code>wire.parse_packet()</code></td><td class="mono">1.19&micro;s</td><td>50,000 calls, synthetic packets</td></tr>
+    <tr><td><code>CandleBuilder.on_tick()</code></td><td class="mono">1.29&micro;s</td><td>20,000 calls</td></tr>
+    <tr><td>Instrument lookup (197k-row real CSV)</td><td class="mono">26.6ms</td><td>Not a hot-path call &mdash; once per symbol at subscribe/reconnect, not per-tick; no optimization needed</td></tr>
+    <tr><td><code>main.py</code> cold import</td><td class="mono">871ms</td><td>Pandas-dominated, already the cost of every other command; Dhan's own imports add negligibly</td></tr>
+    <tr><td>WebSocket connect time, first-tick latency, end-to-end tick-to-signal latency against a real feed</td><td class="mono">&mdash;</td><td><strong>Not measured</strong> &mdash; requires a real connection (&sect;14)</td></tr>
+  </table></div>
+</section>
+
+<section id="bugs">
+  <div class="section-head"><span class="section-num">16</span><h2>Bugs discovered &amp; fixed</h2></div>
+
+  <div class="card">
+    <h4>NO_NEW_BAR: a real interface gap, not hypothetical <span class="badge badge-fixed">production bug &mdash; fixed</span></h4>
+    <p class="muted"><code>MarketDataSource.next_bar()</code>'s original contract used bare <code>None</code> to mean "the feed has permanently ended" &mdash; correct for a finite scripted replay, wrong for a real WebSocket that's simply between candles. Wiring <code>DhanMarketDataSource</code> into the existing pipeline surfaced this immediately: a quiet moment would have been reported as <code>FEED_EXHAUSTED</code>, stopping the CLI as if the feed had died. Fixed with a new <code>NO_NEW_BAR</code> sentinel (<code>live/contracts.py</code>) and a corresponding <code>NO_NEW_DATA</code> pipeline result &mdash; <code>MockMarketDataSource</code>'s existing behavior is completely unchanged (it never returns the sentinel).</p>
+  </div>
+
+  <div class="card">
+    <h4>Own test used near-1970 epoch ticks against a 2026 pipeline clock <span class="badge badge-harness">test bug &mdash; not production</span></h4>
+    <p class="muted">Early integration tests used <code>epoch=60/121</code> as tick timestamps with a 1,000,000&times; freshness multiplier &mdash; not nearly generous enough for a 56-year gap (versus the ~5-year AAPL-data gap that multiplier was tuned for in Phase 13). Fixed by using realistic epoch timestamps near the fixture clock.</p>
+  </div>
+
+  <div class="card">
+    <h4>Own "duplicate bar" test misunderstood CandleBuilder's forward-only state <span class="badge badge-harness">test bug &mdash; not production</span></h4>
+    <p class="muted">A single <code>CandleBuilder</code> can never "resend" an already-closed bucket &mdash; its internal state only moves forward. Rewritten to simulate the <em>realistic</em> case this actually models: a reconnect, where a fresh <code>CandleBuilder</code> (new source instance, same engine) redelivers a bar for an already-processed bucket.</p>
+  </div>
+
+  <div class="card">
+    <h4><code>.gitignore</code>'s <code>.env.*</code> pattern also excluded <code>.env.example</code> <span class="badge badge-fixed">fixed before push</span></h4>
+    <p class="muted"><code>.env.example</code> (documents variable names, no real values, meant to be tracked) was being silently swallowed by the same pattern meant to exclude real secret files. Fixed with an explicit <code>!.env.example</code> negation, caught before the commit that would have hidden it.</p>
+  </div>
+
+  <div class="card">
+    <h4>Two hardcoded MCP tool-count assertions <span class="badge badge-fixed">fixed</span></h4>
+    <p class="muted">Same recurring pattern as Phase 13: <code>test_mcp_paper.py</code> and <code>test_mcp_server.py</code> each hardcode the total tool count as a security-relevant sanity check. Both correctly caught the 3 new tools and were updated (20 &rarr; 23) with the new count's derivation documented in a comment, matching the file's own established convention.</p>
+  </div>
+</section>
+
+<section id="files">
+  <div class="section-head"><span class="section-num">17</span><h2>Files changed</h2></div>
+  <h3>New</h3>
+  <ul>
+    <li><code>live/dhan/</code> &mdash; <code>wire.py</code>, <code>candle_builder.py</code>, <code>instruments.py</code>, <code>market_session.py</code>, <code>market_data_source.py</code>, <code>rest_client.py</code>, <code>broker_adapter.py</code>, <code>config.py</code></li>
+    <li><code>.env.example</code></li>
+    <li>10 new test files (<code>tests/test_dhan_*.py</code>, <code>tests/test_mcp_dhan_tools.py</code>)</li>
+  </ul>
+  <h3>Modified</h3>
+  <ul>
+    <li><code>live/contracts.py</code> &mdash; <code>NO_NEW_BAR</code> sentinel.</li>
+    <li><code>live/pipeline.py</code> &mdash; handles <code>NO_NEW_BAR</code>; writes <code>feed_status</code> on every real bar.</li>
+    <li><code>live/state_store.py</code> &mdash; new <code>feed_status</code> table.</li>
+    <li><code>live/workstation.py</code> &mdash; <code>get_feed_status()</code>.</li>
+    <li><code>market/data_provider.py</code> &mdash; <code>DataSource.DHAN</code> added (additive; <code>BROKER</code> stays reserved for any future non-Dhan broker).</li>
+    <li><code>main.py</code> &mdash; <code>paper-live --source dhan</code>, <code>--refresh-instrument-map</code>, market-session banner, controlled-error handling for Dhan-specific exceptions.</li>
+    <li><code>dashboard/app.py</code> &mdash; MARKET FEED section.</li>
+    <li><code>mcp_server/server.py</code> &mdash; 3 new tools (23 total).</li>
+    <li><code>requirements.txt</code> &mdash; declared <code>requests</code>, <code>websocket-client</code> (both already installed transitively).</li>
+    <li><code>.gitignore</code> &mdash; <code>data/dhan/</code>, <code>!.env.example</code>.</li>
+  </ul>
+</section>
+
+<section id="remaining">
+  <div class="section-head"><span class="section-num">18</span><h2>What remains before real order execution</h2></div>
+  <ul>
+    <li>A real Dhan account and credentials, and the read-only connectivity test this phase deliberately deferred (spec &sect;18/&sect;19/&sect;25).</li>
+    <li><code>DhanBrokerAdapter</code> with actual <code>place_order</code>/<code>modify_order</code>/<code>cancel_order</code> &mdash; does not exist; <code>DisabledDhanOrderExecutor</code> only rehearses the shape.</li>
+    <li>The order-placement translation layer identified in Phase 14 &sect;15: turning an approved <code>(Signal, RiskDecision.position_size)</code> into a real order request, and real fills back into <code>JournalEntry</code>/<code>Position</code>/<code>Trade</code>. Not attempted.</li>
+    <li>Real reconciliation: extending <code>reconcile_against_broker()</code> (or a Dhan-specific equivalent) to actually compare <code>DhanAccountReader</code>'s output against paper-expected state.</li>
+    <li>Partial-fill modeling in <code>paper/store.py</code> &mdash; a real gap Phase 14 already found, still unaddressed.</li>
+    <li>Static IP / deployment (Phase 14 &sect;8's VPS recommendation) &mdash; not set up.</li>
+    <li>Direct confirmation from Dhan on the retail algo-registration question &mdash; still <span class="badge badge-confirm">REQUIRES BROKER CONFIRMATION</span>.</li>
+    <li>The strategy remains classified <strong>C &mdash; unproven</strong>. Nothing in this phase touched it.</li>
+  </ul>
+</section>
+
+<section id="phase16">
+  <div class="section-head"><span class="section-num">19</span><h2>Phase 16 recommendation</h2></div>
+  <p>Before anything else: a real, credentialed, read-only connectivity test &mdash; connect the actual WebSocket, subscribe to one liquid symbol (RELIANCE), watch real ticks become real <code>OHLCVBar</code>s through the unchanged pipeline, and confirm <code>GET /fundlimit</code>/<code>/positions</code> return real account data. Only after that holds reliably over a real trading session does building the order-placement translation layer make sense &mdash; and even then, that stays paper-executed until a separate, deliberate decision to enable real orders, matching this phase's own closing instruction precisely.</p>
+</section>
+
+</main>
+
+<footer class="final">
+  <div class="finalgrid">
+    <div class="cell"><span class="label">REAL MARKET DATA</span><span class="value no-bad">NO (built + verified, not connected live)</span></div>
+    <div class="cell"><span class="label">REAL BROKER ACCOUNT</span><span class="value no-bad">NO</span></div>
+    <div class="cell"><span class="label">REAL ORDER PLACEMENT</span><span class="value no-bad">NO</span></div>
+    <div class="cell"><span class="label">PAPER EXECUTION</span><span class="value yes-good">YES</span></div>
+    <div class="cell"><span class="label">HUMAN APPROVAL</span><span class="value yes-good">YES</span></div>
+  </div>
+  <div class="final-banner">
+    <div class="line">No real Dhan account was connected.</div>
+    <div class="line">No real order was placed.</div>
+    <div class="line">The only execution target reachable from this codebase is PAPER.</div>
+  </div>
+</footer>

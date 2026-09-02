@@ -1,0 +1,462 @@
+<title>Phase 14 Broker Research</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+  :root {
+    --bg: #0b0f14;
+    --surface: #121922;
+    --surface-2: #17202b;
+    --border: #253140;
+    --border-soft: #1c2530;
+    --text: #dbe4ec;
+    --text-muted: #8ca0b3;
+    --text-dim: #5f7284;
+    --accent: #4fd1c5;
+    --accent-soft: #1b3a38;
+    --warn: #e8b84b;
+    --warn-soft: #3a3016;
+    --good: #34d399;
+    --good-soft: #123326;
+    --bad: #f87171;
+    --bad-soft: #3a1a1a;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15.5px; line-height: 1.65; margin: 0; padding: 0 0 80px 0; }
+  ::selection { background: var(--accent-soft); color: var(--accent); }
+  a { color: var(--accent); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 28px; }
+  header.hero { border-bottom: 1px solid var(--border); padding: 56px 0 36px 0; background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%); }
+  .eyebrow { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px 0; }
+  h1 { font-family: var(--mono); font-weight: 600; font-size: clamp(26px, 4vw, 38px); line-height: 1.18; margin: 0 0 14px 0; text-wrap: balance; letter-spacing: -0.01em; }
+  .hero-sub { color: var(--text-muted); font-size: 16.5px; max-width: 66ch; margin: 0 0 28px 0; }
+  .status-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill { font-family: var(--mono); font-size: 12.5px; font-weight: 500; letter-spacing: 0.02em; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
+  .pill-sim { color: var(--warn); background: var(--warn-soft); border-color: #4a3d1c; }
+  .pill-good { color: var(--good); background: var(--good-soft); border-color: #16472f; }
+  .pill-neutral { color: var(--text-muted); background: var(--surface-2); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  nav.toc { max-width: 960px; margin: 0 auto; padding: 22px 28px; display: flex; flex-wrap: wrap; gap: 4px 18px; font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--border-soft); }
+  nav.toc a { color: var(--text-dim); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
+  main { padding-top: 8px; }
+  section { padding: 44px 0; border-bottom: 1px solid var(--border-soft); }
+  section:last-of-type { border-bottom: none; }
+  .section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  .section-num { font-family: var(--mono); color: var(--text-dim); font-size: 14px; min-width: 26px; }
+  h2 { font-family: var(--mono); font-size: 19px; font-weight: 600; margin: 0; color: var(--text); letter-spacing: -0.01em; }
+  h3 { font-family: var(--sans); font-size: 15.5px; font-weight: 600; color: var(--accent); margin: 26px 0 10px 0; }
+  p { margin: 0 0 14px 0; color: var(--text); max-width: 74ch; }
+  p.muted { color: var(--text-muted); }
+  ul, ol { margin: 0 0 14px 0; padding-left: 22px; max-width: 72ch; }
+  li { margin-bottom: 6px; }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; background: var(--surface-2); border: 1px solid var(--border-soft); padding: 1px 6px; border-radius: 3px; color: #a8d8f0; }
+  .flow { font-family: var(--mono); font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; overflow-x: auto; color: var(--text-muted); line-height: 1.9; white-space: pre; margin: 16px 0; }
+  .flow .node { color: var(--accent); }
+  .flow .node-warn { color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 14px 0; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.mono, td code { font-family: var(--mono); }
+  td strong { color: var(--text); font-weight: 500; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin: 18px 0; }
+  .stat { background: var(--surface); padding: 16px 18px; }
+  .stat .n { font-family: var(--mono); font-size: 24px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; margin: 14px 0; }
+  .card h4 { font-family: var(--mono); font-size: 13.5px; color: var(--text); margin: 0 0 8px 0; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+  .badge { font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.03em; white-space: nowrap; }
+  .badge-verified { background: var(--good-soft); color: var(--good); }
+  .badge-inferred { background: var(--warn-soft); color: var(--warn); }
+  .badge-confirm { background: var(--bad-soft); color: var(--bad); }
+  .badge-rec { background: var(--accent-soft); color: var(--accent); }
+  .callout { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 14px 18px; border-radius: 0 6px 6px 0; margin: 18px 0; color: #f0dca3; font-size: 14px; }
+  .callout.good { border-color: var(--good); background: var(--good-soft); color: #a7e8ce; }
+  .callout.accent { border-color: var(--accent); background: var(--accent-soft); color: #bdf2ec; }
+  .callout p { margin: 0; color: inherit; }
+  .kv-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; font-size: 14px; margin: 14px 0; }
+  .kv-list dt { color: var(--text-dim); font-family: var(--mono); font-size: 12.5px; padding-top: 2px; }
+  .kv-list dd { margin: 0; color: var(--text); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-family: var(--mono); font-size: 11.5px; margin: 14px 0 22px 0; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  footer.final { max-width: 960px; margin: 0 auto; padding: 56px 28px 20px 28px; }
+  .final-banner { background: var(--surface); border: 1px solid var(--warn); border-radius: 8px; padding: 28px 30px; text-align: center; }
+  .final-banner .line { font-family: var(--mono); font-size: 16px; color: var(--warn); font-weight: 600; margin: 6px 0; }
+  .scorecard { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .scorecard th, .scorecard td { text-align: center; padding: 8px 6px; }
+  .scorecard th:first-child, .scorecard td:first-child { text-align: left; }
+  .scorecard td.win { color: var(--good); font-weight: 600; }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="light"]) {
+      --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+      --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+      --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+    }
+    :root:not([data-theme="light"]) code, :root:not([data-theme="light"]) .mono { color: #0f5c66; }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+    --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+    --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+  }
+  :root[data-theme="light"] code, :root[data-theme="light"] .mono { color: #0f5c66; }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Phase 14 &mdash; Research &amp; Design Only</p>
+    <h1>Real Market Data + Broker Integration Investigation</h1>
+    <p class="hero-sub">What it would actually take to replace <code>MockMarketDataSource &rarr; MockBrokerAdapter</code> with a real feed and a real broker &mdash; researched against current official documentation, not assumed. No broker was connected. No credentials were requested. No code was written.</p>
+    <div class="status-row">
+      <span class="pill pill-sim"><span class="dot"></span>NO LIVE CAPABILITY EXISTS</span>
+      <span class="pill pill-neutral">RESEARCH / DESIGN ONLY</span>
+      <span class="pill pill-good"><span class="dot"></span>412/413 TESTS STILL PASSING</span>
+      <span class="pill pill-neutral">GIT: b7dcfb0 on main, pushed</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#git">Git state</a>
+  <a href="#architecture">Architecture</a>
+  <a href="#interfaces">Reusable interfaces</a>
+  <a href="#brokers">Broker comparison</a>
+  <a href="#recommendation">Recommended broker</a>
+  <a href="#marketdata">Market data</a>
+  <a href="#regulatory">Regulatory</a>
+  <a href="#deployment">Deployment</a>
+  <a href="#security">Security</a>
+  <a href="#brokeradapter">BrokerAdapter</a>
+  <a href="#livemarketdata">LiveMarketDataSource</a>
+  <a href="#tickcandle">Tick/candle</a>
+  <a href="#failure">Failure model</a>
+  <a href="#cost">Cost</a>
+  <a href="#phase15">Phase 15 plan</a>
+  <a href="#blockers">Blockers</a>
+</nav>
+
+<main class="wrap">
+
+<div class="legend">
+  <span><span class="badge badge-verified">VERIFIED</span> directly stated in an official/primary source</span>
+  <span><span class="badge badge-inferred">INFERRED</span> reasonable deduction, not explicitly stated</span>
+  <span><span class="badge badge-confirm">REQUIRES CONFIRMATION</span> not publicly documented</span>
+</div>
+
+<section id="git">
+  <div class="section-head"><span class="section-num">01</span><h2>Git repository state</h2></div>
+  <p>No git repository existed anywhere in this project before this phase &mdash; not "unsynced," genuinely never initialized across 13 prior phases of work. This was a first init, not a reconciliation.</p>
+  <div class="kv-list">
+    <dt>Commit</dt><dd class="mono">b7dcfb0</dd>
+    <dt>Branch</dt><dd class="mono">main</dd>
+    <dt>Remote</dt><dd class="mono">origin &rarr; github.com/SurathDurgaprasad/trading-workstation.git</dd>
+    <dt>Status</dt><dd>Local and remote in sync, working tree clean</dd>
+  </div>
+  <p class="muted">Before the initial push, 3 test files were found to hardcode the operator's Windows account name into absolute file paths (harmless functionally, but unnecessary on a public repo) &mdash; fixed to use the existing portable <code>AAPL_CACHE_PATH</code> helper. Bulk cached market data, the vector store, and a personal reference PDF were excluded via a new <code>.gitignore</code>; none were ever committed.</p>
+</section>
+
+<section id="architecture">
+  <div class="section-head"><span class="section-num">02</span><h2>Current architecture &amp; target</h2></div>
+  <p>What exists today, end to end, is simulation-only:</p>
+  <div class="flow"><span class="node">MockMarketDataSource</span>
+      |
+<span class="node">Existing market pipeline</span> (indicators, freshness, strategy, RiskEngine &mdash; unchanged)
+      |
+<span class="node">Human approval</span> + second risk check (Phase 13)
+      |
+<span class="node">MockBrokerAdapter</span> &mdash; delegates to PaperTradingEngine</div>
+  <p>The target substitutes only the two edges:</p>
+  <div class="flow"><span class="node-warn">REAL MARKET DATA</span> (LiveMarketDataSource)
+      |
+Existing market pipeline (UNCHANGED)
+      |
+Existing strategy (UNCHANGED)
+      |
+Existing RiskEngine (UNCHANGED)
+      |
+Existing human approval (UNCHANGED)
+      |
+Existing second risk check (UNCHANGED)
+      |
+<span class="node-warn">REAL BROKER</span> (RealBrokerAdapter)</div>
+  <p class="muted">Everything between the two edges &mdash; strategy, RiskEngine, the approval state machine, the journal, reconciliation, the kill switch &mdash; was already built broker-agnostic in Phases 12&ndash;13, specifically so this substitution would not require touching them. This phase found one place where that promise doesn't quite hold yet (see &sect;15).</p>
+</section>
+
+<section id="interfaces">
+  <div class="section-head"><span class="section-num">03</span><h2>Existing reusable interfaces</h2></div>
+  <div class="table-wrap"><table>
+    <tr><th>Interface</th><th>Where</th><th>Reuse plan</th></tr>
+    <tr><td class="mono">OHLCVBar</td><td class="mono">market/data_provider.py</td><td>Unchanged. Already carries <code>source</code>/<code>status</code>/<code>received_at</code>/<code>source_timestamp</code> fields, added in Phase 12 specifically for this.</td></tr>
+    <tr><td class="mono">DataSource.BROKER</td><td class="mono">market/data_provider.py</td><td>Already exists, unused until now &mdash; a real feed sets it. Docstring already says "no broker adapter exists yet."</td></tr>
+    <tr><td class="mono">DataStatus.LIVE / DELAYED</td><td class="mono">market/data_provider.py</td><td>Already exist, reserved. Current code comment: "nothing in this codebase may set status=LIVE today" &mdash; still true after this phase.</td></tr>
+    <tr><td class="mono">MarketDataSource</td><td class="mono">live/contracts.py</td><td>The protocol a real feed implements. One gap found &mdash; see &sect;12.</td></tr>
+    <tr><td class="mono">FreshnessPolicy</td><td class="mono">live/freshness.py</td><td>Reused as-is; the default 2&times; multiplier will need retuning against real feed latency, per its own docstring.</td></tr>
+    <tr><td class="mono">BrokerAdapter (mock)</td><td class="mono">live/broker.py</td><td>Phase 13's protocol rehearses the shape but doesn't map cleanly onto a real broker &mdash; see &sect;11.</td></tr>
+    <tr><td class="mono">reconcile_against_broker()</td><td class="mono">live/broker_reconciliation.py</td><td>Reused as-is; matches by symbol/trade-content, never repairs &mdash; exactly the posture SEBI-facing brokers also expect.</td></tr>
+  </table></div>
+</section>
+
+<section id="brokers">
+  <div class="section-head"><span class="section-num">04</span><h2>Broker comparison</h2></div>
+  <p>Researched against each broker's own current developer documentation (not third-party summaries) on 2026-09-01.</p>
+
+  <h3>Dhan (DhanHQ)</h3>
+  <div class="kv-list">
+    <dt>Docs</dt><dd>Versioned, changelog-driven, live API explorer. <span class="badge badge-verified">VERIFIED</span> — the most thorough of the four.</dd>
+    <dt>Pricing</dt><dd>Trading API free for all account holders. Data API (feed + historical) ₹499+tax/month, waived if &ge;25 trades in the trailing 30 days.</dd>
+    <dt>WebSocket</dt><dd>5 connections/user, 5,000 instruments/connection.</dd>
+    <dt>Auth</dt><dd>API key+secret valid 12 months; access token 24h, auto-regenerable without a manual browser login.</dd>
+    <dt>Order model</dt><dd>Standard order types plus a <strong>Super Order</strong> API &mdash; entry + target + stop-loss + trailing-SL in one request.</dd>
+    <dt>SEBI compliance</dt><dd>Static IP mandatory for order endpoints; <code>algoId</code> already flows through order/trade responses &mdash; concrete evidence the compliance machinery is implemented, not just described.</dd>
+    <dt>Notable gap</dt><dd>MIS auto-squareoff timing and any retail algo-registration process are undocumented publicly. <span class="badge badge-confirm">REQUIRES CONFIRMATION</span></dd>
+  </div>
+
+  <h3>Zerodha (Kite Connect)</h3>
+  <div class="kv-list">
+    <dt>Docs</dt><dd>Clear, exact rate-limit numbers, actively maintained. <span class="badge badge-verified">VERIFIED</span></dd>
+    <dt>Pricing</dt><dd>Free "Personal" tier: order/portfolio management, but <strong>no market data at all</strong>. Paid "Connect" tier: &#8377;500/month/API key, bundles live WebSocket + historical data.</dd>
+    <dt>WebSocket</dt><dd>3 connections/API key, 3,000 instruments/connection.</dd>
+    <dt>Auth</dt><dd>Access token expires 6&nbsp;AM next day. <strong>No refresh token for retail apps</strong> &mdash; a fresh browser login is required daily.</dd>
+    <dt>Order model</dt><dd>Market/Limit/SL/SL-M, Cover Order, GTT (two-leg OCO). No Bracket Order.</dd>
+    <dt>SEBI compliance</dt><dd>The single most useful finding across all four: Zerodha's own developer forum states it <strong>"does not allow fully automated algo trading, requiring manual confirmation... to comply with regulatory guidelines"</strong> &mdash; i.e. one major broker has already built its retail product around exactly this project's human-approval design as a compliance strategy.</dd>
+    <dt>Notable cost</dt><dd>&#8377;500/month is a fixed cost regardless of how few trades this project places early on.</dd>
+  </div>
+
+  <h3>Upstox</h3>
+  <div class="kv-list">
+    <dt>Docs</dt><dd>Versioned (v2&rarr;v3 migration explicitly dated), a dated SEBI compliance circular with concrete deadlines. <span class="badge badge-verified">VERIFIED</span></dd>
+    <dt>Pricing</dt><dd>API and data both free. Flat &#8377;10 per order <em>executed via the API</em> (not manual/app trades). Cheapest at low volume.</dd>
+    <dt>WebSocket</dt><dd>2 connections/user (5 on a paid "Plus" tier); up to 5,000 keys in LTPC mode.</dd>
+    <dt>Auth</dt><dd>Access token expires daily at 3:30&nbsp;AM. <strong>No refresh token exists at all</strong> &mdash; full OAuth+2FA re-run required every day.</dd>
+    <dt>Order model</dt><dd>Market/Limit/SL/SL-M. No Bracket or Cover Order in the current schema.</dd>
+    <dt>SEBI compliance</dt><dd>The clearest regulatory statement found anywhere in this research: Upstox's own circular states its static-IP/Algo-App restrictions apply <strong>"regardless of whether orders are manual or automated."</strong> Directly and explicitly answers this project's central open question for one broker at least &mdash; see &sect;7.</dd>
+  </div>
+
+  <h3>Angel One (SmartAPI)</h3>
+  <div class="kv-list">
+    <dt>Docs</dt><dd>Comprehensive but a client-rendered SPA, and the published rate-limit table (9 orders/sec) visibly <strong>conflicts</strong> with newer forum announcements about a 10-orders/sec SEBI threshold. <span class="badge badge-inferred">INFERRED</span> that the reference docs simply lag the compliance rollout.</dd>
+    <dt>Pricing</dt><dd>API and data both free; only standard brokerage (~&#8377;20/order intraday) applies, same as manual trading.</dd>
+    <dt>WebSocket</dt><dd>3 connections/client code, 1,000 subscriptions/connection.</dd>
+    <dt>Auth</dt><dd>TOTP mandatory at login; JWT expires at midnight; a genuine refresh-token endpoint exists (the only one of the four with real refresh mechanics).</dd>
+    <dt>Order model</dt><dd>Market/Limit/SL/SL-M, plus Bracket (ROBO) orders.</dd>
+    <dt>Notable concern</dt><dd>Whether static-IP enforcement covers market-data/historical endpoints (not just order placement) rests on an unverified forum comment, not an official statement.</dd>
+  </div>
+
+  <h3>Scorecard</h3>
+  <div class="table-wrap"><table class="scorecard">
+    <tr><th>Dimension</th><th>Dhan</th><th>Zerodha</th><th>Upstox</th><th>Angel One</th></tr>
+    <tr><td>Documentation quality</td><td class="win">Best</td><td>Strong</td><td>Strong</td><td>Inconsistent</td></tr>
+    <tr><td>Cost at low volume</td><td>Low (waivable)</td><td>Fixed &#8377;500/mo</td><td class="win">Lowest</td><td>Low</td></tr>
+    <tr><td>Order+stop+target in one call</td><td class="win">Yes (Super Order)</td><td>No</td><td>No</td><td>Partial (BO)</td></tr>
+    <tr><td>Daily re-auth burden</td><td class="win">Auto (no browser)</td><td>Manual, no refresh</td><td>Manual, no refresh</td><td>Refresh token exists</td></tr>
+    <tr><td>Regulatory clarity on human-approval</td><td>Implicit (algoId)</td><td class="win">Strong (own policy)</td><td class="win">Explicit statement</td><td>Weak/inconsistent</td></tr>
+    <tr><td>SEBI compliance evidence in API itself</td><td class="win">algoId in responses</td><td>Forum-documented</td><td>Circular-documented</td><td>Forum-documented</td></tr>
+  </table></div>
+</section>
+
+<section id="recommendation">
+  <div class="section-head"><span class="section-num">05</span><h2>Recommended broker: Dhan</h2></div>
+  <p><strong>Dhan (DhanHQ) is the recommendation</strong>, on four specific grounds, not a coin flip:</p>
+  <ol>
+    <li><strong>The Super Order API maps almost exactly onto this project's own <code>Signal</code> model.</strong> A <code>Signal</code> already carries <code>stop_price</code> and <code>target_price</code> as one unit alongside the entry. Every other broker researched requires the adapter to place, track, and independently manage 2&ndash;3 separate linked orders (entry, stop, target) to replicate what Dhan's single Super Order call already models as one request. This is a real reduction in <code>RealBrokerAdapter</code> complexity, not a marketing point.</li>
+    <li><strong>Best-documented API of the four</strong>, by a clear margin &mdash; versioned, changelogged, with dated compliance notices tracking each SEBI deadline. Lower risk of building against stale or ambiguous documentation.</li>
+    <li><strong>Free trading API</strong> removes cost friction from the part of the system that matters most: order placement, modification, cancellation, and status. The optional ₹499/month data API can be deferred &mdash; this project can continue using its existing Yahoo-cache path for anything that isn't the final execution decision, exactly as recommended in &sect;6.</li>
+    <li><strong>Independent prior signal</strong>: this project's own <code>CostModel.india_nse_intraday_2026()</code> (Phase 3/4) already assumed Dhan-shaped brokerage costs, before this investigation began. Not decisive on its own, but consistent with everything found here.</li>
+  </ol>
+  <p>Why the others lose:</p>
+  <ul>
+    <li><strong>Zerodha</strong> has the single best regulatory-philosophy fit (their own product already requires manual confirmation) and is a completely reasonable second choice &mdash; but a fixed ₹500/month for data is a real recurring cost against a strategy that is still classified <strong>unproven</strong> and may execute very few real trades for a long time.</li>
+    <li><strong>Upstox</strong> gave the clearest regulatory answer of any broker researched and is the cheapest at low volume &mdash; a strong runner-up. It loses only on the order-model fit (no combined entry+stop+target call) and a slightly smaller default WebSocket allowance.</li>
+    <li><strong>Angel One</strong> is disqualified primarily on documentation trust: an internal inconsistency between its own published rate-limit table and its newer compliance announcements is exactly the kind of thing that causes a production bug discovered the hard way.</li>
+  </ul>
+  <div class="callout accent"><p><strong>This is a recommendation to design against, not an instruction to sign up.</strong> No Dhan account was created and no credentials were requested as part of this research.</p></div>
+</section>
+
+<section id="marketdata">
+  <div class="section-head"><span class="section-num">06</span><h2>Live market data</h2></div>
+  <p>NSE and BSE do not sell real-time data directly to individuals in any simple self-service form &mdash; both route real-time/live products through <strong>NSE Data &amp; Analytics</strong> / BSE's equivalent vendor channel, aimed at institutional and data-vendor clients. <span class="badge badge-verified">VERIFIED</span></p>
+  <p>Broker API WebSocket feeds (Dhan/Kite/Upstox/Angel One), by contrast, <strong>are genuinely real-time</strong> &mdash; brokers are exchange members with their own direct connectivity, and the same tick stream powering their own trading terminals is what the API exposes. Typical retail broker-API latency is tens of milliseconds, not colocation-grade but materially live. <span class="badge badge-verified">VERIFIED</span></p>
+  <div class="callout"><p><strong>Yahoo Finance must not be treated as live trading truth &mdash; confirmed, with a specific nuance.</strong> Yahoo's own help page lists NSE as "real-time," but independent reports and the unofficial <code>yfinance</code> library both document real-world delay of up to ~15 minutes for NSE-linked symbols &mdash; a direct contradiction between Yahoo's documentation and observed behavior. Separately, and regardless of that technical question: Yahoo's Terms of Service explicitly state its data is <strong>"for informational purposes only and is not intended for trading or investing purposes,"</strong> and prohibit redistribution/algorithmic exploitation without written permission. Building any live-decision path on Yahoo data would be a ToS violation independent of latency.</p></div>
+  <p>Third-party exchange-authorized vendors (TrueData, Global Datafeeds) offer genuinely exchange-direct real-time ticks, but at ₹1,400&ndash;2,800+/month and with a second vendor relationship/contract to manage &mdash; more expensive and more integration surface than simply using the execution broker's own feed.</p>
+  <table>
+    <tr><th>Source</th><th>Status</th><th>Cost</th><th>Verdict</th></tr>
+    <tr><td>NSE/BSE direct</td><td>Institutional/vendor-gated</td><td>Opaque, high</td><td>Not viable for a single user</td></tr>
+    <tr><td>Yahoo Finance</td><td>DELAYED (contested, up to ~15min)</td><td>Free</td><td>Historical/backtesting only &mdash; already how this project uses it</td></tr>
+    <tr><td>Broker API (e.g. Dhan)</td><td>LIVE (tens of ms)</td><td>Free&ndash;₹500/mo</td><td><strong>Recommended</strong> &mdash; same channel needed for execution anyway</td></tr>
+    <tr><td>3rd-party vendor (TrueData etc.)</td><td>LIVE, exchange-direct</td><td>₹1,400&ndash;2,800+/mo</td><td>Only worth it if data independence from the execution broker matters later</td></tr>
+  </table>
+  <p class="muted">Recommendation: keep Yahoo exactly where it is today (historical backfill, backtesting, non-time-critical reference), and introduce the chosen broker's own live feed as the single source of truth for anything touching a live 1m/5m/15m bar or an execution decision &mdash; no separate data purchase needed.</p>
+</section>
+
+<section id="regulatory">
+  <div class="section-head"><span class="section-num">07</span><h2>Regulatory requirements</h2></div>
+  <p>The governing rule is SEBI Circular <strong>SEBI/HO/MIRSD/MIRSD-PoD/P/CIR/2025/0000013</strong> (Feb 4, 2025), <em>"Safer participation of retail investors in Algorithmic trading,"</em> with a further circular (Sept 30, 2025) confirming full mandatory applicability to all brokers <strong>from April 1, 2026</strong> &mdash; already in force as of this report. <span class="badge badge-verified">VERIFIED</span>, read directly from SEBI's own circular text.</p>
+
+  <h3>The central question: does human-approval reduce the burden?</h3>
+  <div class="callout accent">
+    <p><strong>Best-supported answer: reduced burden, not zero, and not the same as full algo trading &mdash; but SEBI has not explicitly written this exemption down.</strong></p>
+  </div>
+  <p>SEBI's actual registration trigger is an <strong>order-per-second (OPS) rate threshold</strong>, not an automation/manual test. The circular never says "a human-approved system is exempt." What it does is register/tag/empanel algorithms that cross a rate threshold (commonly cited at 10 OPS, though the exact number appears only in exchange-issued implementation standards, not SEBI's own circular text). A system where a human clicks approve/reject on every individual order cannot realistically sustain anywhere near that rate &mdash; so the heavy machinery (exchange algo registration, Algo-ID, empanelment, Research Analyst registration for opaque logic) is very unlikely to be triggered, as a structural consequence of the design, not a named exemption.</p>
+  <p><strong>What is NOT reduced</strong>: baseline API-channel controls apply regardless of automation status. Per SEBI's own text and confirmed by Zerodha's own compliance documentation ("applies to all Kite Connect users who place orders via the API, regardless of order frequency"), and stated even more explicitly by Upstox ("regardless of whether orders are manual or automated"): <strong>static IP whitelisting, a unique non-shared API key, OAuth-based authentication, and mandatory 2FA are required for any order placed via API at all</strong> &mdash; including a single, human-approved order per day.</p>
+  <ul>
+    <li><strong>Static IP</strong>: mandatory for order-placement endpoints specifically (not always for read-only/market-data endpoints, per most brokers). <span class="badge badge-verified">VERIFIED</span></li>
+    <li><strong>Algo-ID / order tagging</strong>: required once a strategy crosses the OPS threshold; below it, brokers still track a generic identifier for audit purposes. <span class="badge badge-verified">VERIFIED</span> (mechanism) / <span class="badge badge-confirm">exact below-threshold tagging behavior varies by broker documentation quality</span></li>
+    <li><strong>2FA + OAuth</strong>: mandated by SEBI directly on brokers, for API access generally. <span class="badge badge-verified">VERIFIED</span></li>
+    <li><strong>Audit trail</strong>: SEBI places this obligation on the <strong>broker</strong>, not the individual retail trader. <span class="badge badge-verified">VERIFIED</span></li>
+    <li><strong>Broker approval gate</strong>: no separate "algo-enabled" approval step was found required below the OPS threshold &mdash; typically just a static-IP field in the broker's developer dashboard. <span class="badge badge-verified">VERIFIED</span> (for Dhan/Zerodha/Upstox)</li>
+    <li><strong>Enforcement</strong>: documented consequences target brokers (e.g. barred from onboarding new algo-API clients), not individual retail users directly. <span class="badge badge-inferred">INFERRED</span> &mdash; no SEBI enforcement action against an individual retail API user was found in this research.</li>
+    <li><strong>NSE vs. BSE</strong>: both operate under the identical SEBI circular; no evidence of a materially different posture. <span class="badge badge-inferred">INFERRED</span></li>
+  </ul>
+  <p class="muted">This should still be confirmed directly with whichever broker's compliance team before any real order is ever placed &mdash; brokers, as the parties actually liable to SEBI, may apply internal policy stricter than the letter of the circular. Nothing here should be read as legal advice.</p>
+</section>
+
+<section id="deployment">
+  <div class="section-head"><span class="section-num">08</span><h2>Deployment</h2></div>
+  <p>The mandatory static-IP requirement (&sect;7) is the deciding factor here, not machine reliability in the abstract. Most Indian residential ISPs (Jio, Airtel, ACT) assign <strong>dynamic</strong> IPs by default; a static IP add-on costs roughly ₹100&ndash;1,000/month depending on ISP and is not always straightforward to obtain on a pure residential plan &mdash; it commonly requires a "business" tier. <span class="badge badge-inferred">INFERRED from ISP pricing pages, current as of 2026</span></p>
+  <p>A small Mumbai-region VPS, by contrast, comes with a static IP as a standard part of the service, typically for <strong>₹300&ndash;700/month</strong> for a specification more than sufficient for this single-process workstation (it currently runs comfortably on a laptop). <span class="badge badge-inferred">INFERRED from current commodity VPS pricing pages</span></p>
+  <table>
+    <tr><th>Option</th><th>Static IP</th><th>Sleep/restart risk</th><th>Cost</th></tr>
+    <tr><td>Home Windows machine + ISP static-IP add-on</td><td>Possible, ISP-dependent</td><td>High &mdash; sleep/reboot/power-outage breaks the feed</td><td>₹100&ndash;1,000/mo add-on</td></tr>
+    <tr><td>Small Mumbai VPS</td><td>Included</td><td>Low &mdash; runs 24/7 independent of the operator's machine</td><td>₹300&ndash;700/mo</td></tr>
+  </table>
+  <p><strong>Recommendation: a single small VPS, not the home machine.</strong> This is not the distributed/Kubernetes infrastructure the spec explicitly warned against &mdash; it's the same single Python process this project already runs locally, moved to a machine that satisfies the one hard external constraint (a stable, whitelistable IP) more simply than fighting a residential ISP for one. The operator still reaches the CLI/dashboard remotely (SSH, or the dashboard's existing web UI bound beyond localhost) to approve or reject signals &mdash; the human-approval step doesn't move, only where the process runs.</p>
+</section>
+
+<section id="security">
+  <div class="section-head"><span class="section-num">09</span><h2>Security model</h2></div>
+  <p>No real credentials exist anywhere in this project today, and none were created during this research. For when they eventually do:</p>
+  <ul>
+    <li><strong>Never in source, never in git.</strong> The <code>.gitignore</code> added this phase already excludes <code>.env</code>/<code>*.key</code>/<code>*.pem</code> patterns on principle, before any secret exists.</li>
+    <li><strong>Local encrypted storage, not plaintext.</strong> This machine already has <code>pywin32</code> installed (a transitive dependency), which provides direct access to Windows DPAPI (<code>CryptProtectData</code>/<code>CryptUnprotectData</code>) &mdash; OS-native, tied to the logged-in user, zero new dependency. The standard cross-platform <code>keyring</code> package is the alternative if the eventual deployment target isn't Windows (e.g. the VPS from &sect;8, which would more likely be Linux).</li>
+    <li><strong>Refresh/rotation.</strong> Every broker researched forces daily token expiry regardless of design choice (&sect;4) &mdash; rotation is not optional to build, it's a daily operational fact for all four brokers.</li>
+    <li><strong>Dashboard access.</strong> The current dashboard (Phase 13) binds to <code>127.0.0.1</code> by default with no authentication &mdash; correct for local-only use. If it ever needs to be reachable from off-machine (e.g. approving from a phone while the process runs on a VPS), it needs actual authentication added before that exposure &mdash; not built yet, and not needed until real execution is in scope.</li>
+    <li><strong>Revocation.</strong> Every broker's developer dashboard supports revoking an API key/app registration directly &mdash; the standard "burn it and reissue" path if a credential is ever suspected compromised.</li>
+  </ul>
+</section>
+
+<section id="brokeradapter">
+  <div class="section-head"><span class="section-num">10</span><h2>BrokerAdapter contract</h2></div>
+  <p>Phase 13's <code>MockBrokerAdapter</code> (<code>live/broker.py</code>) rehearsed a six-method shape that delegates entirely to <code>PaperTradingEngine</code>. Mapped against what a real broker actually needs, based on this phase's research:</p>
+  <div class="table-wrap"><table>
+    <tr><th>Target method</th><th>Status</th><th>Note</th></tr>
+    <tr><td class="mono">authenticate()</td><td><span class="badge badge-confirm">missing</span></td><td>Every broker researched needs this and none of them work the same way &mdash; OAuth+2FA (Dhan/Upstox/Zerodha) vs. TOTP-in-login-body (Angel One), daily expiry with (Angel One) or without (the other three) a refresh token.</td></tr>
+    <tr><td class="mono">get_account()</td><td><span class="badge badge-confirm">missing</span></td><td>Distinct from funds &mdash; broker-side identity/status.</td></tr>
+    <tr><td class="mono">get_positions()</td><td><span class="badge badge-verified">exists</span></td><td>Reuses <code>Position</code> as-is.</td></tr>
+    <tr><td class="mono">get_funds()</td><td><span class="badge badge-verified">exists</span></td><td>Reuses <code>Account</code> as-is.</td></tr>
+    <tr><td class="mono">get_quote()</td><td><span class="badge badge-confirm">missing</span></td><td>Never needed by the paper engine; a real pre-trade price check needs it.</td></tr>
+    <tr><td class="mono">place_order()</td><td><span class="badge badge-inferred">shape mismatch</span></td><td>The mock's <code>submit_order(signal)</code> takes a domain <code>Signal</code> and re-derives everything internally. A real broker has no concept of <code>Signal</code> &mdash; it needs raw parameters (symbol, side, quantity, order type, price, product type, validity). This is the one real interface gap &mdash; see &sect;15.</td></tr>
+    <tr><td class="mono">modify_order()</td><td><span class="badge badge-confirm">missing</span></td><td>Not needed by paper trading (which never modifies a resting order); every real broker supports it.</td></tr>
+    <tr><td class="mono">cancel_order()</td><td><span class="badge badge-inferred">exists, disabled</span></td><td>Currently raises <code>NotImplementedError</code> &mdash; honest about a real Phase 6 gap (<code>PaperOrder</code> has no CANCELLED state). Every broker researched supports real cancellation.</td></tr>
+    <tr><td class="mono">get_order_status()</td><td><span class="badge badge-verified">exists</span></td><td>Currently returns a <code>JournalOutcome</code> value; a real adapter needs to translate each broker's own status vocabulary into that same shape.</td></tr>
+    <tr><td class="mono">get_fills()</td><td><span class="badge badge-verified">exists</span></td><td>Reuses <code>Trade</code> as-is.</td></tr>
+    <tr><td class="mono">reconcile()</td><td><span class="badge badge-inferred">exists, not a method</span></td><td><code>reconcile_against_broker()</code> is a free function today, not a <code>BrokerAdapter</code> method &mdash; trivial to wrap.</td></tr>
+  </table></div>
+  <p class="muted">Net: the interface maps cleanly for read paths (positions, funds, fills, status, reconciliation). It does <strong>not</strong> map cleanly for order placement without new translation logic in between &mdash; that gap is real and is the actual Phase 15 work, not a rename exercise.</p>
+</section>
+
+<section id="livemarketdata">
+  <div class="section-head"><span class="section-num">11</span><h2>LiveMarketDataSource contract</h2></div>
+  <p>Fits the existing <code>MarketDataSource</code> protocol (<code>live/contracts.py</code>) without modification to the protocol's method names. Reuses <code>OHLCVBar</code>, <code>DataSource.BROKER</code>, <code>DataStatus.LIVE</code>, and <code>FreshnessPolicy</code> exactly as they already exist &mdash; all four were built in Phase 12 specifically reserved for this moment, and none needed to change.</p>
+  <p>One real gap, found by reading the protocol against how a live feed actually behaves: <code>next_bar() -&gt; MarketBarEvent | None</code> currently uses <code>None</code> to mean <em>"the feed has cleanly ended, permanently"</em> &mdash; correct for a scripted mock replaying a finite file, meaningless for a live feed that just hasn't completed the next candle yet. The simplest fix that touches nothing else: a real implementation blocks internally (with a timeout) until a bar completes, rather than the protocol growing a third return state. This works cleanly with the existing CLI's tight polling loop and costs nothing architecturally, since a human is already expected to be present for the approval step anyway.</p>
+</section>
+
+<section id="tickcandle">
+  <div class="section-head"><span class="section-num">12</span><h2>Tick vs. candle</h2></div>
+  <p>Every broker researched streams <strong>ticks</strong>, not pre-built candles &mdash; confirmed directly: Dhan and Upstox both explicitly deliver binary/protobuf tick packets over WebSocket; none of the four offer a "give me a live 1-minute candle" streaming primitive. Building 1m/5m/15m bars from a live feed requires local aggregation.</p>
+  <div class="flow">Tick (price, volume, exchange timestamp)
+      |
+<span class="node">CandleBuilder</span>  (NEW component &mdash; nothing in this codebase does tick aggregation today)
+      |
+OHLCVBar  (source=BROKER, status=LIVE &mdash; UNCHANGED type)
+      |
+Existing pipeline (UNCHANGED)</div>
+  <p><code>CandleBuilder</code> is genuinely new: open = first tick in the window, high/low = running extremes, close = last tick, volume = summed tick volume, bucketed by the broker's own exchange timestamp (not local receipt time, to avoid skew). It sits entirely inside <code>LiveMarketDataSource</code>, behind the existing protocol &mdash; nothing above it changes. This is exactly the "do not create a second market-data processing system" instruction, honored: one <code>OHLCVBar</code> type, one indicator pipeline, one place ticks get turned into bars.</p>
+</section>
+
+<section id="failure">
+  <div class="section-head"><span class="section-num">13</span><h2>Failure &amp; recovery model</h2></div>
+  <p>The fail-closed philosophy already built in Phases 12&ndash;13 (never repair automatically, always reconcile, halt rather than guess) extends directly &mdash; this section is mostly "apply the existing posture," not new design.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Scenario</th><th>Response</th></tr>
+    <tr><td>Feed disconnect</td><td>Already handled &mdash; <code>FeedDisconnectedError</code>, fail-closed. Unchanged.</td></tr>
+    <tr><td>Stale market data</td><td>Already handled &mdash; <code>FreshnessPolicy</code> suppresses new signal generation only. Retune the multiplier against real feed latency.</td></tr>
+    <tr><td>Broker disconnect</td><td>New: read-only calls (status/positions) may retry with backoff; <code>place_order()</code> never retries blindly.</td></tr>
+    <tr><td>Order timeout / accepted-but-response-lost</td><td>Never resubmit. Query <code>get_order_status()</code>/<code>get_fills()</code> using the broker's own order ID first &mdash; a timeout may mean the order landed and only the response was lost.</td></tr>
+    <tr><td>Order rejected</td><td>Terminal, mirrors existing <code>RISK_REJECTED</code> handling. No retry.</td></tr>
+    <tr><td>Unknown order state</td><td>Fail closed, flag for manual intervention. Never assume either outcome.</td></tr>
+    <tr><td>Partial fill</td><td><strong>Genuine gap</strong>: the paper engine assumes full fills only. Modeling partial fills needs a <code>paper/store.py</code> schema extension before real broker support &mdash; not attempted this phase.</td></tr>
+    <tr><td>Duplicate order</td><td>Prevented client-side via <code>Signal.stable_id()</code> as an order tag where the broker supports one; reconciliation catches anything that slips through.</td></tr>
+    <tr><td>Local restart</td><td>Already solid &mdash; <code>LiveStateStore</code> persistence + <code>_restore_pending_approvals()</code>. Extends without change.</td></tr>
+    <tr><td>Broker restart/outage</td><td>Treat as a kill-switch-like halt until <code>reconcile_against_broker()</code> reports clean.</td></tr>
+    <tr><td>Position/funds mismatch</td><td>Already handled &mdash; <code>reconcile_against_broker()</code> reports, never repairs. Manual intervention required, matching the existing posture exactly.</td></tr>
+  </table></div>
+</section>
+
+<section id="cost">
+  <div class="section-head"><span class="section-num">14</span><h2>Cost analysis (single user)</h2></div>
+  <h3>Infrastructure/data</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Item</th><th>Estimate</th><th>Confidence</th></tr>
+    <tr><td>Dhan trading API</td><td>Free</td><td class="badge badge-verified">VERIFIED</td></tr>
+    <tr><td>Dhan data API (if not waived by trade volume)</td><td>₹499+tax/month</td><td class="badge badge-verified">VERIFIED</td></tr>
+    <tr><td>Small Mumbai VPS with static IP</td><td>₹300&ndash;700/month</td><td class="badge badge-inferred">INFERRED</td></tr>
+    <tr><td><strong>Total infra/data</strong></td><td><strong>~₹300&ndash;1,200/month</strong></td><td>&mdash;</td></tr>
+  </table></div>
+  <h3>Trading costs (per intraday equity round-trip, current published rates)</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Charge</th><th>Rate</th></tr>
+    <tr><td>STT (sell side, intraday)</td><td>0.025% of sell value</td></tr>
+    <tr><td>Exchange transaction charge</td><td>~0.00307% of turnover, both sides</td></tr>
+    <tr><td>Stamp duty (buy side)</td><td>0.003% of buy turnover</td></tr>
+    <tr><td>SEBI turnover fee</td><td>0.0001% of turnover</td></tr>
+    <tr><td>Dhan API execution fee (if using API order placement)</td><td>Free (bundled in the free trading API)</td></tr>
+    <tr><td>GST</td><td>18% on brokerage + exchange charges (not on STT/stamp duty)</td></tr>
+  </table></div>
+  <p class="muted">Rates from NSE's own published fee schedule, cross-referenced against multiple broker fee pages. <span class="badge badge-inferred">INFERRED / current as of 2026</span> &mdash; these are statutory/exchange rates and change independent of broker choice; they apply identically to paper P&amp;L accounting already in <code>CostModel</code> and to any eventual real execution.</p>
+</section>
+
+<section id="phase15">
+  <div class="section-head"><span class="section-num">15</span><h2>Phase 15 implementation plan (not started)</h2></div>
+  <p>In order, each step keeping the core untouched:</p>
+  <ol>
+    <li>Build <code>CandleBuilder</code> (&sect;12) as an isolated, independently-testable unit &mdash; pure tick-in, bar-out, no broker dependency, testable entirely with synthetic ticks.</li>
+    <li>Build <code>DhanMarketDataSource</code> implementing <code>MarketDataSource</code>, using <code>CandleBuilder</code> internally, against a <strong>sandbox/paper</strong> Dhan connection first if one exists (REQUIRES BROKER CONFIRMATION whether Dhan offers one).</li>
+    <li>Build the order-placement translation layer identified in &sect;10/&sect;15 &mdash; the piece that turns an approved <code>(Signal, RiskDecision.position_size)</code> pair into a Dhan Super Order request, and turns Dhan's own order/trade responses back into the existing <code>JournalEntry</code>/<code>Position</code>/<code>Trade</code> shapes. This is the one genuinely new piece of business logic in the whole plan.</li>
+    <li>Build <code>DhanBrokerAdapter</code> completing the contract in &sect;10, including real <code>cancel_order()</code>/<code>modify_order()</code>.</li>
+    <li>Extend <code>reconcile_against_broker()</code>'s existing test suite against Dhan's actual response shapes.</li>
+    <li>Run the entire existing test suite (412+ tests) unchanged against the new adapters in isolation &mdash; if strategy/RiskEngine/approval tests need to change to accommodate a real broker, that itself is a signal the "substitution at the edges" promise broke somewhere.</li>
+    <li>Only then: a sandboxed, human-approved, paper-executed dry run against real live data with a real (but not yet order-placing) broker connection &mdash; observe the approval workflow under real timing pressure before any conversation about real orders.</li>
+  </ol>
+</section>
+
+<section id="blockers">
+  <div class="section-head"><span class="section-num">16</span><h2>Blockers</h2></div>
+  <h3>Before first broker connection (read-only)</h3>
+  <ul>
+    <li>A Dhan account and API key/secret (not created this phase).</li>
+    <li>A static, whitelistable IP &mdash; per &sect;8, a small VPS is the practical path.</li>
+    <li><code>CandleBuilder</code> + <code>DhanMarketDataSource</code> built and tested (&sect;15 steps 1&ndash;2) &mdash; does not exist yet.</li>
+  </ul>
+  <h3>Before first real-money order</h3>
+  <ul>
+    <li>Everything above, plus the order-placement translation layer and <code>DhanBrokerAdapter</code> (&sect;15 steps 3&ndash;4) &mdash; does not exist yet.</li>
+    <li>Partial-fill modeling in <code>paper/store.py</code> (&sect;13) &mdash; a real gap, not addressed this phase.</li>
+    <li>Direct confirmation from Dhan's compliance/API team on the retail algo-registration question (&sect;4) &mdash; still <span class="badge badge-confirm">REQUIRES BROKER CONFIRMATION</span>.</li>
+    <li>A credential-storage implementation (&sect;9) &mdash; DPAPI or <code>keyring</code>, not built.</li>
+    <li>The strategy itself is still classified <strong>C &mdash; unproven</strong>. Nothing in this phase changes that, and nothing in Phase 15 should be read as license to start trying.</li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="final">
+  <div class="final-banner">
+    <div class="line">This phase produced research and design only.</div>
+    <div class="line">No broker was connected. No credentials exist. No order can be placed.</div>
+    <div class="line">The strategy remains unproven.</div>
+  </div>
+</footer>

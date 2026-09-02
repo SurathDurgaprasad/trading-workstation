@@ -1,0 +1,384 @@
+<title>Phase 11 Volume Confirmation</title>
+<style>
+:root{
+  --bg:#eef1f5; --surface:#ffffff; --surface-2:#e3e7ee; --border:#c7ccd6;
+  --ink:#171a21; --ink-dim:#565d6d; --ink-faint:#848b99;
+  --accent:#a4711f; --accent-ink:#5f4113; --accent-soft:#f3e3c8;
+  --ok:#2f7a4f; --ok-soft:#dcefe1;
+  --risk:#b5402f; --risk-soft:#f7ddd7;
+  --warn:#9d7a1f; --warn-soft:#f2e6c4;
+  --dead:#6b7180; --dead-soft:#e6e8ec;
+  --code-bg:#1b1e27; --code-ink:#dfe3ee;
+  --shadow: 0 1px 2px rgba(23,26,33,0.06), 0 6px 20px -8px rgba(23,26,33,0.18);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12141b; --surface:#191c25; --surface-2:#20242f; --border:#333947;
+    --ink:#e9ebf1; --ink-dim:#aab0bf; --ink-faint:#7a8192;
+    --accent:#e0ac53; --accent-ink:#e0ac53; --accent-soft:#3c2f18;
+    --ok:#7bc79a; --ok-soft:#173327;
+    --risk:#e58b7c; --risk-soft:#3a1f1c;
+    --warn:#e0c257; --warn-soft:#3a3216;
+    --dead:#9298a6; --dead-soft:#262a34;
+    --code-bg:#0e1016; --code-ink:#dbe0ec;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 30px -10px rgba(0,0,0,0.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12141b; --surface:#191c25; --surface-2:#20242f; --border:#333947;
+  --ink:#e9ebf1; --ink-dim:#aab0bf; --ink-faint:#7a8192;
+  --accent:#e0ac53; --accent-ink:#e0ac53; --accent-soft:#3c2f18;
+  --ok:#7bc79a; --ok-soft:#173327;
+  --risk:#e58b7c; --risk-soft:#3a1f1c;
+  --warn:#e0c257; --warn-soft:#3a3216;
+  --dead:#9298a6; --dead-soft:#262a34;
+  --code-bg:#0e1016; --code-ink:#dbe0ec;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 30px -10px rgba(0,0,0,0.5);
+}
+*{box-sizing:border-box;}
+body{ margin:0; background:var(--bg); color:var(--ink); font-family:"IBM Plex Sans", -apple-system, "Segoe UI", sans-serif; line-height:1.6; font-size:16px; }
+@media (prefers-reduced-motion: reduce){ *{animation-duration:0.001ms !important; transition-duration:0.001ms !important;} }
+a{ color:var(--accent-ink); }
+.layout{ display:grid; grid-template-columns: 260px minmax(0,1fr); max-width:1380px; margin:0 auto; }
+@media (max-width: 900px){ .layout{ grid-template-columns: 1fr; } nav.toc{ position:static; height:auto; border-right:none; border-bottom:1px solid var(--border); } }
+nav.toc{ position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto; padding:28px 18px 40px 24px; border-right:1px solid var(--border); font-size:11.5px; }
+nav.toc .toc-kicker{ font-family:"IBM Plex Mono", monospace; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-faint); font-size:11px; margin-bottom:14px; }
+nav.toc ol{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+nav.toc a{ display:block; color:var(--ink-dim); text-decoration:none; padding:4px 8px; border-radius:5px; }
+nav.toc a:hover{ background:var(--surface-2); color:var(--ink); }
+nav.toc .num{ font-family:"IBM Plex Mono", monospace; color:var(--accent-ink); margin-right:6px; }
+main{ padding:44px 48px 100px; min-width:0; }
+@media (max-width: 640px){ main{ padding:28px 18px 80px; } }
+header.masthead{ border-bottom:1px solid var(--border); padding-bottom:28px; margin-bottom:40px; }
+header.masthead .kicker{ font-family:"IBM Plex Mono", monospace; font-size:12px; letter-spacing:0.14em; text-transform:uppercase; color:var(--risk); margin-bottom:10px; }
+header.masthead h1{ font-size:1.95rem; margin:0 0 10px; text-wrap:balance; letter-spacing:-0.01em; }
+header.masthead p.dek{ color:var(--ink-dim); max-width:76ch; margin:0 0 18px; font-size:1.02rem; }
+.meta-row{ display:flex; flex-wrap:wrap; gap:10px; font-family:"IBM Plex Mono", monospace; font-size:12px; color:var(--ink-faint); }
+.meta-row span{ border:1px solid var(--border); border-radius:999px; padding:4px 10px; background:var(--surface); }
+section{ margin-bottom:56px; scroll-margin-top:20px; }
+section h2{ font-size:1.42rem; display:flex; align-items:baseline; gap:10px; margin:0 0 6px; text-wrap:balance; }
+section h2 .sec-num{ font-family:"IBM Plex Mono", monospace; color:var(--accent-ink); font-size:1rem; border:1px solid var(--accent); border-radius:6px; padding:1px 8px; background:var(--accent-soft); }
+section > .lede{ color:var(--ink-dim); max-width:80ch; margin:0 0 20px; }
+section h3{ font-size:1.0rem; margin:24px 0 10px; }
+p{ max-width:80ch; } ul,ol{ max-width:80ch; }
+.callout{ background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:8px; padding:16px 20px; margin:18px 0; box-shadow:var(--shadow); }
+.callout.ok{ border-left-color:var(--ok); }
+.callout.risk{ border-left-color:var(--risk); }
+.callout.warn{ border-left-color:var(--warn); }
+.callout .callout-label{ font-family:"IBM Plex Mono", monospace; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--accent-ink); margin-bottom:6px; display:block; }
+.callout.ok .callout-label{ color:var(--ok); }
+.callout.risk .callout-label{ color:var(--risk); }
+.callout.warn .callout-label{ color:var(--warn); }
+.callout p:last-child{ margin-bottom:0; }
+.table-wrap{ overflow-x:auto; margin:16px 0; border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow); }
+table{ border-collapse:collapse; width:100%; min-width:480px; background:var(--surface); font-size:0.82rem; }
+th, td{ text-align:left; padding:6px 9px; border-bottom:1px solid var(--border); vertical-align:top; }
+th{ font-family:"IBM Plex Mono", monospace; font-size:9.5px; letter-spacing:0.03em; text-transform:uppercase; color:var(--ink-faint); background:var(--surface-2); white-space:nowrap; }
+tr:last-child td{ border-bottom:none; }
+td code, p code, li code{ font-family:"IBM Plex Mono", monospace; background:var(--surface-2); border:1px solid var(--border); border-radius:4px; padding:1px 5px; font-size:0.87em; }
+.tabular{ font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono", monospace; }
+.num-neg{ color:var(--risk); } .num-pos{ color:var(--ok); }
+.badge{ display:inline-block; font-family:"IBM Plex Mono", monospace; font-size:11px; font-weight:600; padding:2px 9px; border-radius:999px; white-space:nowrap; }
+.badge-pass{ background:var(--ok-soft); color:var(--ok); }
+.badge-warn{ background:var(--warn-soft); color:var(--warn); }
+.badge-risk{ background:var(--risk-soft); color:var(--risk); }
+pre{ background:var(--code-bg); color:var(--code-ink); border-radius:10px; padding:16px 18px; overflow-x:auto; font-family:"IBM Plex Mono", monospace; font-size:0.74rem; line-height:1.55; box-shadow:var(--shadow); margin:16px 0; }
+.grid-cards{ display:grid; grid-template-columns:repeat(auto-fit, minmax(150px,1fr)); gap:12px; margin:18px 0; }
+.card{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 16px; box-shadow:var(--shadow); }
+.card .card-num{ font-family:"IBM Plex Mono", monospace; font-size:1.2rem; color:var(--accent-ink); font-variant-numeric:tabular-nums; }
+.card.pos .card-num{ color: var(--ok); }
+.card.neg .card-num{ color: var(--risk); }
+.card .card-label{ color:var(--ink-dim); font-size:0.76rem; margin-top:4px; }
+footer{ color:var(--ink-faint); font-size:12px; font-family:"IBM Plex Mono", monospace; border-top:1px solid var(--border); padding-top:20px; margin-top:60px; }
+.verdict{ background:var(--risk-soft); border:1px solid var(--risk); border-radius:10px; padding:20px 24px; margin:20px 0; }
+.verdict .verdict-label{ font-family:"IBM Plex Mono", monospace; font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--risk); display:block; margin-bottom:8px; }
+.verdict p{ max-width:none; margin:0 0 10px; font-size:1.0rem; }
+.verdict p:last-child{ margin-bottom:0; }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<div class="layout">
+<nav class="toc">
+  <div class="toc-kicker">Contents</div>
+  <ol>
+    <li><a href="#verdict"><span class="num">—</span>Verdict</a></li>
+    <li><a href="#reproduction"><span class="num">1</span>Phase 10 reproduction</a></li>
+    <li><a href="#definition"><span class="num">2</span>volume_ratio definition</a></li>
+    <li><a href="#candidates"><span class="num">3</span>Candidate rules</a></li>
+    <li><a href="#rationale"><span class="num">4</span>Rationale</a></li>
+    <li><a href="#implementation"><span class="num">5</span>Causal implementation</a></li>
+    <li><a href="#fullperiod"><span class="num">6</span>Full-period results</a></li>
+    <li><a href="#persymbol"><span class="num">7</span>Per-symbol results</a></li>
+    <li><a href="#cost"><span class="num">8</span>Cost sensitivity</a></li>
+    <li><a href="#benchmark"><span class="num">9</span>Benchmark comparison</a></li>
+    <li><a href="#standalone"><span class="num">10</span>Standalone predictive value</a></li>
+    <li><a href="#incremental"><span class="num">11</span>Incremental value</a></li>
+    <li><a href="#walkforward"><span class="num">12</span>Walk-forward</a></li>
+    <li><a href="#oos"><span class="num">13</span>Out-of-sample</a></li>
+    <li><a href="#uncertainty"><span class="num">14</span>Statistical uncertainty</a></li>
+    <li><a href="#economic"><span class="num">15</span>Economic significance</a></li>
+    <li><a href="#leakage"><span class="num">16</span>Leakage tests</a></li>
+    <li><a href="#parity"><span class="num">17</span>Paper/backtest parity</a></li>
+    <li><a href="#repro"><span class="num">18</span>Reproducibility</a></li>
+    <li><a href="#changes"><span class="num">19</span>Software changes</a></li>
+    <li><a href="#tests"><span class="num">20</span>Test count</a></li>
+    <li><a href="#classification"><span class="num">21</span>Final classification</a></li>
+    <li><a href="#notproven"><span class="num">22</span>What this does NOT prove</a></li>
+    <li><a href="#next"><span class="num">23</span>Recommendation for Phase 12</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="masthead">
+  <div class="kicker">Volume signal confirmation study — Phase 11</div>
+  <h1>The falsification succeeded: volume_ratio does not confirm</h1>
+  <p class="dek">A dedicated attempt to confirm or falsify Phase 10's single B-classified feature (<code>volume_ratio</code>) as a real, causal, cost-surviving trading signal — exactly 3 pre-registered candidates, standalone and as a filter over the frozen <code>TrendMomentumBaseline</code>. One candidate showed a real-looking pooled out-of-sample improvement; per-symbol inspection showed it was concentrated in 2-3 symbols' large swings, not a broad effect, and failed the cross-symbol consistency bar. H0 stands: no candidate is confirmed.</p>
+  <div class="meta-row">
+    <span>3 candidates × 2 forms (standalone + filtered) = 6 tested</span>
+    <span>0 changes to strategy/baseline.py, risk/, paper/, backtesting/</span>
+    <span>288/289 tests passing (1 pre-existing, unrelated)</span>
+    <span>Reproducibility: byte-identical</span>
+    <span>Classification: C (5 of 6), B (1 of 6, insufficient sample)</span>
+  </div>
+</header>
+
+<section id="verdict">
+<div class="verdict">
+  <span class="verdict-label">Bottom line</span>
+  <p><strong>H0 not rejected.</strong> <code>volume_ratio</code> does not contain enough stable, cross-symbol-consistent, cost-surviving predictive information to support a confirmed trading rule — neither standalone nor as a filter over the frozen strategy. Every full-period pooled net PnL remains negative at baseline cost. The two "high-volume" filtered candidates (A and its extreme-volume cousin C) showed a genuinely positive pooled out-of-sample number (+$1,462 and +$1,264 respectively, vs. control's −$1,295) — but per-symbol inspection shows this was driven almost entirely by large swings in 2-3 symbols (AAPL and XOM alone account for more than the entire pooled improvement), with only 5-6 of 12 symbols actually positive or beating control in that window. That fails the cross-symbol consistency bar this study set for itself before looking at any result.</p>
+  <p>The one candidate with a small-sample OOS number too extreme to trust at face value (filtered low-volume, +0.87R on 5 OOS trades) is classified B — inconclusive due to insufficient sample, exactly the outcome spec's own methodology anticipates for a thin cut, not upgraded because the sign happened to be positive.</p>
+</div>
+</section>
+
+<section id="reproduction">
+<h2><span class="sec-num">1</span>Phase 10 result reproduction</h2>
+<p class="lede">Read directly from the actual saved files, not from memory, per this phase's explicit instruction.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Item</th><th>Value (from <code>phase10_validation_result.json</code> / <code>research/alpha_features.py</code>)</th></tr>
+<tr><td>Feature source</td><td><code>market.indicators.compute_volume_ratio_series</code> — reused as-is in <code>indicator_series["volume_ratio"]</code>, never recomputed by Phase 10 or this phase</td></tr>
+<tr><td>Pooled OOS Spearman ρ, h=5</td><td>+0.04439, p=0.01584, n=2,954</td></tr>
+<tr><td>Pooled dev/val/OOS sign</td><td>+0.0111 (p=0.30) / +0.0229 (p=0.21) / +0.0444 (p=0.016) — consistent sign, strengthening, never significant after Bonferroni correction (α=0.00333)</td></tr>
+<tr><td>Cross-symbol OOS</td><td>8/12 positive-sign symbols</td></tr>
+<tr><td>OOS quintile means (Q1→Q5)</td><td>+0.080% / −0.074% / +0.223% / +0.276% / +0.250% — non-monotonic (Q2 lowest, not Q1)</td></tr>
+<tr><td>Phase 10 classification</td><td>B — inconclusive</td></tr>
+</table>
+</div>
+</section>
+
+<section id="definition">
+<h2><span class="sec-num">2</span>Exact volume_ratio definition (frozen, unchanged)</h2>
+<pre>volume_ratio = volume / rolling_mean(volume, window=20, min_periods=20)</pre>
+<p>Defined in <code>market/indicators.py::compute_volume_ratio_series</code>, computed once as part of every symbol's standard <code>compute_indicator_series()</code> output. This phase imports and uses this exact column — no OBV, VWAP, Chaikin Money Flow, volume RSI, or any other transformation was implemented or considered.</p>
+</section>
+
+<section id="candidates">
+<h2><span class="sec-num">3</span>Candidate rule definitions (pre-registered, exactly 3)</h2>
+<pre>p20, p80 = 20th/80th percentile of volume_ratio, fit ONLY on each symbol's
+           DEVELOPMENT-period data, then FROZEN for validation/OOS
+           (identical discipline to Phase 10's own quintile buckets)
+
+Candidate A — high_volume:    volume_ratio > p80              -> LONG
+Candidate B — low_volume:     volume_ratio < p20               -> LONG
+Candidate C — extreme_volume: volume_ratio > p80 OR < p20       -> LONG</pre>
+<p>Thresholds reuse Phase 10's own already-causal, already-development-fit quintile boundary methodology exactly — no percentile grid was run, no threshold was chosen after seeing a profitability result.</p>
+</section>
+
+<section id="rationale">
+<h2><span class="sec-num">4</span>Rationale and direction</h2>
+<p>Direction was read directly from Phase 10's own evidence (§1): higher volume_ratio associated with higher forward 5-day returns, so every candidate is LONG-biased. Candidate A is the direct reading of the dominant Q3-Q5-vs-Q1-Q2 pattern. Candidate B is a falsification arm, motivated by Phase 10's own finding that the bottom quintile (Q1, +0.08%) was NOT the worst bucket — Q2 was — so testing whether low volume also carries positive information (or doesn't) is informative either way. Candidate C tests whether "unusual" volume in either direction (matching the non-monotonic Q2-dip shape) is more informative than "normal" volume. Each was tested BOTH standalone (<code>research/volume_signal.py::VolumeSignalStrategy</code>, ignoring SMA/RSI/MACD entirely) and as a filter over the frozen <code>TrendMomentumBaseline</code> (via <code>strategy.regime_filters.FilteredStrategy</code>, reused unchanged from Phase 9) — spec's explicit two-question split: does the feature have standalone value, and does it add value to the existing strategy.</p>
+<p>Exit structure reuses <code>TrendMomentumBaseline</code>'s own stop (ATR14×1.5) and target (2R) constants exactly — chosen specifically to isolate the entry signal's value from exit design, and to avoid introducing any new execution primitive. No maximum holding period is imposed (positions exit only via stop/target/end-of-data, identical to every existing strategy).</p>
+</section>
+
+<section id="implementation">
+<h2><span class="sec-num">5</span>Causal implementation</h2>
+<p><code>research/volume_signal.py</code> (new) implements <code>VolumeSignalStrategy</code> (standalone) and <code>make_volume_predicate</code> (for <code>FilteredStrategy</code>), both reading only <code>indicator_series.iloc[index]</code> at generation time — no rolling computation of their own beyond the already-frozen (p20, p80) pair. 17 new tests (<code>tests/test_volume_signal.py</code>) verify: each candidate's exact directional logic against known values; truncated-history and mutate-the-future causality controls; and — specifically re-verified for a volume-based predicate — the suppress-only guarantee <code>FilteredStrategy</code> already proved in Phase 9.</p>
+</section>
+
+<section id="fullperiod">
+<h2><span class="sec-num">6</span>Full-period results (baseline cost)</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Variant</th><th>Trades</th><th>Win %</th><th>Net PnL</th><th>Mean R</th><th>Profit factor</th><th>Positive symbols/12</th></tr>
+<tr><td>control (frozen TrendMomentumBaseline)</td><td class="tabular">218</td><td class="tabular">34.9</td><td class="tabular num-neg">-7,547.20</td><td class="tabular">-0.169</td><td class="tabular">0.887</td><td class="tabular">4</td></tr>
+<tr><td>standalone A — high volume</td><td class="tabular">491</td><td class="tabular">37.1</td><td class="tabular num-neg">-6,304.10</td><td class="tabular">-0.038</td><td class="tabular">0.956</td><td class="tabular">3</td></tr>
+<tr><td>filtered A — high volume</td><td class="tabular">190</td><td class="tabular">38.4</td><td class="tabular num-neg">-2,048.96</td><td class="tabular">-0.037</td><td class="tabular">0.965</td><td class="tabular">3</td></tr>
+<tr><td>standalone B — low volume</td><td class="tabular">409</td><td class="tabular">36.7</td><td class="tabular num-neg">-8,780.92</td><td class="tabular">-0.061</td><td class="tabular">0.929</td><td class="tabular">4</td></tr>
+<tr><td>filtered B — low volume</td><td class="tabular">27</td><td class="tabular">25.9</td><td class="tabular num-neg">-3,617.03</td><td class="tabular">-0.354</td><td class="tabular">0.612</td><td class="tabular">3</td></tr>
+<tr><td>standalone C — extreme volume</td><td class="tabular">459</td><td class="tabular">35.9</td><td class="tabular num-neg">-14,777.50</td><td class="tabular">-0.076</td><td class="tabular">0.891</td><td class="tabular">3</td></tr>
+<tr><td>filtered C — extreme volume</td><td class="tabular">193</td><td class="tabular">37.8</td><td class="tabular num-neg">-4,125.45</td><td class="tabular">-0.053</td><td class="tabular">0.931</td><td class="tabular">3</td></tr>
+</table>
+</div>
+<p>Every variant remains net-loss and profit-factor-below-1 at the pooled full-period level. Filtered A and C reduce the magnitude of control's loss (a real, consistent effect worth naming) — but none crosses into profitability, and positive-symbol counts are FEWER for every volume variant (3/12) than for control itself (4/12).</p>
+</section>
+
+<section id="persymbol">
+<h2><span class="sec-num">7</span>Per-symbol results (full-period)</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Variant</th><th>Beats control / 12</th><th>Positive expectancy / 12</th><th>Beats buy-and-hold / 12</th></tr>
+<tr><td>standalone A</td><td class="tabular">6</td><td class="tabular">3</td><td class="tabular">3</td></tr>
+<tr><td>filtered A</td><td class="tabular">7</td><td class="tabular">3</td><td class="tabular">3</td></tr>
+<tr><td>standalone B</td><td class="tabular">5</td><td class="tabular">3</td><td class="tabular">3</td></tr>
+<tr><td>filtered B</td><td class="tabular">6</td><td class="tabular">3</td><td class="tabular">3</td></tr>
+<tr><td>standalone C</td><td class="tabular">5</td><td class="tabular">2</td><td class="tabular">3</td></tr>
+<tr><td>filtered C</td><td class="tabular">7</td><td class="tabular">3</td><td class="tabular">3</td></tr>
+</table>
+</div>
+<p>No variant exceeds a bare majority on "beats control," and positive-expectancy counts (2-3/12) are consistently WORSE than control's own 4/12 — the volume conditions are not making a broadly larger set of symbols individually profitable, whatever they're doing to the pooled total.</p>
+</section>
+
+<section id="cost">
+<h2><span class="sec-num">8</span>Cost sensitivity</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Variant</th><th>Zero cost</th><th>Baseline</th><th>Moderate 2x</th><th>Adverse slippage</th></tr>
+<tr><td>control</td><td class="tabular num-pos">242</td><td class="tabular num-neg">-7,547</td><td class="tabular num-neg">-17,525</td><td class="tabular num-neg">-12,124</td></tr>
+<tr><td>standalone A</td><td class="tabular num-pos">18,434</td><td class="tabular num-neg">-6,304</td><td class="tabular num-neg">-26,906</td><td class="tabular num-neg">-16,050</td></tr>
+<tr><td>filtered A</td><td class="tabular num-pos">7,377</td><td class="tabular num-neg">-2,049</td><td class="tabular num-neg">-11,949</td><td class="tabular num-neg">-6,754</td></tr>
+<tr><td>standalone B</td><td class="tabular num-pos">11,764</td><td class="tabular num-neg">-8,781</td><td class="tabular num-neg">-26,048</td><td class="tabular num-neg">-15,945</td></tr>
+<tr><td>filtered B</td><td class="tabular num-neg">-2,282</td><td class="tabular num-neg">-3,617</td><td class="tabular num-neg">-4,934</td><td class="tabular num-neg">-4,360</td></tr>
+<tr><td>standalone C</td><td class="tabular num-pos">7,242</td><td class="tabular num-neg">-14,778</td><td class="tabular num-neg">-32,855</td><td class="tabular num-neg">-24,178</td></tr>
+<tr><td>filtered C</td><td class="tabular num-pos">5,452</td><td class="tabular num-neg">-4,125</td><td class="tabular num-neg">-8,976</td><td class="tabular num-neg">-8,976</td></tr>
+</table>
+</div>
+<div class="callout risk">
+<span class="callout-label">Standalone candidates look impressive at zero cost, and that's the trap</span>
+<p>Every standalone candidate shows a large GROSS profit (up to +18,434 for standalone A) that evaporates and reverses hard the moment baseline costs are applied — the higher trade counts these standalone candidates generate (up to 491 trades, more than double control's 218) multiply the fixed per-fill brokerage, exactly the mechanism spec's cost-survival section warns about. This is the clearest illustration in this report of "a signal that predicts returns but cannot survive costs is not a usable trading signal."</p>
+</div>
+</section>
+
+<section id="benchmark">
+<h2><span class="sec-num">9</span>Benchmark comparison</h2>
+<p>Beats-buy-and-hold is 3/12 for every single variant, including control — identical to Phase 8's finding. No volume candidate changes this picture at all; buy-and-hold remains dramatically ahead in every case where it was itself profitable, exactly as established in Phase 8 and re-confirmed unchanged here.</p>
+</section>
+
+<section id="standalone">
+<h2><span class="sec-num">10</span>Standalone predictive value (pure statistical evidence, no execution/costs)</h2>
+<p class="lede">Conditional forward-5-day return when each candidate's condition is true, computed directly from the feature (not from a backtest) — answers "does volume_ratio carry information" independent of any trading-rule mechanics.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Candidate</th><th>OOS n</th><th>OOS mean fwd 5d return</th><th>OOS 95% bootstrap CI</th><th>OOS cross-symbol</th></tr>
+<tr><td>A — high volume</td><td class="tabular">598</td><td class="tabular num-pos">+0.250%</td><td class="tabular">[-0.051%, +0.560%]</td><td class="tabular">6/12</td></tr>
+<tr><td>B — low volume</td><td class="tabular">618</td><td class="tabular num-pos">+0.080%</td><td class="tabular">[-0.184%, +0.355%]</td><td class="tabular">6/12</td></tr>
+<tr><td>C — extreme volume</td><td class="tabular">1,216</td><td class="tabular num-pos">+0.163%</td><td class="tabular">[-0.035%, +0.363%]</td><td class="tabular">8/12</td></tr>
+</table>
+</div>
+<p>All three OOS means are positive — but every OOS confidence interval includes zero, and cross-symbol agreement never exceeds 8/12. This pure-feature view is notably MORE positive-looking than the actual backtested trading results in §6 — an important, honest gap: a positive average forward-return-when-condition-is-true does not automatically survive being converted into an R-multiple stop/target trade (which can be cut short at −1R or capped at +2R at any point within that window, unlike a passive 5-day hold) plus real transaction costs. This is exactly the "statistical evidence vs. economic evidence" distinction spec requires be kept separate — and here, one is modestly positive while the other is clearly not.</p>
+</section>
+
+<section id="incremental">
+<h2><span class="sec-num">11</span>Incremental value over TrendMomentumBaseline</h2>
+<p>Filtered A and filtered C reduce the pooled full-period LOSS relative to control (§6) — a real, reproducible, but modest effect (control −7,547 → filtered A −2,049 / filtered C −4,125), achieved by filtering control's own signal set down (218 → 190/193 trades) rather than adding new ones. This is a genuine, if small, incremental effect on loss magnitude. It does NOT translate into incremental value on profitability, cross-symbol breadth, or positive-expectancy count (§6-7) — the filter makes the existing strategy's losses smaller without making it a winning strategy or improving its consistency across the universe.</p>
+</section>
+
+<section id="walkforward">
+<h2><span class="sec-num">12</span>Walk-forward (60/20/20, thresholds frozen from development)</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Variant</th><th>Development</th><th>Validation</th><th>Out-of-sample</th></tr>
+<tr><td>control</td><td class="tabular num-neg">-8,442 (154t, R=-0.242)</td><td class="tabular num-neg">-1,428 (66t, R=-0.105)</td><td class="tabular num-neg">-1,295 (70t, R=+0.061)</td></tr>
+<tr><td>filtered A</td><td class="tabular num-neg">-8,579 (131t, R=-0.135)</td><td class="tabular num-pos">+1,616 (43t, R=+0.047)</td><td class="tabular num-pos">+1,462 (54t, R=+0.213)</td></tr>
+<tr><td>filtered B</td><td class="tabular num-neg">-3,938 (15t, R=-0.723)</td><td class="tabular num-neg">-2,142 (6t, R=-0.696)</td><td class="tabular num-pos">+2,133 (5t, R=+0.868)</td></tr>
+<tr><td>filtered C</td><td class="tabular num-neg">-9,574 (133t, R=-0.148)</td><td class="tabular num-pos">+1,116 (44t, R=+0.021)</td><td class="tabular num-pos">+1,264 (54t, R=+0.188)</td></tr>
+</table>
+</div>
+<p>(Standalone A/B/C are omitted from this table — all three are negative in all three periods, the clearest and least ambiguous result in the whole study; full numbers are in the machine-readable result.)</p>
+</section>
+
+<section id="oos">
+<h2><span class="sec-num">13</span>Out-of-sample — the decisive test</h2>
+<div class="callout warn">
+<span class="callout-label">A pooled positive that doesn't survive per-symbol inspection</span>
+<p>Filtered A and filtered C both show real pooled OOS improvement over control. Per-symbol OOS breakdown tells a different story: <strong>filtered A beats control in only 6/12 symbols and is net-positive in only 5/12</strong> (filtered C: 7/12 and 5/12). The pooled +$1,462 (filtered A) is smaller than AAPL's own OOS swing alone (control −$626 → filtered A +$1,562, a +$2,188 change) — meaning the pooled number is driven by a small number of symbols' large moves, not a broad effect, with per-symbol OOS trade counts as thin as 1-8 trades each. This is exactly the concentration risk spec's cross-symbol section warns against, and it fails the "cross-symbol reasonably consistent" bar for classification A regardless of the pooled sign.</p>
+</div>
+<p>Filtered B's OOS result (+$2,133, R=+0.868) rests on 5 trades total, pooled across all 12 symbols — explicitly too small a sample to interpret one way or the other, per spec's own stated rule ("if OOS trade count is too small, classify as inconclusive"). It is not treated as evidence of anything, positive or negative.</p>
+</section>
+
+<section id="uncertainty">
+<h2><span class="sec-num">14</span>Statistical uncertainty</h2>
+<p>Every standalone-feature OOS bootstrap CI (§10) includes zero. No backtested variant's improvement over control was tested with a formal significance test beyond the per-symbol/cross-symbol consistency checks in §7/§13, because the concentration finding there is already dispositive — a result driven by 2-3 symbols' large moves does not need a p-value to be judged not-yet-confirmed; the cross-symbol breadth criterion itself, pre-specified before this study ran, already fails.</p>
+</section>
+
+<section id="economic">
+<h2><span class="sec-num">15</span>Economic significance</h2>
+<p>Gross vs. net: standalone A's zero-cost pooled result (+18,434) collapses to −6,304 once baseline costs apply — a swing of over $24,700 attributable entirely to transaction costs on 491 trades (≈$50/trade round-trip average). Filtered A's smaller trade count (190) shows a smaller but still decisive gross-to-net collapse (+7,377 → −2,049, ≈$49/trade). The per-trade cost margin (~$49-50 round-trip) is not small relative to this signal's per-trade edge at any tested variant — none of the six candidates demonstrates a gross edge per trade large enough to comfortably clear this margin at scale.</p>
+</section>
+
+<section id="leakage">
+<h2><span class="sec-num">16</span>Leakage tests</h2>
+<p>17 permanent tests in <code>tests/test_volume_signal.py</code>: exact directional-logic unit tests for all 3 candidates against known threshold values; truncated-history and mutate-the-future causality controls for <code>VolumeSignalStrategy</code>; and a re-verification of <code>FilteredStrategy</code>'s suppress-only guarantee specifically for a volume-based predicate. All 17 pass.</p>
+</section>
+
+<section id="parity">
+<h2><span class="sec-num">17</span>Paper/backtest parity</h2>
+<p class="lede">Per spec: since no candidate survived far enough to justify extensive engineering effort, only the minimum necessary check was run — filtered A (the least-unpromising candidate in the full-period comparison) on AAPL.</p>
+<div class="table-wrap">
+<table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>Backtest trades vs. paper-replay trades</td><td><span class="badge badge-pass">23 = 23, business values identical</span></td></tr>
+<tr><td>Final equity, backtest vs. paper</td><td><span class="badge badge-pass">106,246.77 = 106,246.77</span></td></tr>
+<tr><td>Paper-store reconciliation</td><td><span class="badge badge-pass">OK</span></td></tr>
+</table>
+</div>
+</section>
+
+<section id="repro">
+<h2><span class="sec-num">18</span>Reproducibility</h2>
+<p>The full 12-symbol × 7-variant experiment was run twice against the (already-populated) local cache. <strong>Byte-identical output both times.</strong></p>
+</section>
+
+<section id="changes">
+<h2><span class="sec-num">19</span>Software changes</h2>
+<ul class="table-wrap" style="list-style:none; padding:16px 20px; margin:16px 0;">
+<li><code>research/volume_signal.py</code> (new) — 3 candidate predicates, <code>VolumeSignalStrategy</code> (standalone), <code>make_volume_predicate</code> (for Phase 9's <code>FilteredStrategy</code>).</li>
+<li><code>tests/test_volume_signal.py</code> (new) — 17 tests.</li>
+</ul>
+<p>Nothing else changed. <code>strategy/baseline.py</code>, <code>risk/</code>, <code>paper/</code>, <code>backtesting/</code>, and <code>strategy/registry.py</code> are untouched — no candidate from this phase is registered anywhere reachable from live/paper execution.</p>
+</section>
+
+<section id="tests">
+<h2><span class="sec-num">20</span>Exact test count</h2>
+<div class="grid-cards">
+  <div class="card"><div class="card-num">271</div><div class="card-label">prior (through Phase 10)</div></div>
+  <div class="card"><div class="card-num">17</div><div class="card-label">new this phase</div></div>
+  <div class="card pos"><div class="card-num">288</div><div class="card-label">passing of 289 total</div></div>
+  <div class="card"><div class="card-num">1</div><div class="card-label">pre-existing environmental failure (Ollama not running), unrelated</div></div>
+</div>
+</section>
+
+<section id="classification">
+<h2><span class="sec-num">21</span>Final classification</h2>
+<div class="table-wrap">
+<table>
+<tr><th>Candidate</th><th>Classification</th><th>Why</th></tr>
+<tr><td>standalone A — high volume</td><td><span class="badge badge-risk">C</span></td><td>Net negative at every cost tier above zero; gross-to-net collapse driven by 2.25x control's trade count</td></tr>
+<tr><td>filtered A — high volume</td><td><span class="badge badge-risk">C</span></td><td>Full-period still net negative; OOS improvement fails cross-symbol consistency (5-6/12) — concentrated in 2-3 symbols</td></tr>
+<tr><td>standalone B — low volume</td><td><span class="badge badge-risk">C</span></td><td>Net negative in every period and cost tier tested</td></tr>
+<tr><td>filtered B — low volume</td><td><span class="badge badge-warn">B</span></td><td>Insufficient sample (5-15 trades per period) to draw any conclusion, positive or negative — explicitly not upgraded because OOS sign was positive</td></tr>
+<tr><td>standalone C — extreme volume</td><td><span class="badge badge-risk">C</span></td><td>Worst full-period net PnL of the six candidates; negative across dev/val</td></tr>
+<tr><td>filtered C — extreme volume</td><td><span class="badge badge-risk">C</span></td><td>Same concentration failure as filtered A (largely overlapping trade set)</td></tr>
+</table>
+</div>
+</section>
+
+<section id="notproven">
+<h2><span class="sec-num">22</span>What this does NOT prove</h2>
+<ul>
+<li><strong>This does not prove volume_ratio is pure noise.</strong> The standalone statistical evidence (§10) shows a positive, if weak and non-significant, OOS relationship — the falsification here is specifically about whether it survives conversion into a confirmed, cross-symbol-consistent, cost-surviving TRADING RULE with these particular thresholds and exit structure, not about the raw feature's information content in the abstract.</li>
+<li><strong>This does not prove a different threshold, exit structure, or holding period would fail the same way.</strong> Exactly 3 pre-registered rules with one frozen exit structure were tested, deliberately not a search — spec's explicit anti-overfitting boundary.</li>
+<li><strong>This does not prove filtered A/C's OOS improvement was pure chance.</strong> It shows the improvement is concentrated and thin enough that it cannot be distinguished from a small-sample, few-symbol artifact with the evidence gathered here — a different, more cautious claim than "proven to be noise."</li>
+<li><strong>This does not test volume_ratio in combination with any other feature</strong> — explicitly out of scope, per spec's "no combinatorial search."</li>
+</ul>
+</section>
+
+<section id="next">
+<h2><span class="sec-num">23</span>Recommendation for Phase 12</h2>
+<p>Do not carry any of the 6 candidates forward for deployment or further tuning. Per spec's most important rule, a losing/inconclusive result is reported as such, not rescued by adjusting thresholds, exits, or position sizing after the fact — none of that was done here. The volume_ratio hypothesis, having now been both discovered (Phase 10) and falsification-tested (Phase 11) through this platform's full validation pipeline, should be considered closed absent a genuinely new hypothesis about why or how it might work differently (a different frozen threshold methodology, a different exit structure) — which would itself need to be a fresh, separately pre-registered study, not a continuation of this one. The platform's proven engineering correctness — reused unmodified across four consecutive research phases (8, 9, 10, 11) without a single change to strategy/, risk/, paper/, or backtesting/ — remains this research program's most durable, validated result.</p>
+</section>
+
+<footer>
+Phase 11 — volume signal confirmation study. Machine-readable result: <code>phase11_validation_result.json</code> (sent alongside this report). See the companion <a href="#">Phase 10 Alpha Discovery</a>, <a href="#">Phase 9 Regime Filter Test</a>, <a href="#">Phase 8 Strategy Validation</a>.
+</footer>
+</main>
+</div>
