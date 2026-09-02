@@ -5,6 +5,8 @@ exactly the scenarios spec §23/§9/§10 asks for: malformed messages,
 disconnects, reconnects, and the bounded-retry ceiling.
 """
 import struct
+import threading
+import time
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -232,6 +234,86 @@ def test_reconnect_attempts_are_bounded_then_the_feed_reports_disconnected(instr
 
     with pytest.raises(FeedDisconnectedError):
         source.next_bar()
+
+
+def test_subscribe_after_failed_resets_the_retry_budget(instrument_map, credentials):
+    """Hardening finding (found via offline code review, no live network
+    involved -- confirmed deterministically here): subscribe() calls
+    _connect() directly when recovering from FAILED, bypassing the normal
+    claim path that resets _reconnect_attempts on stability. Without a
+    fix, a manual resubscribe after a permanent failure inherited the
+    exhausted counter from the PREVIOUS episode and could fail permanently
+    again after zero real retries on the very next drop."""
+    source, factory = _source(instrument_map, credentials, max_reconnect_attempts=1, backoff_base_seconds=0.01, backoff_max_seconds=0.01)
+    with source._lock:
+        source.state = DhanConnectionState.FAILED
+        source._reconnect_attempts = source.max_reconnect_attempts  # simulate an exhausted PREVIOUS episode
+
+    source.subscribe(["RELIANCE.NS"], "1m")  # a fresh manual resubscribe after permanent failure
+    assert source.state == DhanConnectionState.CONNECTED
+    assert source._reconnect_attempts == 0  # budget reset -- not inherited from the old failed episode
+
+    # prove it can actually survive a subsequent drop now, unlike before the fix
+    factory.current.simulate_error("a drop after the fresh resubscribe")
+    assert source.state == DhanConnectionState.CONNECTED  # reconnected -- had budget to do so
+
+
+def test_connect_refuses_to_create_a_transport_if_already_closed(instrument_map, credentials):
+    """Hardening fix, precise/white-box version (found via offline code
+    review, no live network involved): _connect() now re-checks CLOSED
+    under the lock before creating a transport -- this is the exact
+    mechanism that closes the orphan-connection race between close() and
+    an in-flight reconnect (see the coarser threaded test below for the
+    end-to-end version of the same fix)."""
+    source, factory = _source(instrument_map, credentials)
+    source.state = DhanConnectionState.CLOSED
+    source._connect()
+    assert len(factory.instances) == 0  # no transport created -- close() wins even if _connect() is invoked anyway
+    assert source.state == DhanConnectionState.CLOSED
+
+
+def test_close_during_an_in_flight_reconnect_prevents_it_from_completing(instrument_map, credentials):
+    """Hardening fix, end-to-end/threaded version (found via offline code
+    review + a real-threading test, no live network involved): close()
+    previously mutated state and read self._transport WITHOUT the lock, so
+    a reconnect already past its own pre-check could race past a
+    concurrent close() and open a fresh, un-tracked WebSocket anyway -- an
+    orphan connection the caller believes is closed. close() now captures
+    self._transport under the same lock it uses to set CLOSED, and
+    _connect() re-checks CLOSED under that same lock immediately before
+    creating a transport, so close() winning the race means no new
+    transport is ever created."""
+    source, factory = _source(
+        instrument_map, credentials, max_reconnect_attempts=5,
+        backoff_base_seconds=0.3, backoff_max_seconds=0.3,  # long enough to reliably close() during the sleep
+    )
+    source.subscribe(["RELIANCE.NS"], "1m")
+    assert len(factory.instances) == 1
+
+    thread = threading.Thread(target=factory.current.simulate_error, args=("drop",))
+    thread.start()
+    time.sleep(0.05)  # let the reconnect claim its attempt and enter the backoff sleep
+    assert source.state == DhanConnectionState.RECONNECTING
+
+    source.close()  # races in WHILE the reconnect is still sleeping
+    thread.join(timeout=2.0)
+    assert not thread.is_alive()
+
+    assert source.state == DhanConnectionState.CLOSED
+    assert len(factory.instances) == 1  # the in-flight reconnect must NOT have created a second (orphan) transport
+
+
+def test_disconnect_reason_never_contains_the_raw_access_token(instrument_map, credentials):
+    """Defense-in-depth (no evidence of an actual leak -- see
+    _redact_secret's docstring): if a failure's reason text ever happened
+    to embed the raw access token, it must never survive into
+    _last_disconnect_reason (which flows into FeedDisconnectedError's
+    message and onward into CLI/dashboard output)."""
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    factory.current.simulate_error(f"pretend leak: token={credentials.access_token} in this error message")
+    assert credentials.access_token not in source._last_disconnect_reason
+    assert "***" in source._last_disconnect_reason
 
 
 def test_close_is_terminal_and_never_triggers_a_reconnect(instrument_map, credentials):

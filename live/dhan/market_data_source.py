@@ -23,6 +23,7 @@ class stops trying and reports FEED_DISCONNECTED forever after, rather
 than spinning.
 """
 
+import logging
 import queue
 import threading
 import time
@@ -46,6 +47,9 @@ from live.dhan.wire import (
     build_subscribe_message,
     parse_packet,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class DhanConnectionState:
@@ -187,6 +191,14 @@ class DhanMarketDataSource:
             self._subscribed_symbols.add(symbol)
 
         if self.state in (DhanConnectionState.DISCONNECTED, DhanConnectionState.FAILED):
+            # Hardening fix (found via offline code review, not a live incident): _connect() itself never
+            # resets _reconnect_attempts -- only _claim_reconnect_locked does, on stability. A manual
+            # resubscribe after a permanent FAILED must start a genuinely fresh retry budget, not inherit
+            # the exhausted counter from the PREVIOUS episode (which would otherwise silently fail again
+            # after zero real retries on the very next drop).
+            with self._lock:
+                self._reconnect_attempts = 0
+                self._connected_at = None
             self._connect()  # _on_transport_open sends the subscribe message once the handshake genuinely completes
         elif self.state == DhanConnectionState.CONNECTED:
             self._send_subscribe(instruments)
@@ -217,20 +229,38 @@ class DhanMarketDataSource:
         self._subscribed_symbols -= target
 
     def close(self) -> None:
-        self.state = DhanConnectionState.CLOSED
-        if self._transport is not None:
-            self._transport.close()
+        """Hardening fix (found via offline code review + a real-threading
+        stress test, no live network involved): this previously mutated
+        `self.state`/read `self._transport` WITHOUT the lock. A reconnect
+        already past its own CLOSED pre-check (inside _run_reconnect_attempt)
+        could race past this unlocked write and call _connect() anyway,
+        which used to unconditionally overwrite state back to CONNECTING and
+        open a brand-new, un-tracked WebSocket -- an orphan connection the
+        caller believes is closed. _connect() now re-checks CLOSED under the
+        SAME lock immediately before creating a transport, so whichever of
+        close()/_connect() acquires the lock first deterministically wins,
+        and the loser either never creates a new transport (if close() won)
+        or close() correctly captures and closes the one _connect() just
+        created (if _connect() won)."""
+        with self._lock:
+            self.state = DhanConnectionState.CLOSED
+            transport = self._transport
+        logger.info("Dhan feed closed by caller.")
+        if transport is not None:
+            transport.close()
 
     # -- connection management (§9) ----------------------------------------
 
     def _connect(self) -> None:
         with self._lock:
+            if self.state == DhanConnectionState.CLOSED:
+                return  # a close() raced ahead of this (re)connect attempt -- honor it, never revive after close()
             self.state = DhanConnectionState.CONNECTING
             self._connection_generation += 1
             generation = self._connection_generation
+            transport = self.transport_factory()
+            self._transport = transport
         url = build_feed_url(client_id=self.credentials.client_id, access_token=self.credentials.access_token)
-        transport = self.transport_factory()
-        self._transport = transport
         transport.connect(
             url,
             on_open=lambda: self._on_transport_open(generation),
@@ -241,6 +271,20 @@ class DhanMarketDataSource:
         # state stays CONNECTING here -- do NOT declare CONNECTED until
         # _on_transport_open actually fires (see _Transport's docstring).
 
+    def _redact_secret(self, text: str) -> str:
+        """Defense-in-depth (Phase 16 hardening -- no evidence of an actual
+        leak; the exception-construction code paths in the pinned
+        websocket-client version were checked and never embed the request
+        URL, only response-derived text or bare hostnames). Still: this
+        project treats "never expose credentials in logs" as a hard
+        invariant enforced at the code level, not a property assumed of a
+        third-party library's current behavior -- see DhanCredentials'
+        masked __repr__ for the same posture elsewhere in this package."""
+        token = self.credentials.access_token
+        if token and token in text:
+            return text.replace(token, "***")
+        return text
+
     def _on_transport_open(self, generation: int) -> None:
         with self._lock:
             if generation != self._connection_generation:
@@ -250,6 +294,7 @@ class DhanMarketDataSource:
             # resetting on every open (rather than on sustained stability) enabled a real reconnect storm.
             self._connected_at = time.monotonic()
             subscribed = list(self._subscribed_symbols)
+        logger.info("Dhan feed CONNECTED (generation=%d, subscribed symbols=%d).", generation, len(subscribed))
         if subscribed:
             instruments = [
                 (instrument.exchange_segment, instrument.security_id)
@@ -294,13 +339,19 @@ class DhanMarketDataSource:
         attempts) that got this project's Dhan client ID rate-limited by
         Dhan's own server ("429 Too Many Requests ... client id is
         blocked") during Phase 16 testing."""
+        reason = self._redact_secret(reason)
         with self._lock:
             if generation != self._connection_generation:
                 return  # a stale, already-superseded generation -- ignore
             self._last_disconnect_reason = reason
             attempt_number = self._claim_reconnect_locked()
+            failed = self.state == DhanConnectionState.FAILED
+            total_attempts = self._reconnect_attempts
         if attempt_number is not None:
+            logger.info("Dhan feed connection lost (%s) -- reconnecting, attempt %d/%d.", reason, attempt_number, self.max_reconnect_attempts)
             self._run_reconnect_attempt(attempt_number)
+        elif failed:
+            logger.warning("Dhan feed permanently FAILED after %d reconnect attempts -- last reason: %s", total_attempts, reason)
 
     def _claim_reconnect_locked(self) -> "int | None":
         """Must be called while holding self._lock. Atomically decides
@@ -350,13 +401,17 @@ class DhanMarketDataSource:
         try:
             self._connect()  # _on_transport_open resends the subscribed instruments once this attempt actually opens
         except Exception as exc:  # noqa: BLE001 -- a failed reconnect attempt must not crash the background thread; it just counts against the bound
+            reason = self._redact_secret(f"reconnect attempt {attempt_number} failed: {exc}")
             with self._lock:
-                self._last_disconnect_reason = f"reconnect attempt {attempt_number} failed: {exc}"
+                self._last_disconnect_reason = reason
                 if self._reconnect_attempts >= self.max_reconnect_attempts:
                     self.state = DhanConnectionState.FAILED
+                    total_attempts = self._reconnect_attempts
+                    logger.warning("Dhan feed permanently FAILED after %d reconnect attempts -- last reason: %s", total_attempts, reason)
                     return
                 self._reconnect_attempts += 1
                 next_attempt = self._reconnect_attempts
+            logger.info("Dhan feed reconnect attempt %d failed synchronously (%s) -- retrying, attempt %d/%d.", attempt_number, reason, next_attempt, self.max_reconnect_attempts)
             self._run_reconnect_attempt(next_attempt)
 
     def _attempt_reconnect(self) -> None:
