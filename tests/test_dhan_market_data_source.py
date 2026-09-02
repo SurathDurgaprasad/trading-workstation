@@ -289,6 +289,95 @@ def test_a_send_failure_after_open_is_treated_as_a_disconnect_not_a_crash(instru
     assert len(factory.instances) == 2  # treated as a disconnect -> reconnect attempted
 
 
+def test_error_then_close_for_the_same_failure_triggers_exactly_one_reconnect(instrument_map, credentials):
+    """Phase 16 (VERIFIED against a real account -- a serious finding): a
+    real WebSocketApp fires BOTH on_error and on_close for the same
+    underlying failure. Before generation-tagged deduplication, each of
+    those (plus send failures, plus server-sent Disconnect packets) called
+    _attempt_reconnect() independently, causing an actual reconnect storm
+    against the real Dhan feed -- dozens of connection attempts within
+    ~15 seconds instead of the configured bound -- which got this
+    project's Dhan client ID rate-limited ("429 Too Many Requests ...
+    client id is blocked") by Dhan's own server. Exactly ONE reconnect
+    must happen per real failure, however many redundant signals arrive
+    for it."""
+    source, factory = _source(instrument_map, credentials, max_reconnect_attempts=5, backoff_base_seconds=0.01, backoff_max_seconds=0.01)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    assert len(factory.instances) == 1
+    first_transport = factory.current  # captured before any reconnect -- the fake auto-opens synchronously,
+    # so factory.current would otherwise already point at the NEW transport by the time simulate_close() runs.
+
+    # Both signals fire for the SAME connection attempt, error first then close --
+    # matching real websocket-client behavior observed live (both tied to the same underlying WebSocketApp).
+    first_transport.simulate_error("Connection to remote host was lost.")
+    first_transport.simulate_close(code=None, reason=None)  # the same transport's belated, now-stale close callback
+
+    assert len(factory.instances) == 2  # exactly one reconnect, not two
+    assert source.state == DhanConnectionState.CONNECTED  # the single reconnect succeeded cleanly (fake auto-opens)
+
+
+def test_a_stale_generations_close_after_a_newer_attempt_is_already_open_is_ignored(instrument_map, credentials):
+    """A second real-world race this same fix must close: a callback for
+    an OLD (already-superseded) connection attempt arriving late must not
+    be mistaken for a failure of the CURRENT, successfully-open connection."""
+    source, factory = _source(instrument_map, credentials, max_reconnect_attempts=5, backoff_base_seconds=0.01, backoff_max_seconds=0.01)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    stale_transport = factory.instances[0]
+
+    factory.current.simulate_error("stale failure")  # triggers a reconnect -> a new (2nd) transport opens
+    assert len(factory.instances) == 2
+    assert source.state == DhanConnectionState.CONNECTED
+
+    stale_transport.simulate_close(code=1000, reason="late callback from the superseded connection")
+    assert len(factory.instances) == 2  # ignored -- must NOT spawn a 3rd, unnecessary reconnect
+    assert source.state == DhanConnectionState.CONNECTED
+
+
+def test_a_flapping_connection_never_resets_the_bound_and_eventually_fails(instrument_map, credentials):
+    """Phase 16 (VERIFIED against a real account -- the deeper root cause
+    behind the reconnect-storm finding): resetting the attempt counter on
+    every successful open let a rapidly flapping connection (open, then
+    fail again within milliseconds) dodge the bound forever against the
+    real Dhan feed -- only Dhan's own server-side rate limiter eventually
+    stopped the storm ("429 Too Many Requests ... client id is blocked").
+    A connection that never stays up for min_stable_connection_seconds
+    must still hit the bound and reach FAILED, not retry indefinitely."""
+    source, factory = _source(
+        instrument_map, credentials, max_reconnect_attempts=3, backoff_base_seconds=0.01, backoff_max_seconds=0.01,
+        min_stable_connection_seconds=10.0,  # far longer than this whole fast test takes to run
+    )
+    source.subscribe(["RELIANCE.NS"], "1m")
+    assert source.state == DhanConnectionState.CONNECTED
+
+    for _ in range(10):  # far more "flaps" than max_reconnect_attempts, to prove it doesn't just get lucky
+        if source.state == DhanConnectionState.FAILED:
+            break
+        factory.current.simulate_error("flapping connection: fails immediately after every open")
+
+    assert source.state == DhanConnectionState.FAILED
+    assert source._reconnect_attempts == 3
+    assert len(factory.instances) == 4  # 1 initial + exactly 3 reconnects, never more
+
+
+def test_a_genuinely_stable_connection_resets_the_bound_before_a_later_failure(instrument_map, credentials):
+    """The complement of the flapping test: a connection that WAS stable
+    for long enough must still get its retry counter reset before the next
+    failure, so a single drop after a long healthy run doesn't inherit an
+    exhausted-looking counter from a much earlier, unrelated episode."""
+    source, factory = _source(
+        instrument_map, credentials, max_reconnect_attempts=2, backoff_base_seconds=0.01, backoff_max_seconds=0.01,
+        min_stable_connection_seconds=0.0,  # "stable" the instant it opens, for a fast test
+    )
+    source.subscribe(["RELIANCE.NS"], "1m")
+    factory.current.simulate_error("first drop")
+    assert source._reconnect_attempts == 1
+    assert source.state == DhanConnectionState.CONNECTED  # reconnected cleanly (fake auto-opens)
+
+    factory.current.simulate_error("second drop, after being stable again")
+    assert source._reconnect_attempts == 1  # reset before counting this one -- not accumulated to 2
+    assert source.state == DhanConnectionState.CONNECTED
+
+
 def test_server_sent_disconnect_packet_triggers_reconnect_path(instrument_map, credentials):
     source, factory = _source(instrument_map, credentials, max_reconnect_attempts=3, backoff_base_seconds=0.01, backoff_max_seconds=0.01)
     source.subscribe(["RELIANCE.NS"], "1m")

@@ -136,6 +136,14 @@ class DhanMarketDataSource:
     backoff_base_seconds: float = 1.0
     backoff_max_seconds: float = 30.0
     next_bar_timeout_seconds: float = 5.0
+    # Phase 16 addition (VERIFIED necessary against a real account -- see
+    # _claim_reconnect_locked's docstring): a connection must stay open for
+    # at least this long before a later failure is treated as the start of
+    # a FRESH retry streak. Without this, a rapidly flapping connection
+    # (opens, then dies again within milliseconds -- exactly what the real
+    # Dhan feed did) resets the attempt counter on every single open and
+    # the bound never actually engages.
+    min_stable_connection_seconds: float = 10.0
     transport_factory: type = _WebsocketClientTransport
 
     def __post_init__(self):
@@ -147,6 +155,13 @@ class DhanMarketDataSource:
         self._subscribed_symbols: set[str] = set()
         self._reconnect_attempts = 0
         self._last_disconnect_reason: str | None = None
+        self._connected_at: float | None = None
+        # Phase 16 addition (VERIFIED necessary against a real account -- see
+        # _report_connection_lost's docstring): guards the state machine and
+        # tags every connection attempt with a generation number so that
+        # redundant failure signals for the SAME attempt are deduplicated.
+        self._lock = threading.Lock()
+        self._connection_generation = 0
 
     # -- MarketDataSource protocol -------------------------------------------
 
@@ -209,24 +224,40 @@ class DhanMarketDataSource:
     # -- connection management (§9) ----------------------------------------
 
     def _connect(self) -> None:
-        self.state = DhanConnectionState.CONNECTING
+        with self._lock:
+            self.state = DhanConnectionState.CONNECTING
+            self._connection_generation += 1
+            generation = self._connection_generation
         url = build_feed_url(client_id=self.credentials.client_id, access_token=self.credentials.access_token)
-        self._transport = self.transport_factory()
-        self._transport.connect(url, on_open=self._on_transport_open, on_message=self._on_raw_message, on_close=self._on_transport_closed, on_error=self._on_transport_error)
+        transport = self.transport_factory()
+        self._transport = transport
+        transport.connect(
+            url,
+            on_open=lambda: self._on_transport_open(generation),
+            on_message=self._on_raw_message,
+            on_close=lambda status_code, reason: self._report_connection_lost(generation, f"transport closed (code={status_code}, reason={reason})"),
+            on_error=lambda error: self._report_connection_lost(generation, f"transport error: {error}"),
+        )
         # state stays CONNECTING here -- do NOT declare CONNECTED until
         # _on_transport_open actually fires (see _Transport's docstring).
 
-    def _on_transport_open(self) -> None:
-        self.state = DhanConnectionState.CONNECTED
-        self._reconnect_attempts = 0
-        if self._subscribed_symbols:
+    def _on_transport_open(self, generation: int) -> None:
+        with self._lock:
+            if generation != self._connection_generation:
+                return  # a stale/superseded connection attempt -- ignore
+            self.state = DhanConnectionState.CONNECTED
+            # _reconnect_attempts is NOT reset here -- see _claim_reconnect_locked's docstring for why
+            # resetting on every open (rather than on sustained stability) enabled a real reconnect storm.
+            self._connected_at = time.monotonic()
+            subscribed = list(self._subscribed_symbols)
+        if subscribed:
             instruments = [
                 (instrument.exchange_segment, instrument.security_id)
-                for instrument in (self._resolve_instrument(symbol) for symbol in self._subscribed_symbols)
+                for instrument in (self._resolve_instrument(symbol) for symbol in subscribed)
             ]
-            self._send_subscribe(instruments)
+            self._send_subscribe(instruments, generation=generation)
 
-    def _send_subscribe(self, instruments: list[tuple[str, str]]) -> None:
+    def _send_subscribe(self, instruments: list[tuple[str, str]], *, generation: int | None = None) -> None:
         # Ticker mode only -- LTP+LTT is all this project's candle building
         # needs (see CandleBuilder/_extract_tick's own docstrings on why
         # Quote/Full's cumulative volume isn't used).
@@ -236,35 +267,106 @@ class DhanMarketDataSource:
             try:
                 self._transport.send_json(build_subscribe_message(request_code=request_code, instruments=chunk))
             except Exception as exc:  # noqa: BLE001 -- a send failure means the connection is already gone (e.g. closed
-                # between on_open and this call); route it through the same bounded reconnect path as an explicit
+                # between on_open and this call); route it through the same deduplicated reconnect path as
                 # on_close/on_error, never let a raw transport exception escape to the caller.
-                self._last_disconnect_reason = f"send failed: {exc}"
-                self._attempt_reconnect()
+                self._report_connection_lost(generation if generation is not None else self._connection_generation, f"send failed: {exc}")
                 return
 
-    def _on_transport_closed(self, status_code, reason) -> None:
-        self._last_disconnect_reason = f"transport closed (code={status_code}, reason={reason})"
-        self._attempt_reconnect()
+    def _report_connection_lost(self, generation: int, reason: str) -> None:
+        """The single funnel for every way a connection attempt can be
+        discovered to have failed (on_error, on_close, a send failure, or a
+        server-sent Disconnect packet in _handle_packet).
 
-    def _on_transport_error(self, error) -> None:
-        self._last_disconnect_reason = f"transport error: {error}"
-        self._attempt_reconnect()
+        Phase 16 fix -- VERIFIED necessary against a real account: a real
+        WebSocketApp fires BOTH on_error and on_close for the same
+        underlying failure (each from its own thread, genuinely concurrent
+        -- confirmed with a real-threading stress test, not just sequential
+        fake-transport calls), and a send can fail independently for that
+        same loss. The generation check alone is NOT sufficient: two
+        concurrent reports for the SAME still-current generation (i.e.
+        arriving before _connect() has had a chance to bump the generation,
+        which only happens after the backoff sleep) both pass it. The
+        actual mutual exclusion has to be the STATE transition itself,
+        claimed atomically under the lock in _claim_reconnect -- see its
+        docstring. Without this, one real failure triggered 2-3+ separate
+        reconnect episodes, and under genuine thread concurrency this
+        compounded into an actual reconnect storm (hundreds of connection
+        attempts) that got this project's Dhan client ID rate-limited by
+        Dhan's own server ("429 Too Many Requests ... client id is
+        blocked") during Phase 16 testing."""
+        with self._lock:
+            if generation != self._connection_generation:
+                return  # a stale, already-superseded generation -- ignore
+            self._last_disconnect_reason = reason
+            attempt_number = self._claim_reconnect_locked()
+        if attempt_number is not None:
+            self._run_reconnect_attempt(attempt_number)
 
-    def _attempt_reconnect(self) -> None:
-        if self.state == DhanConnectionState.CLOSED:
-            return  # deliberate close() -- never reconnect after that
+    def _claim_reconnect_locked(self) -> "int | None":
+        """Must be called while holding self._lock. Atomically decides
+        whether THIS caller is the one that gets to initiate a new
+        reconnect episode -- returns the attempt number if so, or None if
+        there's nothing to do (already CLOSED, a reconnect is already in
+        flight, or the bound is already exhausted). This is the actual
+        mutual-exclusion point: state, not just the generation number, is
+        what a concurrent duplicate report checks against.
+
+        Phase 16 fix -- VERIFIED necessary against a real account: the
+        original design reset _reconnect_attempts to 0 the instant a
+        connection opened. Against the real Dhan feed, connections kept
+        opening successfully and then closing again within milliseconds
+        (a "flapping" connection) -- every open reset the counter to 0
+        before the very next failure could ever push it toward the bound,
+        so the bound never actually engaged; only Dhan's own server-side
+        rate limiter eventually stopped the storm ("429 Too Many Requests
+        ... client id is blocked"). The counter must only reset if the
+        connection was genuinely stable for min_stable_connection_seconds
+        first -- a flapping connection accumulates attempts across the
+        whole flapping episode and correctly reaches FAILED."""
+        if self.state in (DhanConnectionState.CLOSED, DhanConnectionState.RECONNECTING):
+            return None
+        was_stable = self._connected_at is not None and (time.monotonic() - self._connected_at) >= self.min_stable_connection_seconds
+        if was_stable:
+            self._reconnect_attempts = 0
+        self._connected_at = None
         if self._reconnect_attempts >= self.max_reconnect_attempts:
             self.state = DhanConnectionState.FAILED
-            return
+            return None
         self.state = DhanConnectionState.RECONNECTING
         self._reconnect_attempts += 1
-        backoff = min(self.backoff_base_seconds * (2 ** (self._reconnect_attempts - 1)), self.backoff_max_seconds)
+        return self._reconnect_attempts
+
+    def _run_reconnect_attempt(self, attempt_number: int) -> None:
+        """Executes ONE already-claimed reconnect attempt (backoff, then
+        connect). On a SYNCHRONOUS connect() failure, retries by claiming
+        the next attempt directly -- this is a legitimate continuation of
+        the episode already claimed by _claim_reconnect_locked, not a new
+        duplicate claim, so it does not re-check "already RECONNECTING"."""
+        backoff = min(self.backoff_base_seconds * (2 ** (attempt_number - 1)), self.backoff_max_seconds)
         time.sleep(backoff)
+        with self._lock:
+            if self.state == DhanConnectionState.CLOSED:
+                return  # close() happened while backing off -- honor it, never reconnect after a deliberate close
         try:
             self._connect()  # _on_transport_open resends the subscribed instruments once this attempt actually opens
         except Exception as exc:  # noqa: BLE001 -- a failed reconnect attempt must not crash the background thread; it just counts against the bound
-            self._last_disconnect_reason = f"reconnect attempt {self._reconnect_attempts} failed: {exc}"
-            self._attempt_reconnect()
+            with self._lock:
+                self._last_disconnect_reason = f"reconnect attempt {attempt_number} failed: {exc}"
+                if self._reconnect_attempts >= self.max_reconnect_attempts:
+                    self.state = DhanConnectionState.FAILED
+                    return
+                self._reconnect_attempts += 1
+                next_attempt = self._reconnect_attempts
+            self._run_reconnect_attempt(next_attempt)
+
+    def _attempt_reconnect(self) -> None:
+        """White-box entry point used directly by tests (and internally,
+        indistinguishable from a fresh _report_connection_lost call with no
+        generation to check): claim a reconnect episode and run it."""
+        with self._lock:
+            attempt_number = self._claim_reconnect_locked()
+        if attempt_number is not None:
+            self._run_reconnect_attempt(attempt_number)
 
     # -- wire-level handling, pure and unit-testable with synthetic bytes ---
 
@@ -285,8 +387,10 @@ class DhanMarketDataSource:
         packet = parse_packet(data)
 
         if isinstance(packet, DhanDisconnectPacket):
-            self._last_disconnect_reason = f"server-sent disconnect (code={packet.reason_code})"
-            self._attempt_reconnect()
+            # Routed through the same dedup funnel as on_error/on_close/send-failure (see
+            # _report_connection_lost's docstring) -- a server-sent Disconnect packet typically
+            # precedes the socket's own on_close/on_error for the same teardown.
+            self._report_connection_lost(self._connection_generation, f"server-sent disconnect (code={packet.reason_code})")
             return None
 
         symbol = self._security_id_to_symbol.get(str(packet.header.security_id))
