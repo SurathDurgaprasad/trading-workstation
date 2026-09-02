@@ -60,9 +60,19 @@ class DhanConnectionState:
 class _Transport(Protocol):
     """The only part of this module that talks to a real socket. Tests
     inject a fake implementing this same shape instead of a real
-    websocket-client connection."""
+    websocket-client connection.
 
-    def connect(self, url: str, *, on_message, on_close, on_error) -> None: ...
+    `on_open` (Phase 16 addition -- VERIFIED necessary against a real
+    account: connecting to a real Dhan feed that immediately drops the
+    connection ["Connection to remote host was lost", no close code, ~0.5s
+    after connect] crashed `subscribe()` under the original design, which
+    declared CONNECTED and sent the subscribe message the instant the
+    background thread *started*, not once the handshake had actually
+    succeeded. `on_open` is the only trustworthy "the handshake genuinely
+    completed" signal; nothing here is CONNECTED, and no message is sent,
+    before it fires."""
+
+    def connect(self, url: str, *, on_open, on_message, on_close, on_error) -> None: ...
     def send_json(self, message: dict) -> None: ...
     def close(self) -> None: ...
 
@@ -78,8 +88,11 @@ class _WebsocketClientTransport:
     _app: object = field(default=None, repr=False)
     _thread: threading.Thread | None = field(default=None, repr=False)
 
-    def connect(self, url: str, *, on_message, on_close, on_error) -> None:
+    def connect(self, url: str, *, on_open, on_message, on_close, on_error) -> None:
         import websocket  # websocket-client
+
+        def _on_open(_ws):
+            on_open()
 
         def _on_message(_ws, message):
             on_message(message)
@@ -90,7 +103,7 @@ class _WebsocketClientTransport:
         def _on_error(_ws, error):
             on_error(error)
 
-        self._app = websocket.WebSocketApp(url, on_message=_on_message, on_close=_on_close, on_error=_on_error)
+        self._app = websocket.WebSocketApp(url, on_open=_on_open, on_message=_on_message, on_close=_on_close, on_error=_on_error)
         self._thread = threading.Thread(target=self._app.run_forever, kwargs={"ping_interval": 0}, daemon=True)
         self._thread.start()
 
@@ -159,9 +172,11 @@ class DhanMarketDataSource:
             self._subscribed_symbols.add(symbol)
 
         if self.state in (DhanConnectionState.DISCONNECTED, DhanConnectionState.FAILED):
-            self._connect()
-
-        self._send_subscribe(instruments)
+            self._connect()  # _on_transport_open sends the subscribe message once the handshake genuinely completes
+        elif self.state == DhanConnectionState.CONNECTED:
+            self._send_subscribe(instruments)
+        # else: CONNECTING/RECONNECTING already in flight -- _on_transport_open will pick up
+        # the now-updated _subscribed_symbols set once it fires; nothing to send yet.
 
     def next_bar(self):
         """Blocks up to `next_bar_timeout_seconds` waiting for a completed
@@ -197,9 +212,19 @@ class DhanMarketDataSource:
         self.state = DhanConnectionState.CONNECTING
         url = build_feed_url(client_id=self.credentials.client_id, access_token=self.credentials.access_token)
         self._transport = self.transport_factory()
-        self._transport.connect(url, on_message=self._on_raw_message, on_close=self._on_transport_closed, on_error=self._on_transport_error)
+        self._transport.connect(url, on_open=self._on_transport_open, on_message=self._on_raw_message, on_close=self._on_transport_closed, on_error=self._on_transport_error)
+        # state stays CONNECTING here -- do NOT declare CONNECTED until
+        # _on_transport_open actually fires (see _Transport's docstring).
+
+    def _on_transport_open(self) -> None:
         self.state = DhanConnectionState.CONNECTED
         self._reconnect_attempts = 0
+        if self._subscribed_symbols:
+            instruments = [
+                (instrument.exchange_segment, instrument.security_id)
+                for instrument in (self._resolve_instrument(symbol) for symbol in self._subscribed_symbols)
+            ]
+            self._send_subscribe(instruments)
 
     def _send_subscribe(self, instruments: list[tuple[str, str]]) -> None:
         # Ticker mode only -- LTP+LTT is all this project's candle building
@@ -208,7 +233,14 @@ class DhanMarketDataSource:
         request_code = DhanFeedRequestCode.SUBSCRIBE_TICKER
         for start in range(0, len(instruments), MAX_INSTRUMENTS_PER_SUBSCRIBE_MESSAGE):
             chunk = instruments[start : start + MAX_INSTRUMENTS_PER_SUBSCRIBE_MESSAGE]
-            self._transport.send_json(build_subscribe_message(request_code=request_code, instruments=chunk))
+            try:
+                self._transport.send_json(build_subscribe_message(request_code=request_code, instruments=chunk))
+            except Exception as exc:  # noqa: BLE001 -- a send failure means the connection is already gone (e.g. closed
+                # between on_open and this call); route it through the same bounded reconnect path as an explicit
+                # on_close/on_error, never let a raw transport exception escape to the caller.
+                self._last_disconnect_reason = f"send failed: {exc}"
+                self._attempt_reconnect()
+                return
 
     def _on_transport_closed(self, status_code, reason) -> None:
         self._last_disconnect_reason = f"transport closed (code={status_code}, reason={reason})"
@@ -229,9 +261,7 @@ class DhanMarketDataSource:
         backoff = min(self.backoff_base_seconds * (2 ** (self._reconnect_attempts - 1)), self.backoff_max_seconds)
         time.sleep(backoff)
         try:
-            self._connect()
-            instruments = [(instrument.exchange_segment, instrument.security_id) for instrument in (self._resolve_instrument(s) for s in self._subscribed_symbols)]
-            self._send_subscribe(instruments)
+            self._connect()  # _on_transport_open resends the subscribed instruments once this attempt actually opens
         except Exception as exc:  # noqa: BLE001 -- a failed reconnect attempt must not crash the background thread; it just counts against the bound
             self._last_disconnect_reason = f"reconnect attempt {self._reconnect_attempts} failed: {exc}"
             self._attempt_reconnect()

@@ -22,19 +22,30 @@ NSE,E,2885,EQUITY,0,RELIANCE,1.0,Reliance Industries,,,,10.0000,NA,ES,EQ,RELIANC
 
 
 class _FakeTransport:
-    def __init__(self):
+    """`auto_open` defaults to True (a successful handshake) so existing
+    tests -- which exercise post-connect behavior, not the handshake itself
+    -- don't need to know about on_open at all. `auto_open=False` (Phase 16
+    addition) reproduces the real scenario found against a real Dhan
+    account: the connection errors/closes BEFORE on_open ever fires."""
+
+    def __init__(self, auto_open: bool = True):
+        self.auto_open = auto_open
         self.sent_messages = []
         self.closed = False
         self.url = None
+        self._on_open = None
         self._on_message = None
         self._on_close = None
         self._on_error = None
 
-    def connect(self, url, *, on_message, on_close, on_error):
+    def connect(self, url, *, on_open, on_message, on_close, on_error):
         self.url = url
+        self._on_open = on_open
         self._on_message = on_message
         self._on_close = on_close
         self._on_error = on_error
+        if self.auto_open:
+            self._on_open()
 
     def send_json(self, message):
         self.sent_messages.append(message)
@@ -42,19 +53,26 @@ class _FakeTransport:
     def close(self):
         self.closed = True
 
+    def simulate_open(self):
+        self._on_open()
+
     def simulate_message(self, data: bytes):
         self._on_message(data)
 
     def simulate_close(self, code=1000, reason="simulated"):
         self._on_close(code, reason)
 
+    def simulate_error(self, error):
+        self._on_error(error)
+
 
 class _FakeTransportFactory:
-    def __init__(self):
+    def __init__(self, auto_open: bool = True):
+        self.auto_open = auto_open
         self.instances: list[_FakeTransport] = []
 
     def __call__(self):
-        transport = _FakeTransport()
+        transport = _FakeTransport(auto_open=self.auto_open)
         self.instances.append(transport)
         return transport
 
@@ -226,6 +244,49 @@ def test_close_is_terminal_and_never_triggers_a_reconnect(instrument_map, creden
     factory.current.simulate_close(code=1000, reason="post-close noise")
     assert source.state == DhanConnectionState.CLOSED  # a stray close callback after close() must not resurrect it
     assert len(factory.instances) == 1  # no new transport was created
+
+
+def test_handshake_failure_before_open_does_not_crash_and_triggers_reconnect(instrument_map, credentials):
+    """Phase 16 (VERIFIED against a real account): connecting to the real
+    Dhan feed produced 'Connection to remote host was lost' (no close code)
+    roughly 0.5s after connect -- before on_open ever fired. Under the
+    original design (CONNECTED declared the instant the background thread
+    started), this crashed subscribe() with a raw
+    WebSocketConnectionClosedException from inside send_json(). subscribe()
+    must never raise here, must never report CONNECTED before a real
+    on_open, and must route a pre-open failure through the same bounded
+    reconnect path as any other disconnect."""
+    factory = _FakeTransportFactory(auto_open=False)
+    source = DhanMarketDataSource(
+        credentials=credentials, instrument_map=instrument_map, interval="1m",
+        transport_factory=factory, next_bar_timeout_seconds=0.2,
+        max_reconnect_attempts=3, backoff_base_seconds=0.01, backoff_max_seconds=0.01,
+    )
+    source.subscribe(["RELIANCE.NS"], "1m")  # must not raise, even though on_open never fires
+    assert source.state != DhanConnectionState.CONNECTED
+    assert factory.current.sent_messages == []  # nothing sent to a socket that was never open
+
+    factory.current.simulate_error("Connection to remote host was lost.")
+    assert len(factory.instances) == 2  # a reconnect attempt was made
+    # the reconnect's own transport also never opens (auto_open=False for the whole factory,
+    # matching what was actually observed live) -- it should be attempting again, not CONNECTED
+    # or dead, and it must not have raised.
+    assert source.state == DhanConnectionState.CONNECTING
+
+
+def test_a_send_failure_after_open_is_treated_as_a_disconnect_not_a_crash(instrument_map, credentials):
+    """A narrower variant of the same real-world risk: the socket closes in
+    the gap between on_open firing and send_json() actually writing to it.
+    send_json() raising must not propagate out of subscribe()/_send_subscribe -- it must be treated as a disconnect."""
+    source, factory = _source(instrument_map, credentials, max_reconnect_attempts=3, backoff_base_seconds=0.01, backoff_max_seconds=0.01)
+
+    def _raising_send_json(message):
+        raise ConnectionError("simulated: socket closed between open and send")
+
+    source.subscribe(["RELIANCE.NS"], "1m")  # first subscribe succeeds via auto_open
+    factory.current.send_json = _raising_send_json
+    source._send_subscribe([("NSE_EQ", "2885")])  # must not raise
+    assert len(factory.instances) == 2  # treated as a disconnect -> reconnect attempted
 
 
 def test_server_sent_disconnect_packet_triggers_reconnect_path(instrument_map, credentials):

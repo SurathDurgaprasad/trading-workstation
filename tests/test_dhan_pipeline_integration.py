@@ -30,14 +30,22 @@ NSE,E,2885,EQUITY,0,RELIANCE,1.0,Reliance Industries,,,,10.0000,NA,ES,EQ,RELIANC
 
 
 class _FakeTransport:
+    """Auto-fires on_open on connect() (a successful handshake), matching
+    test_dhan_market_data_source.py's fake -- these integration tests exist
+    to exercise the pipeline above the transport, not the handshake itself
+    (see that file's Phase 16 on_open lifecycle fix for why this exists)."""
+
     def __init__(self):
         self.sent_messages = []
+        self._on_open = None
         self._on_message = None
         self._on_close = None
 
-    def connect(self, url, *, on_message, on_close, on_error):
+    def connect(self, url, *, on_open, on_message, on_close, on_error):
+        self._on_open = on_open
         self._on_message = on_message
         self._on_close = on_close
+        self._on_open()
 
     def send_json(self, message):
         self.sent_messages.append(message)

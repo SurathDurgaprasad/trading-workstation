@@ -74,6 +74,26 @@ def test_empty_positions_list_is_handled_cleanly(credentials):
     assert client.get_positions() == []
 
 
+def test_dh1111_zero_holdings_error_is_treated_as_an_empty_list(credentials):
+    """Phase 16 (VERIFIED against a real account): a real Dhan account with
+    zero holdings makes /holdings return HTTP 500 + errorCode DH-1111
+    instead of 200 + [] -- undocumented in the official error tables, but
+    observed live. This must be treated as "no holdings", not a failure."""
+    body = {"errorType": "HOLDING_ERROR", "errorCode": "DH-1111", "errorMessage": "No holdings available"}
+    client = DhanRestClient(credentials=credentials, http_get=_fake_get({"/holdings": (500, body)}))
+    assert client.get_holdings() == []
+
+
+def test_other_500_errors_on_holdings_still_raise(credentials):
+    """Only the specific DH-1111 "no holdings" shape is swallowed -- any
+    other error status/body on /holdings must still raise, unchanged."""
+    body = {"errorType": "INTERNAL_SERVER_ERROR", "errorCode": "DH-908", "errorMessage": "Server error"}
+    client = DhanRestClient(credentials=credentials, http_get=_fake_get({"/holdings": (500, body)}))
+    with pytest.raises(DhanRestError) as exc_info:
+        client.get_holdings()
+    assert exc_info.value.status_code == 500
+
+
 def test_non_2xx_status_raises_dhan_rest_error_with_status_code(credentials):
     client = DhanRestClient(credentials=credentials, http_get=_fake_get({"/fundlimit": (401, {"errorCode": "DH-901", "errorMessage": "Invalid token"})}))
     with pytest.raises(DhanRestError) as exc_info:

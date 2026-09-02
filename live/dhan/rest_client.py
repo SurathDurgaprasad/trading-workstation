@@ -17,9 +17,10 @@ class DhanRestError(RuntimeError):
     Carries the HTTP status code so callers can distinguish, e.g., an
     expired token (DH-901/807) from a transient server error (908)."""
 
-    def __init__(self, message: str, *, status_code: int | None = None):
+    def __init__(self, message: str, *, status_code: int | None = None, body: dict | list | None = None):
         super().__init__(message)
         self.status_code = status_code
+        self.body = body
 
 
 @dataclass(frozen=True)
@@ -110,7 +111,7 @@ class DhanRestClient:
     def _get(self, path: str):
         status_code, body = self.http_get(f"{self.base_url}{path}", self._headers())
         if status_code < 200 or status_code >= 300:
-            raise DhanRestError(f"Dhan REST GET {path} returned HTTP {status_code}: {body}", status_code=status_code)
+            raise DhanRestError(f"Dhan REST GET {path} returned HTTP {status_code}: {body}", status_code=status_code, body=body)
         return body
 
     def get_fund_limit(self) -> DhanFundLimit:
@@ -120,4 +121,18 @@ class DhanRestClient:
         return [DhanPosition.from_api(row) for row in self._get("/positions")]
 
     def get_holdings(self) -> list[DhanHolding]:
-        return [DhanHolding.from_api(row) for row in self._get("/holdings")]
+        # Phase 16 (VERIFIED against a real account, 2026-09-02): unlike
+        # /positions, a real Dhan account with zero holdings makes /holdings
+        # respond HTTP 500 with {"errorCode": "DH-1111", "errorMessage": "No
+        # holdings available"} instead of 200 + []. This is NOT in the
+        # documented Trading API (DH-901..910) or Data API (800..814) error
+        # tables at dhanhq.co/docs/v2/annexure/ as of that date -- observed
+        # live behavior, not a documented contract. Treated as "zero
+        # holdings", not a failure; any other error still raises normally.
+        try:
+            body = self._get("/holdings")
+        except DhanRestError as exc:
+            if exc.status_code == 500 and isinstance(exc.body, dict) and exc.body.get("errorCode") == "DH-1111":
+                return []
+            raise
+        return [DhanHolding.from_api(row) for row in body]
