@@ -11,22 +11,25 @@ class MarketDataProviderName(str, Enum):
 
 
 class DataSource(str, Enum):
-    """Phase 12 §5 — explicit provenance. MOCK/BROKER are new; YAHOO is the
-    only source that has ever existed before this phase. Deliberately
-    generic (BROKER, not DHAN) — no broker adapter exists yet (spec §1: "the
-    interface must NOT assume Dhan")."""
+    """Phase 12 §5 — explicit provenance. MOCK/BROKER were added generic
+    ("BROKER, not DHAN — no broker adapter exists yet") since no real
+    broker existed at the time. Phase 15 adds DHAN, the first concrete
+    broker value, once live/dhan/ actually exists; BROKER stays reserved
+    for any future non-Dhan broker rather than being repurposed."""
 
     YAHOO = "YAHOO"
     MOCK = "MOCK"
     BROKER = "BROKER"
+    DHAN = "DHAN"
 
 
 class DataStatus(str, Enum):
     """Phase 12 §2/§5 — answers "is this safe to trade on?" at a glance.
-    LIVE and DELAYED are reserved for a real broker feed that does not exist
-    yet in this phase; nothing in this codebase may set status=LIVE today.
-    SIMULATED is exclusively the mock feed's — it must never be confused
-    with LIVE, even though both stream bar-by-bar."""
+    LIVE and DELAYED were reserved for a real broker feed that did not
+    exist yet as of Phase 12; Phase 15's DhanMarketDataSource is the first
+    code path allowed to set status=LIVE. SIMULATED is exclusively the
+    mock feed's — it must never be confused with LIVE, even though both
+    stream bar-by-bar."""
 
     LIVE = "LIVE"
     DELAYED = "DELAYED"

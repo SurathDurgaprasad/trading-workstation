@@ -155,7 +155,7 @@ def test_no_mcp_tool_can_execute_a_real_order():
         lowered = name.lower()
         for verb in forbidden:
             assert verb not in lowered, f"{name} looks like a live-execution tool ({verb})"
-    assert len(tool_names) == 20  # 4 (Phase 5) + 6 (Phase 6) + 1 (Phase 7A) + 1 (Phase 12) + 8 (Phase 13)
+    assert len(tool_names) == 23  # 4 (Phase 5) + 6 (Phase 6) + 1 (Phase 7A) + 1 (Phase 12) + 8 (Phase 13) + 3 (Phase 15, read-only Dhan)
 
 
 async def _list_tools():

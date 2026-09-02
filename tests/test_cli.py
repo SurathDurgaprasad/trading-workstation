@@ -120,6 +120,19 @@ def test_paper_live_subcommand_defaults():
     assert args.auto_reject is False
     assert args.kill_switch is False
     assert args.reset_kill_switch is False
+    assert args.source == "mock"  # real Dhan connection is opt-in, never the default
+    assert args.refresh_instrument_map is False
+
+
+def test_paper_live_source_dhan_flag():
+    args = parse_args(["paper-live", "--symbol", "RELIANCE.NS", "--source", "dhan", "--refresh-instrument-map"])
+    assert args.source == "dhan"
+    assert args.refresh_instrument_map is True
+
+
+def test_paper_live_source_rejects_unknown_values():
+    with pytest.raises(SystemExit):
+        parse_args(["paper-live", "--symbol", "RELIANCE.NS", "--source", "zerodha"])
 
 
 def test_paper_live_subcommand_overrides():
@@ -199,3 +212,60 @@ def test_run_paper_live_command_kill_switch_activate_and_reset(tmp_path, capsys)
     reset_args = parse_args(["paper-live", "--reset-kill-switch", "--state-db", str(state_db)])
     run_paper_live_command(reset_args)
     assert "KILL SWITCH RESET" in capsys.readouterr().out
+
+
+# --- Phase 15: --source dhan --------------------------------------------------
+
+
+def test_paper_live_source_dhan_fails_cleanly_without_credentials(monkeypatch, tmp_path):
+    """No DhanCredentialsMissingError traceback should ever reach the
+    operator -- run_paper_live_command must raise a controlled error that
+    main()'s own exception handler already knows how to report cleanly."""
+    from live.dhan.config import DhanCredentialsMissingError
+
+    monkeypatch.delenv("DHAN_CLIENT_ID", raising=False)
+    monkeypatch.delenv("DHAN_ACCESS_TOKEN", raising=False)
+    args = parse_args([
+        "paper-live", "--symbol", "RELIANCE.NS", "--source", "dhan",
+        "--db", str(tmp_path / "paper.db"), "--state-db", str(tmp_path / "state.db"),
+    ])
+    with pytest.raises(DhanCredentialsMissingError):
+        run_paper_live_command(args)
+
+
+def test_build_market_data_source_mock_is_labeled_simulated():
+    from main import _build_market_data_source
+
+    args = parse_args(["paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y"])
+    source, source_label, status_label = _build_market_data_source(args)
+    assert "MOCK" in source_label
+    assert status_label == "SIMULATED"
+
+
+def test_build_market_data_source_dhan_is_labeled_live(monkeypatch):
+    """Wires real DhanMarketDataSource construction using fake credentials
+    and a fake DhanInstrumentMap.download() -- no real network call and no
+    dependency on any local cache file's presence."""
+    import io
+
+    import pandas as pd
+
+    from live.dhan.instruments import DhanInstrumentMap
+
+    fixture_csv = (
+        "SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_INSTRUMENT_NAME,SEM_EXPIRY_CODE,SEM_TRADING_SYMBOL,"
+        "SEM_LOT_UNITS,SEM_CUSTOM_SYMBOL,SEM_EXPIRY_DATE,SEM_STRIKE_PRICE,SEM_OPTION_TYPE,SEM_TICK_SIZE,"
+        "SEM_EXPIRY_FLAG,SEM_EXCH_INSTRUMENT_TYPE,SEM_SERIES,SM_SYMBOL_NAME\n"
+        "NSE,E,2885,EQUITY,0,RELIANCE,1.0,Reliance Industries,,,,10.0000,NA,ES,EQ,RELIANCE INDUSTRIES LTD\n"
+    )
+    fake_map = DhanInstrumentMap(pd.read_csv(io.StringIO(fixture_csv), dtype=str, keep_default_na=False))
+    monkeypatch.setattr(DhanInstrumentMap, "download", classmethod(lambda cls, *a, **kw: fake_map))
+    monkeypatch.setenv("DHAN_CLIENT_ID", "1000000001")
+    monkeypatch.setenv("DHAN_ACCESS_TOKEN", "fake-token-for-tests")
+
+    from main import _build_market_data_source
+
+    args = parse_args(["paper-live", "--symbol", "RELIANCE.NS", "--source", "dhan"])
+    source, source_label, status_label = _build_market_data_source(args)
+    assert "DHAN" in source_label
+    assert status_label == "LIVE"

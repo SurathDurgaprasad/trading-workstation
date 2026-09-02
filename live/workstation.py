@@ -157,6 +157,20 @@ def get_trade_journal() -> list:
     return get_live_engine().store.list_journal_entries()
 
 
+def get_feed_status() -> list:
+    """Phase 15 §7/§22: returns live.state_store.FeedStatusRecord objects
+    -- read-only, the ONLY honest source of "what did the market feed most
+    recently deliver" for a process (dashboard/MCP) that isn't itself
+    running the feed. Never fabricated: an empty list means no bar has
+    ever been processed with a state_store attached, not "the feed is
+    down" -- see individual records' own connection_state for that."""
+    state_store = new_live_state_store()
+    try:
+        return state_store.list_feed_status()
+    finally:
+        state_store.close()
+
+
 def approve_pending_signal(signal_id: str, reason: str | None = None) -> dict:
     state_store = new_live_state_store()
     try:

@@ -20,6 +20,8 @@ pandas==3.0.3
 numpy==2.4.6
 ollama==0.6.2
 mcp==1.29.1
+requests==2.34.2
+websocket-client==1.9.0
 
 # test-only
 pytest==9.1.1

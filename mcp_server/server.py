@@ -552,6 +552,76 @@ def reject_pending_signal_tool(signal_id: str, reason: str | None = None) -> dic
     return _workstation.reject_pending_signal(signal_id, reason=reason)
 
 
+# --------------------------------------------------------------------------
+# Phase 15: read-only Dhan observation tools. No place_order/modify_order/
+# cancel_order tool exists here or anywhere in this server -- real order
+# execution is disabled outright this phase (live.dhan.broker_adapter's
+# RealOrderPlacementDisabledError), not merely unexposed via MCP.
+# --------------------------------------------------------------------------
+
+
+@mcp.tool()
+@observed_tool("get_live_market_status")
+def get_live_market_status_tool() -> list[dict]:
+    """The last bar actually delivered by whichever process is driving the
+    live feed (typically the `paper-live` CLI running elsewhere), per
+    symbol -- source (MOCK/DHAN), status (SIMULATED/LIVE), connection
+    state, and data age. Read-only; reused from live.state_store's
+    feed_status table via live.workstation.get_feed_status() -- never
+    fabricated. An empty list means no bar has been processed with a
+    state store attached yet, not that the feed is down."""
+    return [
+        {
+            "symbol": r.symbol, "source": r.source, "status": r.status, "connection_state": r.connection_state,
+            "bar_timestamp": r.bar_timestamp, "received_at": r.received_at, "updated_at": r.updated_at,
+        }
+        for r in _workstation.get_feed_status()
+    ]
+
+
+def _get_dhan_account_reader():
+    from live.dhan.broker_adapter import DhanAccountReader
+    from live.dhan.config import load_dhan_credentials
+    from live.dhan.rest_client import DhanRestClient
+
+    try:
+        credentials = load_dhan_credentials()
+    except Exception as exc:  # DhanCredentialsMissingError
+        raise ToolError(str(exc)) from exc
+    return DhanAccountReader(rest_client=DhanRestClient(credentials=credentials))
+
+
+@mcp.tool()
+@observed_tool("get_dhan_account_funds")
+def get_dhan_account_funds_tool() -> dict:
+    """REAL Dhan account funds, read-only (GET /fundlimit). Requires
+    DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN to be set in the server process's
+    environment -- raises a clear ToolError if they aren't, never a bare
+    traceback. Distinct from get_account_state_tool (the PAPER account) --
+    never mixed."""
+    from dataclasses import asdict
+
+    reader = _get_dhan_account_reader()
+    try:
+        return asdict(reader.get_fund_limit())
+    except Exception as exc:  # DhanRestError
+        raise ToolError(str(exc)) from exc
+
+
+@mcp.tool()
+@observed_tool("get_dhan_account_positions")
+def get_dhan_account_positions_tool() -> list[dict]:
+    """REAL Dhan open positions, read-only (GET /positions). Distinct from
+    get_positions_tool (the PAPER account's positions) -- never mixed."""
+    from dataclasses import asdict
+
+    reader = _get_dhan_account_reader()
+    try:
+        return [asdict(p) for p in reader.get_positions()]
+    except Exception as exc:
+        raise ToolError(str(exc)) from exc
+
+
 def main() -> None:
     setup_logging()
     mcp.run(transport="stdio")

@@ -90,6 +90,7 @@ async def index(request: Request) -> HTMLResponse:
     account = workstation.get_account_state()
     risk = workstation.get_risk_state()
     journal = workstation.get_trade_journal()
+    feed_status = workstation.get_feed_status()
 
     kill_banner = ""
     if status["kill_switch_active"]:
@@ -137,13 +138,41 @@ async def index(request: Request) -> HTMLResponse:
         for e in sorted(journal, key=lambda e: e.created_at, reverse=True)[:25]
     ) or "<tr><td colspan='4' class='muted'>No journal entries yet.</td></tr>"
 
+    def _feed_row(record) -> str:
+        source_class = "tag-mock" if record.source == "MOCK" else "tag-long"  # reuse the LONG/green tag color for a real source, distinct from mock's blue
+        status_class = "tag-sim" if record.status in ("SIMULATED", "HISTORICAL") else "tag-long"
+        try:
+            age_seconds = (datetime.now(timezone.utc) - datetime.fromisoformat(record.received_at)).total_seconds()
+            age_text = f"{age_seconds:,.1f}s"
+        except ValueError:
+            age_text = "unknown"
+        conn = record.connection_state or "UNKNOWN"
+        conn_class = "tag-long" if conn == "CONNECTED" else "tag-short"
+        return (
+            f"<tr><td>{html.escape(record.symbol)}</td>"
+            f"<td><span class='tag {source_class}'>{html.escape(record.source)}</span></td>"
+            f"<td><span class='tag {status_class}'>{html.escape(record.status)}</span></td>"
+            f"<td><span class='tag {conn_class}'>{html.escape(conn)}</span></td>"
+            f"<td>{html.escape(record.bar_timestamp)}</td>"
+            f"<td>{age_text}</td></tr>"
+        )
+
+    feed_rows = "".join(_feed_row(r) for r in feed_status) or (
+        "<tr><td colspan='6' class='muted'>No market data processed yet in this session &mdash; "
+        "run <code>python main.py paper-live ...</code> to start a feed.</td></tr>"
+    )
+
     body = f"""
 {kill_banner}
 <h2>KILL SWITCH <span class="tag tag-sim">{'ACTIVE' if status['kill_switch_active'] else 'INACTIVE'}</span></h2>
 {kill_form}
 
-<h2>MARKET <span class="tag tag-mock">MOCK</span> <span class="tag tag-sim">SIMULATED</span></h2>
-<p class="muted">Derived from the latest signal seen for each symbol currently awaiting approval &mdash; not a live quote feed.</p>
+<h2>MARKET FEED</h2>
+<p class="muted">The last bar actually delivered by whatever is driving the feed (the paper-live CLI, in another process) &mdash; never fabricated here.</p>
+<table><tr><th>Symbol</th><th>Source</th><th>Status</th><th>Connection</th><th>Last Bar</th><th>Data Age</th></tr>{feed_rows}</table>
+
+<h2>SIGNALS <span class="tag tag-mock">from pending approvals</span></h2>
+<p class="muted">Derived from the latest signal seen for each symbol currently awaiting approval.</p>
 <table><tr><th>Symbol</th><th>Direction</th><th>Reference Price</th><th>As Of</th></tr>{market_rows}</table>
 
 <h2>SIGNALS / PENDING APPROVAL ({status['pending_approvals_count']})</h2>

@@ -138,3 +138,55 @@ def test_kill_switch_survives_a_reopened_connection(tmp_path):
     assert store2.is_kill_switch_active() is True
     active, _, reason = store2.kill_switch_state()
     assert reason == "persisted halt"
+
+
+# --- feed status (Phase 15) ---------------------------------------------------
+
+
+def test_get_feed_status_returns_none_when_never_written(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    assert store.get_feed_status("RELIANCE.NS") is None
+
+
+def test_save_and_get_feed_status(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    now = datetime.now(timezone.utc)
+    store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, connection_state="CONNECTED")
+    record = store.get_feed_status("RELIANCE.NS")
+    assert record is not None
+    assert record.source == "DHAN"
+    assert record.status == "LIVE"
+    assert record.connection_state == "CONNECTED"
+
+
+def test_save_feed_status_overwrites_the_same_symbol_in_place(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    now = datetime.now(timezone.utc)
+    store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now)
+    later = now + timedelta(seconds=60)
+    store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=later, received_at=later, connection_state="CONNECTED")
+    all_records = store.list_feed_status()
+    assert len(all_records) == 1  # not a second row -- one row per symbol
+    assert all_records[0].bar_timestamp == later.isoformat()
+
+
+def test_list_feed_status_covers_multiple_symbols(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    now = datetime.now(timezone.utc)
+    store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now)
+    store.save_feed_status(symbol="TCS.NS", source="MOCK", status="SIMULATED", bar_timestamp=now, received_at=now)
+    symbols = {r.symbol for r in store.list_feed_status()}
+    assert symbols == {"RELIANCE.NS", "TCS.NS"}
+
+
+def test_feed_status_survives_a_reopened_connection(tmp_path):
+    db_path = tmp_path / "state.db"
+    now = datetime.now(timezone.utc)
+    store1 = LiveStateStore(db_path)
+    store1.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now)
+    store1.close()
+
+    store2 = LiveStateStore(db_path)
+    record = store2.get_feed_status("RELIANCE.NS")
+    assert record is not None
+    assert record.source == "DHAN"

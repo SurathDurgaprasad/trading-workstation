@@ -1,0 +1,235 @@
+"""Phase 15 §23: DhanMarketDataSource, tested against a FAKE transport
+(dependency-injected via `transport_factory`) -- no real network, no real
+Dhan account, no credentials. The fake transport lets tests simulate
+exactly the scenarios spec §23/§9/§10 asks for: malformed messages,
+disconnects, reconnects, and the bounded-retry ceiling.
+"""
+import struct
+from datetime import datetime, timezone
+
+import pandas as pd
+import pytest
+
+from live.contracts import NO_NEW_BAR, FeedDisconnectedError
+from live.dhan.config import DhanCredentials
+from live.dhan.instruments import DhanInstrumentMap
+from live.dhan.market_data_source import DhanConnectionState, DhanMarketDataSource
+from market.data_provider import DataSource, DataStatus
+
+_FIXTURE_CSV = """SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_INSTRUMENT_NAME,SEM_EXPIRY_CODE,SEM_TRADING_SYMBOL,SEM_LOT_UNITS,SEM_CUSTOM_SYMBOL,SEM_EXPIRY_DATE,SEM_STRIKE_PRICE,SEM_OPTION_TYPE,SEM_TICK_SIZE,SEM_EXPIRY_FLAG,SEM_EXCH_INSTRUMENT_TYPE,SEM_SERIES,SM_SYMBOL_NAME
+NSE,E,2885,EQUITY,0,RELIANCE,1.0,Reliance Industries,,,,10.0000,NA,ES,EQ,RELIANCE INDUSTRIES LTD
+"""
+
+
+class _FakeTransport:
+    def __init__(self):
+        self.sent_messages = []
+        self.closed = False
+        self.url = None
+        self._on_message = None
+        self._on_close = None
+        self._on_error = None
+
+    def connect(self, url, *, on_message, on_close, on_error):
+        self.url = url
+        self._on_message = on_message
+        self._on_close = on_close
+        self._on_error = on_error
+
+    def send_json(self, message):
+        self.sent_messages.append(message)
+
+    def close(self):
+        self.closed = True
+
+    def simulate_message(self, data: bytes):
+        self._on_message(data)
+
+    def simulate_close(self, code=1000, reason="simulated"):
+        self._on_close(code, reason)
+
+
+class _FakeTransportFactory:
+    def __init__(self):
+        self.instances: list[_FakeTransport] = []
+
+    def __call__(self):
+        transport = _FakeTransport()
+        self.instances.append(transport)
+        return transport
+
+    @property
+    def current(self) -> _FakeTransport:
+        return self.instances[-1]
+
+
+@pytest.fixture
+def instrument_map() -> DhanInstrumentMap:
+    import io
+
+    return DhanInstrumentMap(pd.read_csv(io.StringIO(_FIXTURE_CSV), dtype=str, keep_default_na=False))
+
+
+@pytest.fixture
+def credentials() -> DhanCredentials:
+    return DhanCredentials(client_id="1000000001", access_token="fake-token-for-tests")
+
+
+def _ticker_packet(security_id: int, price: float, epoch: int) -> bytes:
+    header = struct.pack("<BhBi", 2, 16, 1, security_id)  # response_code=2 (Ticker), segment=1 (NSE_EQ)
+    body = struct.pack("<fi", price, epoch)
+    return header + body
+
+
+def _disconnect_packet(reason_code: int) -> bytes:
+    header = struct.pack("<BhBi", 50, 10, 0, 0)
+    body = struct.pack("<h", reason_code)
+    return header + body
+
+
+def _source(instrument_map, credentials, **overrides) -> tuple[DhanMarketDataSource, _FakeTransportFactory]:
+    factory = _FakeTransportFactory()
+    source = DhanMarketDataSource(
+        credentials=credentials, instrument_map=instrument_map, interval="1m",
+        transport_factory=factory, next_bar_timeout_seconds=0.2, **overrides,
+    )
+    return source, factory
+
+
+def test_subscribe_connects_and_sends_a_subscribe_message(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    assert source.is_connected() is True
+    assert len(factory.current.sent_messages) == 1
+    message = factory.current.sent_messages[0]
+    assert message["InstrumentList"] == [{"ExchangeSegment": "NSE_EQ", "SecurityId": "2885"}]
+
+
+def test_subscribe_url_carries_credentials_as_query_params(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    assert "token=fake-token-for-tests" in factory.current.url
+    assert "clientId=1000000001" in factory.current.url
+
+
+def test_subscribe_with_wrong_interval_raises(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials)
+    with pytest.raises(ValueError):
+        source.subscribe(["RELIANCE.NS"], "5m")
+
+
+def test_a_tick_that_completes_a_bar_is_delivered_via_next_bar(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    factory.current.simulate_message(_ticker_packet(2885, 1428.5, epoch=60))
+    factory.current.simulate_message(_ticker_packet(2885, 1430.0, epoch=121))  # crosses into the next 1m bucket
+
+    event = source.next_bar()
+    assert event is not None
+    assert event.symbol == "RELIANCE.NS"
+    assert event.bar.open == pytest.approx(1428.5)
+    assert event.bar.source == DataSource.DHAN
+    assert event.bar.status == DataStatus.LIVE
+
+
+def test_next_bar_returns_no_new_bar_sentinel_on_timeout(instrument_map, credentials):
+    """The Phase 14-identified gap, now fixed: "no new bar yet" must be
+    distinct from both a permanent feed-ended signal (bare None) and a
+    real bar -- NO_NEW_BAR, not an exception, not None."""
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    result = source.next_bar()
+    assert result is NO_NEW_BAR
+    assert result is not None
+    assert source.is_connected() is True  # still connected -- just nothing completed yet
+
+
+def test_malformed_message_is_dropped_without_crashing(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    factory.current.simulate_message(b"\x02\x00")  # far too short to be any valid packet
+    assert source.is_connected() is True  # the connection itself is unaffected
+    assert source.next_bar() is NO_NEW_BAR  # and nothing bogus was queued
+
+
+def test_message_for_an_unsubscribed_security_id_is_ignored(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    factory.current.simulate_message(_ticker_packet(999999, 100.0, epoch=60))  # never subscribed
+    assert source.next_bar() is NO_NEW_BAR
+
+
+def test_duplicate_ticks_at_the_same_timestamp_do_not_each_complete_a_bar(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    factory.current.simulate_message(_ticker_packet(2885, 100.0, epoch=10))
+    factory.current.simulate_message(_ticker_packet(2885, 100.0, epoch=10))  # exact duplicate
+    assert source.next_bar() is NO_NEW_BAR  # still the same bucket -- nothing completed
+
+
+def test_out_of_order_tick_within_the_same_bucket_is_absorbed_not_rejected(instrument_map, credentials):
+    """A tick that arrives slightly out of order but still within the
+    current bucket is just another data point for that bucket -- Dhan
+    ticks are trusted at this layer; true out-of-order/duplicate BAR
+    protection happens downstream in the existing PaperTradingEngine,
+    unchanged."""
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    factory.current.simulate_message(_ticker_packet(2885, 100.0, epoch=30))
+    factory.current.simulate_message(_ticker_packet(2885, 99.0, epoch=10))  # earlier timestamp, same bucket
+    factory.current.simulate_message(_ticker_packet(2885, 101.0, epoch=61))
+    bar_event = source.next_bar()
+    assert bar_event.bar.low == pytest.approx(99.0)
+
+
+def test_disconnect_marks_reconnecting_then_reconnects_within_bound(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials, max_reconnect_attempts=3, backoff_base_seconds=0.01, backoff_max_seconds=0.02)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    factory.current.simulate_close(code=1006, reason="abnormal closure")
+    # a fresh transport should have been created and re-subscribed
+    assert len(factory.instances) == 2
+    assert source.state in (DhanConnectionState.CONNECTED, DhanConnectionState.RECONNECTING)
+
+
+def test_reconnect_attempts_are_bounded_then_the_feed_reports_disconnected(instrument_map, credentials):
+    """Section 9: no infinite uncontrolled reconnect loop. Force every
+    reconnect attempt to fail, and confirm the source gives up after
+    max_reconnect_attempts rather than retrying forever."""
+    source, factory = _source(instrument_map, credentials, max_reconnect_attempts=2, backoff_base_seconds=0.01, backoff_max_seconds=0.01)
+
+    call_count = {"n": 0}
+    original_connect = source._connect
+
+    def _failing_connect():
+        call_count["n"] += 1
+        raise ConnectionError("simulated: Dhan server unreachable")
+
+    source._connect = _failing_connect
+    source.state = DhanConnectionState.CONNECTED  # pretend we were connected, then it dropped
+    source._subscribed_symbols = {"RELIANCE.NS"}
+    source._attempt_reconnect()
+
+    assert source.state == DhanConnectionState.FAILED
+    assert call_count["n"] == 2  # exactly max_reconnect_attempts, not unbounded
+
+    with pytest.raises(FeedDisconnectedError):
+        source.next_bar()
+
+
+def test_close_is_terminal_and_never_triggers_a_reconnect(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    source.close()
+    assert source.state == DhanConnectionState.CLOSED
+    assert factory.current.closed is True
+
+    factory.current.simulate_close(code=1000, reason="post-close noise")
+    assert source.state == DhanConnectionState.CLOSED  # a stray close callback after close() must not resurrect it
+    assert len(factory.instances) == 1  # no new transport was created
+
+
+def test_server_sent_disconnect_packet_triggers_reconnect_path(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials, max_reconnect_attempts=3, backoff_base_seconds=0.01, backoff_max_seconds=0.01)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    factory.current.simulate_message(_disconnect_packet(805))  # "too many connections" per Dhan's documented codes
+    assert len(factory.instances) == 2  # reconnect was attempted

@@ -84,6 +84,33 @@ def test_index_renders_empty_workstation(client):
     assert "No open positions." in response.text
 
 
+def test_index_shows_no_feed_data_when_nothing_processed_yet(client):
+    """Phase 15 §7/§22: absence of a feed_status row must never be
+    silently filled in with a fabricated MOCK/SIMULATED default."""
+    response = client.get("/")
+    assert "No market data processed yet in this session" in response.text
+
+
+def test_index_shows_real_feed_status_once_written(client):
+    """Directly exercises live.workstation.get_feed_status() through the
+    dashboard -- proving MOCK vs. DHAN and SIMULATED vs. LIVE are both
+    genuinely distinguished in the rendered page, never hardcoded."""
+    import live.workstation as workstation_module
+
+    state_store = workstation_module.new_live_state_store()
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    state_store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, connection_state="CONNECTED")
+    state_store.close()
+
+    response = client.get("/")
+    assert "RELIANCE.NS" in response.text
+    assert "DHAN" in response.text
+    assert "LIVE" in response.text
+    assert "CONNECTED" in response.text
+
+
 def test_index_shows_a_pending_signal_with_approve_reject_buttons(client):
     signal_id = _drive_one_pending_approval()
     response = client.get("/")

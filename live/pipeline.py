@@ -41,7 +41,7 @@ from enum import Enum
 import pandas as pd
 
 from live.approval import SignalLifecycle, SignalLifecycleState
-from live.contracts import FeedDisconnectedError, MarketDataSource
+from live.contracts import NO_NEW_BAR, FeedDisconnectedError, MarketDataSource
 from live.freshness import DEFAULT_FRESHNESS_POLICY, FreshnessPolicy, FreshnessResult
 from live.state_store import LiveStateStore
 from market.data_provider import OHLCV, OHLCVBar
@@ -75,7 +75,7 @@ class _SymbolBuffer:
 class PipelineStepResult:
     """One outcome of LiveSimPipeline.process_next()."""
 
-    kind: str  # BAR_PROCESSED | DUPLICATE_SKIPPED | OUT_OF_ORDER_REJECTED | STALE_SIGNAL_SUPPRESSED | FEED_DISCONNECTED | FEED_EXHAUSTED | PENDING_HUMAN_APPROVAL | KILL_SWITCH_ACTIVE
+    kind: str  # BAR_PROCESSED | DUPLICATE_SKIPPED | OUT_OF_ORDER_REJECTED | STALE_SIGNAL_SUPPRESSED | FEED_DISCONNECTED | FEED_EXHAUSTED | NO_NEW_DATA | PENDING_HUMAN_APPROVAL | KILL_SWITCH_ACTIVE
     symbol: str | None = None
     bar: OHLCVBar | None = None
     freshness: FreshnessResult | None = None
@@ -186,12 +186,36 @@ class LiveSimPipeline:
         except FeedDisconnectedError as exc:
             return PipelineStepResult(kind="FEED_DISCONNECTED", detail=str(exc), expired_signal_ids=expired)
 
+        if event is NO_NEW_BAR:
+            # The feed is alive but had nothing new within this poll (a
+            # real, open-ended streaming source, as opposed to a finite
+            # scripted replay) -- distinct from FEED_EXHAUSTED, which means
+            # the source will never produce another bar. Existing
+            # positions/kill-switch/expiry checks above already ran;
+            # there's simply no bar to process this call. See
+            # live/contracts.py's NO_NEW_BAR docstring.
+            return PipelineStepResult(kind="NO_NEW_DATA", expired_signal_ids=expired)
+
         if event is None:
             return PipelineStepResult(kind="FEED_EXHAUSTED", expired_signal_ids=expired)
 
         symbol, bar = event.symbol, event.bar
         buffer = self._buffers.setdefault(symbol, _SymbolBuffer())
         buffer.append(bar)
+
+        if self.state_store is not None:
+            # Phase 15 §7/§22: the ONLY way a separate process (the
+            # dashboard) can honestly know what the feed most recently
+            # delivered -- written the moment a bar arrives, independent of
+            # what the paper engine goes on to do with it (duplicate/
+            # out-of-order/stale are all still "the feed is alive and
+            # delivering bar_timestamp", which is exactly what this
+            # records).
+            self.state_store.save_feed_status(
+                symbol=symbol, source=bar.source.value, status=bar.status.value,
+                bar_timestamp=bar.timestamp, received_at=bar.received_at or self._clock(),
+                connection_state="CONNECTED" if self.source.is_connected() else "DISCONNECTED",
+            )
 
         engine_bar = Bar(timestamp=bar.timestamp, open=bar.open, high=bar.high, low=bar.low, close=bar.close, volume=bar.volume)
         try:

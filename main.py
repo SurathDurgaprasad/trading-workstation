@@ -1,6 +1,7 @@
 import argparse
 import logging
 import sys
+import time
 
 from pydantic import BaseModel
 
@@ -19,6 +20,9 @@ from backtesting.report import format_backtest_report
 from backtesting.runner import FullBacktestRun, run_full_backtest
 from core.config import PROJECT_ROOT
 from core.logging import setup_logging
+from live.dhan.config import DhanCredentialsMissingError
+from live.dhan.instruments import InstrumentNotFoundError
+from live.dhan.rest_client import DhanRestError
 from llm.errors import ModelNotAvailableError, OllamaUnavailableError
 from market.data_provider import MarketDataError
 from rag.errors import RagStoreNotFoundError
@@ -49,6 +53,9 @@ _CONTROLLED_ERRORS = (
     AgentOutputError,
     UnknownStrategyError,
     ValueError,
+    DhanCredentialsMissingError,
+    DhanRestError,
+    InstrumentNotFoundError,
 )
 
 
@@ -420,9 +427,30 @@ def _prompt_approval(auto_approve: bool, auto_reject: bool) -> str:
         print("Please answer Y or N.")
 
 
+def _build_market_data_source(args: argparse.Namespace):
+    """Returns (source, source_label, status_label). MOCK/SIMULATED for the
+    existing scripted replay (unchanged); DHAN/LIVE for a real Dhan
+    WebSocket feed (Phase 15) -- the only two labels this project's own
+    DataSource/DataStatus model allows a live-sim CLI run to display,
+    matching whatever the resulting bars are actually tagged with."""
+    if args.source == "dhan":
+        from live.dhan.config import load_dhan_credentials
+        from live.dhan.instruments import DhanInstrumentMap
+        from live.dhan.market_data_source import DhanMarketDataSource
+
+        credentials = load_dhan_credentials()  # raises DhanCredentialsMissingError with a clear message if unset
+        instrument_map = DhanInstrumentMap.download(force=args.refresh_instrument_map)
+        source = DhanMarketDataSource(credentials=credentials, instrument_map=instrument_map, interval=args.interval)
+        return source, "DHAN (real WebSocket feed)", "LIVE"
+
+    from live.mock_source import MockMarketDataSource
+
+    source = MockMarketDataSource.from_cached_history(args.symbol, interval=args.interval, period=args.period)
+    return source, "MOCK (replaying cached history)", "SIMULATED"
+
+
 def run_paper_live_command(args: argparse.Namespace) -> None:
     from live.freshness import FreshnessPolicy
-    from live.mock_source import MockMarketDataSource
     from live.pipeline import DEFAULT_APPROVAL_TIMEOUT_SECONDS, LiveSimPipeline
     from live.state_store import LiveStateStore
     from paper.engine import PaperTradingEngine
@@ -450,7 +478,7 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
     engine = PaperTradingEngine(store)
     strategy = get_strategy(args.strategy)
 
-    source = MockMarketDataSource.from_cached_history(args.symbol, interval=args.interval, period=args.period)
+    source, source_label, status_label = _build_market_data_source(args)
     freshness_policy = FreshnessPolicy(multiplier=args.freshness_multiplier)
     approval_timeout_seconds = args.approval_timeout_seconds if args.approval_timeout_seconds is not None else DEFAULT_APPROVAL_TIMEOUT_SECONDS
     pipeline = LiveSimPipeline(
@@ -462,14 +490,20 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
     print("=" * 60)
     print("HUMAN-OPERATED PAPER TRADING WORKSTATION -- NOT LIVE TRADING")
     print("=" * 60)
-    print("SOURCE:   MOCK (replaying cached history)")
-    print("STATUS:   SIMULATED")
+    print(f"SOURCE:   {source_label}")
+    print(f"STATUS:   {status_label}")
+    print("EXECUTION: PAPER (this is always true, regardless of data source)")
     print(f"SYMBOL:   {args.symbol}")
     print(f"INTERVAL: {args.interval}")
     print(f"DATABASE: {db_path}")
     print(f"STATE DB: {state_db_path}")
     print(f"HUMAN APPROVAL REQUIRED: {not args.no_human_approval}")
-    print("This process places NO real orders and holds NO broker connection.")
+    if args.source == "dhan":
+        from live.dhan.market_session import current_market_session
+
+        session = current_market_session()
+        print(f"MARKET SESSION: {session.state.value} (as of {session.as_of_ist.strftime('%H:%M:%S IST')}, does NOT account for exchange holidays)")
+    print("This process places NO real orders and holds NO broker connection for execution.")
     if pipeline.is_kill_switch_active():
         print("\n*** KILL SWITCH ACTIVE *** -- no new signal will be approved or executed.")
         print("Run `python main.py paper-live --reset-kill-switch --state-db "
@@ -483,11 +517,15 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
             print(f"\n[EXPIRED] signal {expired_id[:12]} -- approval window elapsed without a decision.")
 
         if result.kind == "FEED_EXHAUSTED":
-            print("\n[SIMULATED] Feed exhausted -- cached history replay complete.")
+            print(f"\n[{status_label}] Feed exhausted -- replay complete.")
             break
         if result.kind == "FEED_DISCONNECTED":
-            print(f"\n[SIMULATED] FEED DISCONNECTED: {result.detail}")
+            print(f"\n[{status_label}] FEED DISCONNECTED: {result.detail}")
+            print(f"[{status_label}] No new signal will be generated while disconnected. Existing positions are still monitored on reconnect.")
+            time.sleep(1.0)  # avoid a tight busy-loop if the source is permanently down (e.g. Dhan reconnect attempts exhausted)
             continue
+        if result.kind == "NO_NEW_DATA":
+            continue  # feed alive, nothing new this poll -- not an error, don't spam output or count as a processed bar
 
         processed += 1
 
@@ -525,10 +563,10 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
             )
         print(line)
 
-    print(f"\n[SIMULATED] Bars processed: {processed}")
+    print(f"\n[{status_label}] Bars processed: {processed}")
     _print_account_block(engine.account)
     report = reconcile(store)
-    print(f"\n[SIMULATED] Reconciliation: {'OK' if report.ok else 'FAILED'}")
+    print(f"\n[{status_label}] Reconciliation: {'OK' if report.ok else 'FAILED'}")
     if not report.ok:
         for issue in report.issues:
             print(f"  - {issue.check}: {issue.detail}", file=sys.stderr)
@@ -728,7 +766,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     paper_live_parser.add_argument("--symbol", help="Ticker to replay (e.g. AAPL, RELIANCE.NS). Required unless using --kill-switch/--reset-kill-switch.")
     paper_live_parser.add_argument("--interval", default="1m", help="Bar interval: 1m, 5m, 15m, 1d, etc. (default: 1m).")
-    paper_live_parser.add_argument("--period", default="1d", help="Historical window to fetch for the mock feed (default: 1d).")
+    paper_live_parser.add_argument("--period", default="1d", help="Historical window to fetch for the mock feed (default: 1d). Ignored when --source dhan.")
+    paper_live_parser.add_argument(
+        "--source", choices=["mock", "dhan"], default="mock",
+        help=(
+            "Market data source (default: mock). 'dhan' connects to a REAL Dhan WebSocket feed "
+            "(requires DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN env vars) -- execution is ALWAYS paper "
+            "regardless of this setting; no real order can be placed through this command."
+        ),
+    )
+    paper_live_parser.add_argument("--refresh-instrument-map", action="store_true", help="Force a fresh download of Dhan's instrument master CSV instead of reusing the local cache. Only used with --source dhan.")
     paper_live_parser.add_argument("--strategy", default="trend_momentum_baseline", help="Registered strategy name.")
     paper_live_parser.add_argument("--db", type=str, default=None, help=f"SQLite paper-trading journal path (default: {DEFAULT_LIVE_SIM_DB_PATH}).")
     paper_live_parser.add_argument("--state-db", type=str, default=None, help=f"SQLite pending-approval/kill-switch state path (default: {DEFAULT_LIVE_STATE_DB_PATH}).")

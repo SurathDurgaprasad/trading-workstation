@@ -14,16 +14,18 @@ venv/
 data/*.db
 data/market/**/*.csv
 data/market/**/*.json
+data/dhan/
 vectorstore/
 
 # Personal/reference documents not part of the published project
 documents/
 
 # Local secrets (none exist in this project today -- excluded on principle;
-# see the Phase 13/14 security notes for why real credentials must never
+# see the Phase 13/14/15 security notes for why real credentials must never
 # land here even later)
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 

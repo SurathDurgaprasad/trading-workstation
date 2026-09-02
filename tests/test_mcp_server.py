@@ -62,12 +62,15 @@ def test_no_tool_exposes_an_execution_capability():
     # (run_mock_live_simulation_tool, read-only in effect -- runs against an
     # ephemeral in-memory engine, never the persistent paper DB) + 8 from
     # Phase 13 (6 read-only paper-live workstation tools + 2 unmistakably-
-    # named approval-action tools). Several of these mutate PERSISTENT state
-    # -- paper_trade_signal_tool, submit_paper_market_bar_tool,
+    # named approval-action tools) + 3 from Phase 15 (get_live_market_status,
+    # get_dhan_account_funds, get_dhan_account_positions -- all read-only
+    # GETs against a real Dhan account; no place/modify/cancel_order tool
+    # exists anywhere in this server). Several of these mutate PERSISTENT
+    # state -- paper_trade_signal_tool, submit_paper_market_bar_tool,
     # approve_pending_signal_tool, reject_pending_signal_tool -- but only
     # simulated state, unmistakably named; see test_mcp_paper.py,
     # test_mcp_paper_bar.py, and test_mcp_live_workstation.py's dedicated checks.
-    assert len(tool_names) == 20
+    assert len(tool_names) == 23
     for name in tool_names:
         lowered = name.lower()
         for verb in _FORBIDDEN_VERBS:

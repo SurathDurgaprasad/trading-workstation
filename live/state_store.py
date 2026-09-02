@@ -5,7 +5,7 @@ connections to one SQLite file are standard and safe; this deliberately
 does NOT reach into PaperStore's internals or modify paper/store.py's
 schema (spec: "do not blindly refactor").
 
-Two tables:
+Three tables:
   - pending_approvals: one row per signal ever sent to
     PENDING_HUMAN_APPROVAL, updated in place as its lifecycle advances —
     this is the durable audit trail spec §3 requires (signal_id,
@@ -13,6 +13,13 @@ Two tables:
     human decision, decision timestamp/reason, final execution result).
   - kill_switch: a single row, survives restart, requires an explicit
     reset (spec §8).
+  - feed_status (Phase 15 §7/§22): one row per symbol, updated every time
+    LiveSimPipeline processes a real bar — the ONLY way the dashboard (a
+    separate process from whatever is actually driving the feed, e.g. the
+    `paper-live` CLI) can honestly know the data source/status/age of the
+    last bar seen, without polling the feed itself. This is deliberately
+    NOT fabricated from the dashboard side; if no bar has ever been
+    written here, the dashboard says so rather than guessing.
 """
 
 import sqlite3
@@ -50,6 +57,16 @@ CREATE TABLE IF NOT EXISTS kill_switch (
     reason TEXT,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS feed_status (
+    symbol TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    status TEXT NOT NULL,
+    bar_timestamp TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    connection_state TEXT,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -74,6 +91,17 @@ class PendingApprovalRecord:
     decision_reason: str | None = None
     approved_quantity: int | None = None
     final_execution_result: str | None = None
+
+
+@dataclass
+class FeedStatusRecord:
+    symbol: str
+    source: str  # DataSource value, e.g. "DHAN", "MOCK" -- stored as plain text, not the enum itself (this store never imports market.data_provider)
+    status: str  # DataStatus value, e.g. "LIVE", "SIMULATED"
+    bar_timestamp: str
+    received_at: str
+    connection_state: str | None
+    updated_at: str
 
 
 class LiveStateStore:
@@ -180,6 +208,32 @@ class LiveStateStore:
             "ON CONFLICT(id) DO UPDATE SET active=0, activated_at=NULL, reason=NULL, updated_at=excluded.updated_at",
             (_now(),),
         )
+
+    # --- feed status (Phase 15) -------------------------------------------------
+
+    def save_feed_status(
+        self, *, symbol: str, source: str, status: str, bar_timestamp: datetime, received_at: datetime, connection_state: str | None = None,
+    ) -> None:
+        self._conn.execute(
+            "INSERT INTO feed_status (symbol, source, status, bar_timestamp, received_at, connection_state, updated_at) "
+            "VALUES (?,?,?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET "
+            "source=excluded.source, status=excluded.status, bar_timestamp=excluded.bar_timestamp, "
+            "received_at=excluded.received_at, connection_state=excluded.connection_state, updated_at=excluded.updated_at",
+            (symbol, source, status, bar_timestamp.isoformat(), received_at.isoformat(), connection_state, _now()),
+        )
+
+    def get_feed_status(self, symbol: str) -> "FeedStatusRecord | None":
+        row = self._conn.execute(
+            "SELECT symbol, source, status, bar_timestamp, received_at, connection_state, updated_at FROM feed_status WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+        if row is None:
+            return None
+        return FeedStatusRecord(symbol=row[0], source=row[1], status=row[2], bar_timestamp=row[3], received_at=row[4], connection_state=row[5], updated_at=row[6])
+
+    def list_feed_status(self) -> list["FeedStatusRecord"]:
+        rows = self._conn.execute("SELECT symbol, source, status, bar_timestamp, received_at, connection_state, updated_at FROM feed_status ORDER BY symbol").fetchall()
+        return [FeedStatusRecord(symbol=r[0], source=r[1], status=r[2], bar_timestamp=r[3], received_at=r[4], connection_state=r[5], updated_at=r[6]) for r in rows]
 
 
 def _serialize_history(history: list[tuple]) -> str:
