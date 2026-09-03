@@ -43,7 +43,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate")
+_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -1004,6 +1004,94 @@ def run_evaluate_command(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+# `learn` -- Phase 24 performance learning: READ-ONLY analysis over Phase
+# 23's prediction history (strategy comparison, market regime performance,
+# confidence calibration, signal quality). Per the roadmap's own Phase 24
+# rule ("No automatic strategy modification without Versioning/Evaluation/
+# Rollback/Audit Trail"), this command changes no configuration and places
+# no order -- learning/ never writes to DecisionConfig, RiskConfig, or
+# anything else.
+# --------------------------------------------------------------------------
+
+
+def _fmt_pct(value: float | None) -> str:
+    return f"{value:+.2%}" if value is not None else "n/a"
+
+
+def _fmt_ratio(value: float | None) -> str:
+    return f"{value:.2f}" if value is not None else "n/a"
+
+
+def run_learn_command(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
+    from backtesting.cache import CachedMarketDataProvider
+    from decision_engine.store import DecisionStore
+    from learning.analysis import EvaluatedPrediction, build_learning_report
+    from market.data_provider import get_market_data_provider
+    from predictions.store import PredictionStore
+
+    predictions_db = args.predictions_db or DEFAULT_PREDICTIONS_DB_PATH
+    decision_db = args.decision_db or DEFAULT_DECISION_DB_PATH
+
+    items: list[EvaluatedPrediction] = []
+    if Path(predictions_db).exists():
+        prediction_store = PredictionStore(predictions_db)
+        decision_store = DecisionStore(decision_db) if Path(decision_db).exists() else None
+
+        for prediction in prediction_store.list_predictions():
+            evaluation = prediction_store.latest_evaluation_for_prediction(prediction.prediction_id)
+            if evaluation is None:
+                continue
+            decision = decision_store.get_decision(prediction.decision_id) if decision_store is not None else None
+            items.append(EvaluatedPrediction(prediction=prediction, evaluation=evaluation, decision=decision))
+
+        prediction_store.close()
+        if decision_store is not None:
+            decision_store.close()
+
+    logger.info("Building performance learning report over %d evaluated predictions", len(items))
+    provider = CachedMarketDataProvider(get_market_data_provider())
+    report = build_learning_report(items, provider=provider)
+
+    print("=" * 70)
+    print("PERFORMANCE LEARNING REPORT -- READ-ONLY (no configuration changed, no order placed)")
+    print("=" * 70)
+    print(f"Generated at:           {report.generated_at.isoformat()}")
+    print(f"Predictions considered: {report.total_predictions_considered}")
+
+    print("\nStrategy comparison (by decision config version):")
+    if not report.strategy_comparison:
+        print("  (none)")
+    for s in report.strategy_comparison:
+        print(
+            f"  {s.config_version:18s} total={s.total:4d} resolved={s.resolved:4d} "
+            f"win_rate={_fmt_pct(s.win_rate)} avg_return={_fmt_pct(s.average_return)} profit_factor={_fmt_ratio(s.profit_factor)}"
+        )
+
+    print("\nMarket regime performance (at entry):")
+    if not report.regime_performance:
+        print("  (none)")
+    for r in report.regime_performance:
+        print(f"  {r.regime.value:10s} total={r.total:4d} resolved={r.resolved:4d} win_rate={_fmt_pct(r.win_rate)} avg_return={_fmt_pct(r.average_return)}")
+
+    print("\nConfidence calibration (composite score median split):")
+    if not report.confidence_calibration:
+        print("  (none -- no predictions with recorded scanner evidence)")
+    for c in report.confidence_calibration:
+        print(f"  {c.bucket_label:34s} total={c.total:4d} resolved={c.resolved:4d} win_rate={_fmt_pct(c.win_rate)} avg_return={_fmt_pct(c.average_return)}")
+
+    print("\nSignal quality (resolved predictions only):")
+    print(f"  Resolved:                {report.signal_quality.resolved}")
+    print(f"  Avg favorable excursion: {_fmt_pct(report.signal_quality.average_favorable_excursion)}")
+    print(f"  Avg adverse excursion:   {_fmt_pct(report.signal_quality.average_adverse_excursion)}")
+
+    print("\nNotes:")
+    for note in report.notes:
+        print(f"  - {note}")
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -1296,6 +1384,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     evaluate_parser.add_argument("--db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
     evaluate_parser.add_argument("--period", default="1y", help="Historical window to fetch per symbol when checking for a resolution (default: 1y).")
 
+    learn_parser = subparsers.add_parser(
+        "learn",
+        help=(
+            "Phase 24: READ-ONLY performance analysis over evaluated predictions -- strategy comparison, market "
+            "regime performance, confidence calibration, signal quality. Changes no configuration, places no order."
+        ),
+    )
+    learn_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
+    learn_parser.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path, for strategy/calibration grouping (default: {DEFAULT_DECISION_DB_PATH}).")
+
     return parser.parse_args(argv)
 
 
@@ -1329,6 +1427,8 @@ def main() -> None:
             run_predict_command(args)
         elif args.command == "evaluate":
             run_evaluate_command(args)
+        elif args.command == "learn":
+            run_learn_command(args)
         else:
             run_analyze_command(args)
     except _CONTROLLED_ERRORS as exc:

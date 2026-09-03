@@ -4,6 +4,7 @@ from main import (
     parse_args,
     run_decide_command,
     run_evaluate_command,
+    run_learn_command,
     run_paper_live_command,
     run_predict_command,
     run_research_command,
@@ -515,6 +516,88 @@ def test_run_evaluate_command_with_no_predictions_reports_zero_cleanly(tmp_path,
     assert "Predictions needing evaluation: 0" in output
     assert "Total:             0" in output
     assert "n/a" in output
+
+
+def test_learn_subcommand_defaults():
+    args = parse_args(["learn"])
+    assert args.command == "learn"
+    assert args.predictions_db is None
+    assert args.decision_db is None
+
+
+def test_learn_subcommand_overrides():
+    args = parse_args(["learn", "--predictions-db", "/tmp/predictions.db", "--decision-db", "/tmp/decisions.db"])
+    assert args.predictions_db == "/tmp/predictions.db"
+    assert args.decision_db == "/tmp/decisions.db"
+
+
+def test_run_learn_command_with_no_predictions_reports_zero_cleanly(tmp_path, capsys):
+    args = parse_args(["learn", "--predictions-db", str(tmp_path / "no-such-predictions.db")])
+    run_learn_command(args)
+
+    output = capsys.readouterr().out
+    assert "PERFORMANCE LEARNING REPORT -- READ-ONLY (no configuration changed, no order placed)" in output
+    assert "Predictions considered: 0" in output
+    assert "Experiment Tracking" in output
+
+
+def test_run_learn_command_end_to_end_with_real_stores(tmp_path, capsys, monkeypatch):
+    from datetime import datetime, timezone
+
+    import backtesting.cache as cache_module
+    import market.data_provider as market_data_provider_module
+    from decision_engine.models import Decision, DecisionLabel, RiskContext
+    from decision_engine.store import DecisionStore
+    from market.data_provider import MarketDataError
+    from market_intelligence.models import CandidateScore
+    from predictions.models import PredictionEvaluation, PredictionOutcomeState, PredictionRecord
+    from predictions.store import PredictionStore
+
+    decision_db = tmp_path / "decisions.db"
+    decision_store = DecisionStore(decision_db)
+    candidate = CandidateScore(
+        symbol="AAPL", as_of=datetime(2024, 1, 2), last_close=100.0, avg_daily_value=1_000_000.0,
+        volume_ratio=1.1, trend_score=1.0, momentum_score=0.5, breakout_score=0.01,
+        relative_strength_score=0.02, sector_strength_score=None, composite_score=1.5, explanation=["fake"],
+    )
+    decision_store.save_decision(Decision(
+        decision_id="dec-1", symbol="AAPL", as_of=datetime(2024, 1, 2, tzinfo=timezone.utc), label=DecisionLabel.BUY,
+        rationale=["fake"], config_version="cfg1", scanner_evidence=candidate, research_evidence=None,
+        market_context=None, risk_context=RiskContext.unknown(), narrative=None, narrative_unavailable_reason=None,
+    ))
+    decision_store.close()
+
+    predictions_db = tmp_path / "predictions.db"
+    prediction_store = PredictionStore(predictions_db)
+    prediction_store.save_prediction(PredictionRecord(
+        prediction_id="pred-1", decision_id="dec-1", symbol="AAPL", created_at=datetime.now(timezone.utc),
+        label=DecisionLabel.BUY, entry_price=100.0, stop_price=95.0, target_price=110.0, entry_time=datetime(2024, 1, 2),
+        horizon_bars=20, interval="1d",
+    ))
+    prediction_store.save_evaluation(PredictionEvaluation(
+        evaluation_id="eval-1", prediction_id="pred-1", evaluated_at=datetime.now(timezone.utc),
+        outcome=PredictionOutcomeState.TARGET_HIT, bars_observed=5, exit_time=datetime(2024, 1, 9),
+        exit_price=110.0, actual_return=0.10, max_favorable_excursion=0.10, max_adverse_excursion=0.01, detail="test",
+    ))
+    prediction_store.close()
+
+    class _FakeProvider:
+        def fetch_ohlcv(self, symbol, *, period="1y", interval="1d"):
+            raise MarketDataError("no regime data in this test")
+
+    # Avoid any real network/cache-file I/O: replace the provider factory with a
+    # fake, and replace CachedMarketDataProvider with an identity pass-through
+    # so no data/market/ cache file is ever written by this test.
+    monkeypatch.setattr(market_data_provider_module, "get_market_data_provider", lambda: _FakeProvider())
+    monkeypatch.setattr(cache_module, "CachedMarketDataProvider", lambda inner: inner)
+
+    args = parse_args(["learn", "--predictions-db", str(predictions_db), "--decision-db", str(decision_db)])
+    run_learn_command(args)
+
+    output = capsys.readouterr().out
+    assert "PERFORMANCE LEARNING REPORT -- READ-ONLY (no configuration changed, no order placed)" in output
+    assert "Predictions considered: 1" in output
+    assert "cfg1" in output
 
 
 def test_paper_live_kill_switch_flags_parse_without_a_symbol():
