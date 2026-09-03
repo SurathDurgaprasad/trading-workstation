@@ -61,7 +61,16 @@ To try the real Dhan market-data feed instead of the mock replay (still paper ex
 python main.py paper-live --symbol RELIANCE.NS --source dhan
 ```
 
-Full test suite:
+**Ollama (optional — only for `analyze` and the AI explanation feature):** every other command (`backtest`, `paper`, `paper-live`, `dashboard`) works with no Ollama installed at all. If you do want `analyze`/AI explanations, install [Ollama](https://ollama.com), start it (`ollama serve`), and pull the two models this project uses by default (see `core/config.py`'s `Settings` for the exact names if you've changed them):
+
+```bash
+ollama pull qwen2.5-coder:7b
+ollama pull nomic-embed-text
+```
+
+Without Ollama running, `analyze` and any AI-explanation step fail with a clear, one-line error (`Ollama is not reachable at http://localhost:11434...`) — never a crash or a silent hang.
+
+Full test suite (no Ollama required — the suite runs standalone by design):
 
 ```bash
 pytest
@@ -71,6 +80,6 @@ Some tests use cached historical market data (`data/market/`) or a downloaded Dh
 
 ## Project status
 
-Development has proceeded in numbered phases, each with its own forensic audit and report — see [`docs/PHASE_HISTORY.md`](docs/PHASE_HISTORY.md) for the full index, including the original phase reports preserved under `docs/phases/`. As of Phase 16, 533 tests pass (1 pre-existing failure, unrelated to any of this — a local Ollama daemon isn't running in every environment). The human-operated workstation (CLI, dashboard, MCP, approval workflow, kill switch, reconciliation) and the real Dhan market-data adapter are both code-complete, tested, and — as of Phase 16 — verified against the live Dhan service.
+Development has proceeded in numbered phases, each with its own forensic audit and report — see [`docs/PHASE_HISTORY.md`](docs/PHASE_HISTORY.md) for the full index, including the original phase reports preserved under `docs/phases/`. As of Phase 17, all 536 tests pass standalone — the full suite has no external-service dependency (a previously Ollama-dependent test was corrected to mock that dependency, matching its actual intent; see the Phase 17 report). The human-operated workstation (CLI, dashboard, MCP, approval workflow, kill switch, reconciliation) and the real Dhan market-data adapter are both code-complete, tested, and — as of Phase 16 — verified against the live Dhan service.
 
 What remains before real trading could even be considered: a naturally-occurring real trading signal traced end-to-end through the risk engine, human approval, and paper execution (not yet observed — real market data has flowed through the pipeline as far as strategy invocation, but no signal has occurred yet to exercise the rest of the chain against real data), a real order-placement adapter (does not exist — only a structurally-disabled stub does), and, independently of any of that, actual evidence the strategy has an edge (it doesn't, as of the last validation study).

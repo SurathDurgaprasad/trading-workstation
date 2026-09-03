@@ -51,6 +51,7 @@ provided for reference, not as a substitute for a committed file.
 | 15 | Dhan live market data integration, read-only first | [`docs/phases/phase-15-dhan-integration.html`](phases/phase-15-dhan-integration.html) |
 | &mdash; | GitHub Reconciliation Audit (this repository's own forensic audit, pre-Phase-16) | [`https://claude.ai/code/artifact/e44ea528-f8b2-4efb-bc60-3d15d77ca174`](https://claude.ai/code/artifact/e44ea528-f8b2-4efb-bc60-3d15d77ca174) — Claude Artifact only |
 | 16 | Real Dhan connectivity verification — real REST calls, real WebSocket data, four real bugs found and fixed (including a reconnect storm and a timezone decoding bug), 10 real bars traced through the pipeline to strategy invocation. No natural signal occurred; risk/approval/paper remain deterministic-test-only, not real-service-verified | [`docs/phases/phase-16-dhan-real-connectivity.html`](phases/phase-16-dhan-real-connectivity.html) |
+| 17 | Production readiness & operationalization audit — startup/shutdown lifecycle, dependency degradation, observability, security, and persistence reviewed against the running code. Two real bugs found and fixed: an Ollama-dependent test misclassified as a hard dependency, and the Dhan/mock market-data source never being closed on any CLI exit path (including Ctrl+C) | [`docs/phases/phase-17-production-readiness.html`](phases/phase-17-production-readiness.html) |
 
 ## Artifact-only reports (for reference; not committed as files)
 
