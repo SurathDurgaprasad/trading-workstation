@@ -36,6 +36,36 @@ def test_make_decision_no_action_when_no_candidate():
     assert decision.scanner_evidence is None
 
 
+def test_make_decision_computes_confidence_deterministically():
+    decision = make_decision("AAPL", candidate=_candidate(composite=1.5, trend=1.0, momentum=0.5), include_narrative=False)
+    assert decision.confidence is not None
+    assert 0.0 <= decision.confidence <= 1.0
+    assert decision.confidence_explanation is not None
+    assert "agree" in decision.confidence_explanation
+
+
+def test_make_decision_confidence_is_zero_with_no_candidate():
+    decision = make_decision("AAPL", candidate=None, include_narrative=False)
+    assert decision.confidence == 0.0
+
+
+def test_make_decision_confidence_never_llm_derived(monkeypatch):
+    """Confidence must be identical whether or not the AI narrative step
+    ran -- it is computed purely from decision_engine.confidence, never
+    from an LLM call, per the roadmap's own explicit rule for this phase."""
+    from llm.errors import OllamaUnavailableError
+
+    def _raise(*args, **kwargs):
+        raise OllamaUnavailableError("http://localhost:11434")
+
+    monkeypatch.setattr("llm.provider.check_ollama_availability", _raise)
+
+    with_narrative_attempt = make_decision("AAPL", candidate=_candidate(), include_narrative=True)
+    without_narrative = make_decision("AAPL", candidate=_candidate(), include_narrative=False)
+
+    assert with_narrative_attempt.confidence == without_narrative.confidence
+
+
 def test_make_decision_does_not_crash_when_holding_with_no_scanner_evidence():
     """Regression for a bug found by self-audit: classify() used to return WATCH here
     with no candidate, which Decision's own model_validator then rejected (WATCH requires

@@ -19,6 +19,7 @@ import logging
 from datetime import datetime, timezone
 
 from decision_engine.config import DecisionConfig
+from decision_engine.confidence import compute_confidence
 from decision_engine.models import Decision, RiskContext
 from decision_engine.rules import classify
 from market.context import MarketContext
@@ -81,6 +82,7 @@ def make_decision(
     decision_time = now or datetime.now(timezone.utc)
 
     label, rationale = classify(symbol=normalized, candidate=candidate, risk_context=resolved_risk_context, config=config)
+    confidence_breakdown = compute_confidence(candidate)
 
     decision = Decision(
         decision_id=Decision.new_id(),
@@ -93,6 +95,8 @@ def make_decision(
         research_evidence=research,
         market_context=market_context,
         risk_context=resolved_risk_context,
+        confidence=confidence_breakdown.score,
+        confidence_explanation=confidence_breakdown.explanation(),
         narrative=None,
         narrative_unavailable_reason=None,
     )

@@ -130,6 +130,26 @@ def test_intelligence_page_shows_data_source_and_status_when_present(client, _is
     assert "DHAN / LIVE" in response.text
 
 
+def test_intelligence_page_shows_confidence_when_present(client, _isolated_intelligence_dbs):
+    """Phase 34: a decision's real decision_engine.confidence score must
+    be shown -- never fabricated when absent."""
+    tmp_path = _isolated_intelligence_dbs
+    candidate = _candidate("AAPL", composite=1.75)
+    _save_scan(tmp_path / "scanner.db", candidate)
+
+    store = DecisionStore(tmp_path / "decisions.db")
+    store.save_decision(Decision(
+        decision_id="dec-AAPL", symbol="AAPL", as_of=datetime(2024, 6, 1, tzinfo=timezone.utc), label=DecisionLabel.BUY,
+        rationale=["fake"], config_version="cfg1", scanner_evidence=candidate, research_evidence=None,
+        market_context=None, risk_context=RiskContext.unknown(), confidence=0.8, confidence_explanation="4 of 5 agree",
+        narrative=None, narrative_unavailable_reason=None,
+    ))
+    store.close()
+
+    response = client.get("/intelligence")
+    assert "80%" in response.text
+
+
 def test_intelligence_page_shows_n_a_when_market_context_absent(client, _isolated_intelligence_dbs):
     """A decision with no market_context at all (e.g. from standalone
     `decide`, which does not build one) must show an honest "n/a" --

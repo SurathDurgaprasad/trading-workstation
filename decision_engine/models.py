@@ -113,6 +113,17 @@ class Decision(BaseModel):
     market_context: MarketContext | None
     risk_context: RiskContext
 
+    confidence: float | None = None
+    """Phase 34 -- decision_engine.confidence.compute_confidence's score
+    (0.0-1.0): fraction of available scanner factors agreeing with this
+    decision's own direction. Deterministic, never LLM-derived. None only
+    for a Decision built before this field existed, or with no
+    scanner_evidence at all (NO_ACTION)."""
+    confidence_explanation: str | None = None
+    """The same computation's own explanation() string -- which factors
+    agreed/disagreed, in plain language. Always present when `confidence`
+    is, for provenance."""
+
     narrative: str | None
     narrative_unavailable_reason: str | None
 

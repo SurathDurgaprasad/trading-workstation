@@ -6,6 +6,7 @@ from learning.analysis import (
     build_learning_report,
     compare_by_config_version,
     compute_confidence_calibration,
+    compute_real_confidence_calibration,
     compute_regime_performance,
     compute_signal_quality,
 )
@@ -25,12 +26,13 @@ def _candidate(composite: float = 1.0) -> CandidateScore:
     )
 
 
-def _decision(decision_id: str, *, config_version: str = "cfg1", composite: float | None = 1.0) -> Decision:
+def _decision(decision_id: str, *, config_version: str = "cfg1", composite: float | None = 1.0, confidence: float | None = None) -> Decision:
     return Decision(
         decision_id=decision_id, symbol="AAPL", as_of=datetime(2024, 1, 2, tzinfo=timezone.utc), label=DecisionLabel.BUY,
         rationale=["fake"], config_version=config_version,
         scanner_evidence=_candidate(composite) if composite is not None else None,
         research_evidence=None, market_context=None, risk_context=RiskContext.unknown(),
+        confidence=confidence, confidence_explanation="fake" if confidence is not None else None,
         narrative=None, narrative_unavailable_reason=None,
     )
 
@@ -167,6 +169,52 @@ def test_confidence_calibration_empty_input_returns_empty_list():
     assert compute_confidence_calibration([]) == []
 
 
+# --- compute_real_confidence_calibration (Phase 34) -----------------------------
+
+
+def test_real_confidence_calibration_buckets_by_fixed_bands():
+    items = [
+        EvaluatedPrediction(_prediction("p1", "d1"), _evaluation("p1", PredictionOutcomeState.TARGET_HIT, actual_return=0.1), _decision("d1", confidence=0.2)),
+        EvaluatedPrediction(_prediction("p2", "d2"), _evaluation("p2", PredictionOutcomeState.STOP_HIT, actual_return=-0.05), _decision("d2", confidence=0.6)),
+        EvaluatedPrediction(_prediction("p3", "d3"), _evaluation("p3", PredictionOutcomeState.TARGET_HIT, actual_return=0.2), _decision("d3", confidence=0.9)),
+        EvaluatedPrediction(_prediction("p4", "d4"), _evaluation("p4", PredictionOutcomeState.TARGET_HIT, actual_return=0.15), _decision("d4", confidence=1.0)),
+    ]
+    buckets = compute_real_confidence_calibration(items)
+
+    low = next(b for b in buckets if b.bucket_label.startswith("LOW"))
+    medium = next(b for b in buckets if b.bucket_label.startswith("MEDIUM"))
+    high = next(b for b in buckets if b.bucket_label.startswith("HIGH"))
+
+    assert low.total == 1    # 0.2
+    assert medium.total == 1  # 0.6
+    assert high.total == 2    # 0.9, 1.0 (1.0 must land in HIGH, not be excluded by the upper boundary)
+
+
+def test_real_confidence_calibration_win_rate_per_bucket():
+    items = [
+        EvaluatedPrediction(_prediction("p1", "d1"), _evaluation("p1", PredictionOutcomeState.TARGET_HIT, actual_return=0.1), _decision("d1", confidence=0.9)),
+        EvaluatedPrediction(_prediction("p2", "d2"), _evaluation("p2", PredictionOutcomeState.TARGET_HIT, actual_return=0.2), _decision("d2", confidence=0.85)),
+        EvaluatedPrediction(_prediction("p3", "d3"), _evaluation("p3", PredictionOutcomeState.STOP_HIT, actual_return=-0.1), _decision("d3", confidence=0.1)),
+    ]
+    buckets = compute_real_confidence_calibration(items)
+    high = next(b for b in buckets if b.bucket_label.startswith("HIGH"))
+    low = next(b for b in buckets if b.bucket_label.startswith("LOW"))
+
+    assert high.win_rate == 1.0  # both HIGH-confidence predictions hit target
+    assert low.win_rate == 0.0   # the one LOW-confidence prediction hit stop
+
+
+def test_real_confidence_calibration_excludes_decisions_with_no_confidence():
+    items = [
+        EvaluatedPrediction(_prediction("p1", "d1"), _evaluation("p1", PredictionOutcomeState.TARGET_HIT, actual_return=0.1), _decision("d1", confidence=None)),
+    ]
+    assert compute_real_confidence_calibration(items) == []
+
+
+def test_real_confidence_calibration_empty_input_returns_empty_list():
+    assert compute_real_confidence_calibration([]) == []
+
+
 # --- compute_signal_quality ---------------------------------------------------
 
 
@@ -207,7 +255,7 @@ def test_signal_quality_empty_input_is_none_safe():
 def test_build_learning_report_composes_everything_and_states_honest_notes():
     provider = _FakeProvider({"AAPL": _rising_ohlcv("AAPL")})
     items = [
-        EvaluatedPrediction(_prediction("p1", "d1"), _evaluation("p1", PredictionOutcomeState.TARGET_HIT, actual_return=0.1), _decision("d1")),
+        EvaluatedPrediction(_prediction("p1", "d1"), _evaluation("p1", PredictionOutcomeState.TARGET_HIT, actual_return=0.1), _decision("d1", confidence=0.9)),
     ]
     report = build_learning_report(items, provider=provider)
 
@@ -215,6 +263,7 @@ def test_build_learning_report_composes_everything_and_states_honest_notes():
     assert len(report.strategy_comparison) == 1
     assert len(report.regime_performance) == 1
     assert len(report.confidence_calibration) == 2
+    assert len(report.real_confidence_calibration) == 3
     assert report.signal_quality.resolved == 1
     assert any("Experiment Tracking" in note for note in report.notes)
     assert any("Model Comparison" in note for note in report.notes)
@@ -226,4 +275,5 @@ def test_build_learning_report_handles_zero_predictions():
     assert report.strategy_comparison == []
     assert report.regime_performance == []
     assert report.confidence_calibration == []
+    assert report.real_confidence_calibration == []
     assert report.signal_quality.resolved == 0

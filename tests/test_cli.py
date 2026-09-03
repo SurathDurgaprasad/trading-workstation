@@ -326,6 +326,7 @@ def test_run_decide_command_end_to_end_with_real_scanner_and_research_stores(tmp
     output = capsys.readouterr().out
     assert "DECISION -- LABEL ONLY, NOT AN ORDER (no trade is placed by this command)" in output
     assert "LABEL:          BUY" in output
+    assert "Confidence:     100% " in output  # trend/momentum/breakout/relative_strength all agree, sector_strength is None
     assert "Scanner evidence: none found" not in output
     assert "Research evidence: none found" not in output
 

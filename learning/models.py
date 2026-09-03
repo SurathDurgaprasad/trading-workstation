@@ -78,6 +78,12 @@ class LearningReport(BaseModel):
     strategy_comparison: list[StrategyPerformance]
     regime_performance: list[RegimePerformance]
     confidence_calibration: list[CalibrationBucket]
+    real_confidence_calibration: list[CalibrationBucket] = []
+    """Phase 34 -- calibration against decision_engine.confidence's real,
+    deterministic score (fixed LOW/MEDIUM/HIGH bands), distinct from
+    `confidence_calibration` above (a composite-score median-split
+    proxy, kept for continuity). Empty for any prediction set with no
+    Decision.confidence recorded (e.g. all pre-Phase-34 decisions)."""
     signal_quality: SignalQualityReport
     notes: list[str]
     """Honest statements of what this report does NOT cover -- e.g.

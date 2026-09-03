@@ -119,6 +119,37 @@ def compute_confidence_calibration(items: list[EvaluatedPrediction]) -> list[Cal
     return buckets
 
 
+_CONFIDENCE_BUCKETS = (
+    (0.0, 0.5, "LOW confidence (<50%)"),
+    (0.5, 0.8, "MEDIUM confidence (50-80%)"),
+    (0.8, 1.01, "HIGH confidence (>=80%)"),  # 1.01 so a real 1.0 (100%) score is included in the top bucket
+)
+
+
+def compute_real_confidence_calibration(items: list[EvaluatedPrediction]) -> list[CalibrationBucket]:
+    """Phase 34 -- genuine calibration against decision_engine.confidence's
+    real, deterministic score (Decision.confidence), NOT the composite-
+    score median-split proxy `compute_confidence_calibration` above uses.
+    Fixed bucket boundaries (not a moving median) so a reader can compare
+    across different scans/runs on stable, interpretable terms: does a
+    HIGH-confidence decision actually resolve better than a LOW one?
+
+    Only considers items whose Decision actually has a `confidence` score
+    (None for any Decision built before this phase, or with no
+    scanner_evidence) -- never fabricates a score for one that lacks it."""
+    scored = [item for item in items if item.decision is not None and item.decision.confidence is not None]
+    if not scored:
+        return []
+
+    buckets = []
+    for low, high, label in _CONFIDENCE_BUCKETS:
+        group = [item for item in scored if low <= item.decision.confidence < high]
+        returns = _resolved_returns(group)
+        win_rate, average_return, _ = _resolution_stats(returns)
+        buckets.append(CalibrationBucket(bucket_label=label, total=len(group), resolved=len(returns), win_rate=win_rate, average_return=average_return))
+    return buckets
+
+
 def compute_signal_quality(items: list[EvaluatedPrediction]) -> SignalQualityReport:
     # Unlike strategy comparison / calibration, this only needs
     # PredictionEvaluation data -- a missing Decision does not exclude an
@@ -143,14 +174,15 @@ def build_learning_report(
         strategy_comparison=compare_by_config_version(items),
         regime_performance=compute_regime_performance(items, provider=provider),
         confidence_calibration=compute_confidence_calibration(items),
+        real_confidence_calibration=compute_real_confidence_calibration(items),
         signal_quality=compute_signal_quality(items),
         notes=[
             "Experiment Tracking is not implemented this phase -- no experiment-tracking framework exists in this system yet.",
             "Model Comparison is not implemented this phase -- there is exactly one deterministic decision rule "
             "(decision_engine.rules.classify) with one toggleable flag, not multiple competing models; see "
             "strategy_comparison (grouped by DecisionConfig.version_id) for the closest available comparison.",
-            "Confidence Calibration here means 'does a higher CandidateScore.composite_score predict a better "
-            "outcome' -- decision_engine.models.Decision has no numeric stated-confidence field of its own yet, "
-            "so this is not literal probability calibration.",
+            "confidence_calibration (composite-score median split) is a legacy proxy kept for continuity -- "
+            "real_confidence_calibration (Phase 34) uses decision_engine.confidence's actual deterministic "
+            "score against fixed LOW/MEDIUM/HIGH bands and is the more meaningful of the two.",
         ],
     )

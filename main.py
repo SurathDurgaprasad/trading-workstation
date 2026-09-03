@@ -957,6 +957,8 @@ def run_decide_command(args: argparse.Namespace) -> None:
     print(f"Symbol:         {decision.symbol}")
     print(f"As of:          {decision.as_of.isoformat()}")
     print(f"LABEL:          {decision.label.value}")
+    if decision.confidence is not None:
+        print(f"Confidence:     {decision.confidence:.0%} ({decision.confidence_explanation})")
     print(f"Config version: {decision.config_version}")
     print(f"Database:       {db_path}")
 
@@ -1214,10 +1216,16 @@ def run_learn_command(args: argparse.Namespace) -> None:
     for r in report.regime_performance:
         print(f"  {r.regime.value:10s} total={r.total:4d} resolved={r.resolved:4d} win_rate={_fmt_pct(r.win_rate)} avg_return={_fmt_pct(r.average_return)}")
 
-    print("\nConfidence calibration (composite score median split):")
+    print("\nConfidence calibration (composite score median split -- legacy proxy):")
     if not report.confidence_calibration:
         print("  (none -- no predictions with recorded scanner evidence)")
     for c in report.confidence_calibration:
+        print(f"  {c.bucket_label:34s} total={c.total:4d} resolved={c.resolved:4d} win_rate={_fmt_pct(c.win_rate)} avg_return={_fmt_pct(c.average_return)}")
+
+    print("\nConfidence calibration (Phase 34: real decision_engine.confidence score, fixed LOW/MEDIUM/HIGH bands):")
+    if not report.real_confidence_calibration:
+        print("  (none -- no decisions with a recorded confidence score)")
+    for c in report.real_confidence_calibration:
         print(f"  {c.bucket_label:34s} total={c.total:4d} resolved={c.resolved:4d} win_rate={_fmt_pct(c.win_rate)} avg_return={_fmt_pct(c.average_return)}")
 
     print("\nSignal quality (resolved predictions only):")
