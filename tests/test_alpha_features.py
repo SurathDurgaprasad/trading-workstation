@@ -9,7 +9,7 @@ import pytest
 
 from market.indicators import compute_indicator_series
 from market.data_provider import OHLCV
-from research.alpha_features import FEATURE_COLUMNS, add_alpha_features, add_forward_return_targets
+from quant_research.alpha_features import FEATURE_COLUMNS, add_alpha_features, add_forward_return_targets
 
 
 def _ohlcv(n, symbol="TEST", seed_close=100.0):

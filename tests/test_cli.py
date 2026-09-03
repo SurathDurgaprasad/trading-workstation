@@ -1,6 +1,6 @@
 import pytest
 
-from main import parse_args, run_paper_live_command, run_scan_command
+from main import parse_args, run_paper_live_command, run_research_command, run_scan_command
 from tests.conftest import AAPL_CACHE_PATH
 
 
@@ -193,6 +193,62 @@ def test_scan_command_requires_symbols_or_watchlist_file():
     args = parse_args(["scan"])
     with pytest.raises(SystemExit):
         run_scan_command(args)
+
+
+def test_research_subcommand_defaults():
+    args = parse_args(["research", "--symbol", "AAPL"])
+    assert args.command == "research"
+    assert args.symbol == "AAPL"
+    assert args.news_limit == 10
+    assert args.no_ai_summary is False
+    assert args.db is None
+
+
+def test_research_subcommand_overrides():
+    args = parse_args(["research", "--symbol", "RELIANCE.NS", "--news-limit", "3", "--no-ai-summary", "--db", "/tmp/research.db"])
+    assert args.symbol == "RELIANCE.NS"
+    assert args.news_limit == 3
+    assert args.no_ai_summary is True
+    assert args.db == "/tmp/research.db"
+
+
+def test_run_research_command_end_to_end_with_fake_providers(tmp_path, capsys, monkeypatch):
+    from datetime import datetime, timezone
+
+    from research import news as research_news
+    from research import sector as research_sector
+    from research.models import NewsItem, SectorInfo
+
+    class _FakeNewsProvider:
+        def fetch_news(self, symbol, *, limit=10):
+            return [
+                NewsItem(
+                    title="A real-shaped headline", summary="Summary text.", source="Yahoo Finance",
+                    url="https://example.com/a", published_at=datetime(2026, 9, 2, tzinfo=timezone.utc),
+                )
+            ]
+
+    class _FakeSectorProvider:
+        def fetch_sector_info(self, symbol):
+            return SectorInfo(symbol=symbol, sector="Technology", industry="Consumer Electronics", as_of=datetime.now(timezone.utc))
+
+    monkeypatch.setattr(research_news, "YahooNewsProvider", _FakeNewsProvider)
+    monkeypatch.setattr(research_sector, "YahooSectorInfoProvider", _FakeSectorProvider)
+
+    args = parse_args(["research", "--symbol", "AAPL", "--no-ai-summary", "--db", str(tmp_path / "research.db")])
+    run_research_command(args)
+
+    output = capsys.readouterr().out
+    assert "RESEARCH REPORT -- EVIDENCE ONLY (no recommendation, no buy/sell)" in output
+    assert "A real-shaped headline" in output
+    assert "Technology" in output
+    assert "AI SUMMARY: not available" in output
+
+    from research.store import ResearchStore
+
+    store = ResearchStore(tmp_path / "research.db")
+    assert store.latest_report_for_symbol("AAPL") is not None
+    store.close()
 
 
 def test_paper_live_kill_switch_flags_parse_without_a_symbol():

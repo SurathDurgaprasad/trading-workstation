@@ -8,7 +8,7 @@ import pytest
 
 from market.indicators import compute_indicator_series
 from market.data_provider import OHLCV
-from research.volume_signal import (
+from quant_research.volume_signal import (
     CANDIDATES,
     VolumeSignalStrategy,
     dev_fit_volume_thresholds,

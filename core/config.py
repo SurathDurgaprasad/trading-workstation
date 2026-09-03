@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-AgentRole = Literal["technical", "risk", "critic", "debate", "supervisor", "signal_explainer"]
+AgentRole = Literal["technical", "risk", "critic", "debate", "supervisor", "signal_explainer", "research_summarizer"]
 
 
 class LLMProvider(str, Enum):
@@ -39,6 +39,7 @@ class Settings(BaseModel):
     debate_temperature: float = 0.3
     supervisor_temperature: float = 0.1
     signal_explainer_temperature: float = 0.2
+    research_summarizer_temperature: float = 0.2
 
     vectorstore_dir: Path = Field(default=PROJECT_ROOT / "vectorstore")
     documents_dir: Path = Field(default=PROJECT_ROOT / "documents")
@@ -58,6 +59,7 @@ class Settings(BaseModel):
             "debate": self.debate_temperature,
             "supervisor": self.supervisor_temperature,
             "signal_explainer": self.signal_explainer_temperature,
+            "research_summarizer": self.research_summarizer_temperature,
         }[role]
 
 

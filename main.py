@@ -41,7 +41,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan")
+_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -680,6 +680,71 @@ def run_scan_command(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+# `research` -- Phase 20 research intelligence: real Yahoo Finance news +
+# sector classification, plus an OPTIONAL, never-blocking AI summary
+# (narration only -- same posture as the AI explanation step in
+# `paper-live`). No recommendation, no buy/sell/quantity/price level.
+# --------------------------------------------------------------------------
+
+DEFAULT_RESEARCH_DB_PATH = PROJECT_ROOT / "data" / "research.db"
+
+
+def run_research_command(args: argparse.Namespace) -> None:
+    from research.news import YahooNewsProvider
+    from research.sector import YahooSectorInfoProvider
+    from research.store import ResearchStore
+    from research.summarizer import build_research_report
+
+    logger.info("Running research for %s", args.symbol)
+    report = build_research_report(
+        args.symbol,
+        news_provider=YahooNewsProvider(),
+        sector_provider=YahooSectorInfoProvider(),
+        include_ai_summary=not args.no_ai_summary,
+        news_limit=args.news_limit,
+    )
+
+    db_path = args.db or DEFAULT_RESEARCH_DB_PATH
+    store = ResearchStore(db_path)
+    store.save_report(report)
+    store.close()
+
+    print("=" * 70)
+    print("RESEARCH REPORT -- EVIDENCE ONLY (no recommendation, no buy/sell)")
+    print("=" * 70)
+    print(f"Report ID:  {report.report_id}")
+    print(f"Symbol:     {report.symbol}")
+    print(f"As of:      {report.as_of.isoformat()}")
+    print(f"Database:   {db_path}")
+
+    if report.sector is not None:
+        print(f"\nSector:     {report.sector.sector or 'UNKNOWN'}")
+        print(f"Industry:   {report.sector.industry or 'UNKNOWN'}")
+    else:
+        print("\nSector:     not available")
+
+    print(f"\nNews ({len(report.news)}):")
+    if not report.news:
+        print("  (none available)")
+    for item in report.news:
+        print(f"  [{item.published_at.isoformat()}] ({item.source}) {item.title}")
+        if item.url:
+            print(f"      {item.url}")
+
+    if report.ai_summary is not None:
+        print("\nAI SUMMARY (narration only -- not a recommendation):")
+        print(f"  {report.ai_summary.summary}")
+        print(f"  Confidence: {report.ai_summary.confidence:.2f}")
+        if report.ai_summary.unknowns:
+            print("  Unknowns:")
+            for unknown in report.ai_summary.unknowns:
+                print(f"    - {unknown}")
+    else:
+        reason = report.ai_summary_unavailable_reason or "AI summary skipped (--no-ai-summary)."
+        print(f"\nAI SUMMARY: not available ({reason})")
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -900,6 +965,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     scan_parser.add_argument("--db", type=str, default=None, help=f"SQLite scan-history path (default: {DEFAULT_SCANNER_DB_PATH}).")
     scan_parser.add_argument("--top", type=int, default=10, help="Print only the top N ranked candidates (default: 10).")
 
+    research_parser = subparsers.add_parser(
+        "research",
+        help=(
+            "Phase 20: real Yahoo Finance news + sector classification for one symbol, plus an "
+            "optional AI summary (narration only). No recommendation, no buy/sell/quantity/price level."
+        ),
+    )
+    research_parser.add_argument("--symbol", required=True, help="Ticker to research (e.g. AAPL, RELIANCE.NS).")
+    research_parser.add_argument("--news-limit", type=int, default=10, help="Max news items to fetch (default: 10).")
+    research_parser.add_argument("--no-ai-summary", action="store_true", help="Skip the optional AI summary step (default: attempt it, never blocking if Ollama is unavailable).")
+    research_parser.add_argument("--db", type=str, default=None, help=f"SQLite research-history path (default: {DEFAULT_RESEARCH_DB_PATH}).")
+
     return parser.parse_args(argv)
 
 
@@ -923,6 +1000,8 @@ def main() -> None:
             run_dashboard_command(args)
         elif args.command == "scan":
             run_scan_command(args)
+        elif args.command == "research":
+            run_research_command(args)
         else:
             run_analyze_command(args)
     except _CONTROLLED_ERRORS as exc:

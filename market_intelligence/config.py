@@ -2,7 +2,7 @@
 
 Every gate defaults to a no-op (0.0 / None) rather than a fabricated
 cutoff: this project only sets a specific numeric threshold once it has
-evidence for it (see e.g. research/volume_signal.py's percentile fit).
+evidence for it (see e.g. quant_research/volume_signal.py's percentile fit).
 No liquidity/volatility study has been run yet, so the defaults here
 leave those gates structurally present -- matching the roadmap's own
 Market Universe -> Liquidity Filter -> ... -> Candidate Ranking pipeline
