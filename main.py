@@ -44,7 +44,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime")
+_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime", "experiment")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -1249,6 +1249,155 @@ def run_learn_command(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+# `experiment` -- Phase 37 experiment tracking: a NAMED, REGISTERED record
+# of "I am deliberately running this configuration, starting now, for
+# this reason" -- distinct from decision_engine.config.DecisionConfig/
+# market_intelligence.config.ScannerConfig/risk.config.RiskConfig's own
+# existing, unmodified deterministic version_id() hashing, which this
+# reuses rather than re-deriving. Append-only: `start` and `end` never
+# rewrite a registered experiment, only add a new event -- current
+# status is always DERIVED from the latest event.
+# --------------------------------------------------------------------------
+
+DEFAULT_EXPERIMENTS_DB_PATH = PROJECT_ROOT / "data" / "experiments.db"
+
+
+def _resolve_current_config_version(config_type) -> str:
+    from experiments.models import ConfigType
+
+    if config_type == ConfigType.DECISION_ENGINE:
+        from decision_engine.config import DecisionConfig
+
+        return DecisionConfig().version_id()
+    if config_type == ConfigType.SCANNER:
+        from market_intelligence.config import ScannerConfig
+
+        return ScannerConfig().version_id()
+    from risk.config import RiskConfig
+
+    return RiskConfig().version_id()
+
+
+def run_experiment_command(args: argparse.Namespace) -> None:
+    from datetime import timezone
+
+    from experiments.models import ConfigType, Experiment, ExperimentEvent, ExperimentEventType
+    from experiments.store import ExperimentStore
+
+    db_path = args.db or DEFAULT_EXPERIMENTS_DB_PATH
+    store = ExperimentStore(db_path)
+
+    if args.experiment_command == "start":
+        config_type = ConfigType(args.config_type)
+        config_version = _resolve_current_config_version(config_type)
+        now = datetime.now(timezone.utc)
+        experiment = Experiment(
+            experiment_id=Experiment.new_id(), name=args.name, description=args.description or "",
+            config_type=config_type, config_version=config_version, started_at=now,
+        )
+        store.save_experiment(experiment)
+        store.save_event(ExperimentEvent(
+            event_id=ExperimentEvent.new_id(), experiment_id=experiment.experiment_id,
+            event_type=ExperimentEventType.STARTED, occurred_at=now, detail="registered via `experiment start`",
+        ))
+        store.close()
+
+        print("=" * 70)
+        print("EXPERIMENT REGISTERED -- dataset/time boundary starts now")
+        print("=" * 70)
+        print(f"Experiment ID:  {experiment.experiment_id}")
+        print(f"Name:           {experiment.name}")
+        print(f"Config type:    {experiment.config_type.value}")
+        print(f"Config version: {experiment.config_version}")
+        print(f"Started at:     {experiment.started_at.isoformat()}")
+        print(f"Database:       {db_path}")
+        print("\nThis records WHICH config is in effect and WHEN this experiment's comparison window starts.")
+        print("It does not change any configuration -- decide/scan/size continue to use their own current settings unchanged.")
+        return
+
+    if args.experiment_command == "end":
+        experiment = store.get_experiment(args.experiment_id)
+        if experiment is None:
+            store.close()
+            print(f"experiment: no experiment found with id {args.experiment_id} in {db_path}.", file=sys.stderr)
+            sys.exit(1)
+        if store.is_ended(args.experiment_id):
+            store.close()
+            print(f"experiment: {args.experiment_id} is already ended.", file=sys.stderr)
+            sys.exit(1)
+
+        store.save_event(ExperimentEvent(
+            event_id=ExperimentEvent.new_id(), experiment_id=args.experiment_id,
+            event_type=ExperimentEventType.ENDED, occurred_at=datetime.now(timezone.utc), detail=args.note or "",
+        ))
+        store.close()
+        print(f"Experiment {args.experiment_id} ({experiment.name!r}) ended.")
+        return
+
+    if args.experiment_command == "list":
+        experiments = store.list_experiments(limit=args.limit)
+        rows = [(e, store.is_ended(e.experiment_id)) for e in experiments]
+        store.close()
+
+        print("=" * 70)
+        print("EXPERIMENTS -- READ-ONLY REGISTRY")
+        print("=" * 70)
+        print(f"Database: {db_path}\n")
+        if not rows:
+            print("No experiments registered yet -- run `experiment start` first.")
+        for experiment, ended in rows:
+            status = "ENDED" if ended else "ONGOING"
+            print(f"{experiment.experiment_id[:12]}  {status:8s} {experiment.config_type.value:16s} {experiment.name}")
+            print(f"             config_version={experiment.config_version}  started={experiment.started_at.isoformat()}")
+        return
+
+    if args.experiment_command == "compare":
+        from pathlib import Path
+
+        from decision_engine.store import DecisionStore
+        from experiments.comparison import compare_experiments
+        from learning.analysis import EvaluatedPrediction
+        from predictions.store import PredictionStore
+
+        experiments = store.list_experiments(limit=args.limit)
+
+        predictions_db = args.predictions_db or DEFAULT_PREDICTIONS_DB_PATH
+        decision_db = args.decision_db or DEFAULT_DECISION_DB_PATH
+        items: list[EvaluatedPrediction] = []
+        if Path(predictions_db).exists():
+            prediction_store = PredictionStore(predictions_db)
+            decision_store = DecisionStore(decision_db) if Path(decision_db).exists() else None
+            for prediction in prediction_store.list_predictions():
+                evaluation = prediction_store.latest_evaluation_for_prediction(prediction.prediction_id)
+                if evaluation is None:
+                    continue
+                decision = decision_store.get_decision(prediction.decision_id) if decision_store is not None else None
+                items.append(EvaluatedPrediction(prediction=prediction, evaluation=evaluation, decision=decision))
+            prediction_store.close()
+            if decision_store is not None:
+                decision_store.close()
+
+        comparisons = compare_experiments(experiments, items, store)
+        store.close()
+
+        print("=" * 70)
+        print("EXPERIMENT COMPARISON -- each experiment's OWN dataset/time boundary, not lifetime aggregates")
+        print("=" * 70)
+        if not comparisons:
+            print("No experiments registered yet -- run `experiment start` first.")
+        for c in comparisons:
+            window_end = c.ended_at.isoformat() if c.ended_at is not None else "ongoing"
+            print(f"\n{c.experiment.name} ({c.experiment.experiment_id[:12]})")
+            print(f"  Config version: {c.experiment.config_version}")
+            print(f"  Window:         {c.experiment.started_at.isoformat()} -> {window_end}")
+            print(f"  Total:          {c.total}   Resolved: {c.resolved}")
+            print(f"  Win rate:       {_fmt_pct(c.win_rate) if c.win_rate is not None else 'n/a'}")
+            print(f"  Avg return:     {_fmt_pct(c.average_return) if c.average_return is not None else 'n/a'}")
+            print(f"  Profit factor:  {_fmt_ratio(c.profit_factor) if c.profit_factor is not None else 'n/a'}")
+        return
+
+
+# --------------------------------------------------------------------------
 # `shadow-run` -- Phase 27 end-to-end shadow trading validation: ONE pass
 # through the full pipeline (scan -> research -> decide -> predict ->
 # evaluate -> learn) for a configured watchlist. This is orchestration
@@ -1978,6 +2127,36 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     learn_parser.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path, for strategy/calibration grouping (default: {DEFAULT_DECISION_DB_PATH}).")
     learn_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker protection for regime-performance lookups (default: off).")
 
+    experiment_parser = subparsers.add_parser(
+        "experiment",
+        help=(
+            "Phase 37: register/track named experiments over decision_engine/scanner/risk config versions -- "
+            "a dataset/time-boundary comparison, not a lifetime aggregate. Never changes any configuration."
+        ),
+    )
+    experiment_subparsers = experiment_parser.add_subparsers(dest="experiment_command", required=True)
+
+    experiment_start_parser = experiment_subparsers.add_parser("start", help="Register a new experiment -- records the CURRENT default config's version_id for --config-type and starts its comparison window now.")
+    experiment_start_parser.add_argument("--name", required=True, help="Short, human-readable experiment name.")
+    experiment_start_parser.add_argument("--config-type", choices=["decision_engine", "scanner", "risk"], required=True, help="Which existing, unmodified versioned config this experiment tracks.")
+    experiment_start_parser.add_argument("--description", type=str, default=None, help="Free-text: what is being tried and why.")
+    experiment_start_parser.add_argument("--db", type=str, default=None, help=f"SQLite experiment-registry path (default: {DEFAULT_EXPERIMENTS_DB_PATH}).")
+
+    experiment_end_parser = experiment_subparsers.add_parser("end", help="Mark an experiment ended -- closes its comparison window now. Never rewrites the original registration, only appends an ENDED event.")
+    experiment_end_parser.add_argument("--experiment-id", required=True, help="The experiment_id printed by `experiment start`/`experiment list`.")
+    experiment_end_parser.add_argument("--note", type=str, default=None, help="Free-text: why this experiment is ending / what was observed.")
+    experiment_end_parser.add_argument("--db", type=str, default=None, help=f"SQLite experiment-registry path (default: {DEFAULT_EXPERIMENTS_DB_PATH}).")
+
+    experiment_list_parser = experiment_subparsers.add_parser("list", help="Read-only: list every registered experiment and its derived status (ONGOING/ENDED).")
+    experiment_list_parser.add_argument("--db", type=str, default=None, help=f"SQLite experiment-registry path (default: {DEFAULT_EXPERIMENTS_DB_PATH}).")
+    experiment_list_parser.add_argument("--limit", type=int, default=50, help="Max experiments to list, most recent first (default: 50).")
+
+    experiment_compare_parser = experiment_subparsers.add_parser("compare", help="Read-only: win rate/avg return/profit factor for every registered experiment, computed ONLY over predictions within its own dataset/time boundary.")
+    experiment_compare_parser.add_argument("--db", type=str, default=None, help=f"SQLite experiment-registry path (default: {DEFAULT_EXPERIMENTS_DB_PATH}).")
+    experiment_compare_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
+    experiment_compare_parser.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")
+    experiment_compare_parser.add_argument("--limit", type=int, default=50, help="Max experiments to compare (default: 50).")
+
     review_parser = subparsers.add_parser(
         "review",
         help=(
@@ -2099,6 +2278,8 @@ def main() -> None:
             run_universe_command(args)
         elif args.command == "regime":
             run_regime_command(args)
+        elif args.command == "experiment":
+            run_experiment_command(args)
         else:
             run_analyze_command(args)
     except _CONTROLLED_ERRORS as exc:

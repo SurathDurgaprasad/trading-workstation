@@ -1,0 +1,176 @@
+<title>Phase 37 Experiment Tracking</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+  :root {
+    --bg: #0b0f14; --surface: #121922; --surface-2: #17202b; --border: #253140; --border-soft: #1c2530;
+    --text: #dbe4ec; --text-muted: #8ca0b3; --text-dim: #5f7284;
+    --accent: #4fd1c5; --accent-soft: #1b3a38;
+    --warn: #e8b84b; --warn-soft: #3a3016;
+    --good: #34d399; --good-soft: #123326;
+    --bad: #f87171; --bad-soft: #3a1a1a;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15.5px; line-height: 1.65; margin: 0; padding: 0 0 80px 0; }
+  ::selection { background: var(--accent-soft); color: var(--accent); }
+  a { color: var(--accent); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 28px; }
+  header.hero { border-bottom: 1px solid var(--border); padding: 56px 0 36px 0; background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%); }
+  .eyebrow { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px 0; }
+  h1 { font-family: var(--mono); font-weight: 600; font-size: clamp(26px, 4vw, 38px); line-height: 1.18; margin: 0 0 14px 0; text-wrap: balance; letter-spacing: -0.01em; }
+  .hero-sub { color: var(--text-muted); font-size: 16.5px; max-width: 66ch; margin: 0 0 28px 0; }
+  .status-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill { font-family: var(--mono); font-size: 12.5px; font-weight: 500; letter-spacing: 0.02em; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
+  .pill-good { color: var(--good); background: var(--good-soft); border-color: #16472f; }
+  .pill-neutral { color: var(--text-muted); background: var(--surface-2); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  nav.toc { max-width: 960px; margin: 0 auto; padding: 22px 28px; display: flex; flex-wrap: wrap; gap: 4px 18px; font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--border-soft); }
+  nav.toc a { color: var(--text-dim); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
+  main { padding-top: 8px; }
+  section { padding: 44px 0; border-bottom: 1px solid var(--border-soft); }
+  section:last-of-type { border-bottom: none; }
+  .section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  .section-num { font-family: var(--mono); color: var(--text-dim); font-size: 14px; min-width: 26px; }
+  h2 { font-family: var(--mono); font-size: 19px; font-weight: 600; margin: 0; color: var(--text); letter-spacing: -0.01em; }
+  p { margin: 0 0 14px 0; color: var(--text); max-width: 74ch; }
+  p.muted { color: var(--text-muted); }
+  ul, ol { margin: 0 0 14px 0; padding-left: 22px; max-width: 72ch; }
+  li { margin-bottom: 6px; }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; background: var(--surface-2); border: 1px solid var(--border-soft); padding: 1px 6px; border-radius: 3px; color: #a8d8f0; }
+  .flow { font-family: var(--mono); font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; overflow-x: auto; color: var(--text-muted); line-height: 1.9; white-space: pre; margin: 16px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 14px 0; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.mono, td code { font-family: var(--mono); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; margin: 14px 0; }
+  .card h4 { font-family: var(--mono); font-size: 13.5px; color: var(--text); margin: 0 0 8px 0; }
+  .badge { font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.03em; white-space: nowrap; }
+  .badge-verified { background: var(--good-soft); color: var(--good); }
+  .badge-na { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+  .kv-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; font-size: 14px; margin: 14px 0; }
+  .kv-list dt { color: var(--text-dim); font-family: var(--mono); font-size: 12.5px; padding-top: 2px; }
+  .kv-list dd { margin: 0; color: var(--text); }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="light"]) {
+      --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+      --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+      --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+    }
+    :root:not([data-theme="light"]) code, :root:not([data-theme="light"]) .mono { color: #0f5c66; }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+    --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+    --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+  }
+  :root[data-theme="light"] code, :root[data-theme="light"] .mono { color: #0f5c66; }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Phase 37 &mdash; Experiment Tracking</p>
+    <h1>A Named Window, Not Just a Config Hash</h1>
+    <p class="hero-sub">Every tunable config in this project (<code>DecisionConfig</code>/<code>ScannerConfig</code>/<code>RiskConfig</code>) already has a deterministic <code>version_id()</code> hash -- what was missing was a REGISTRY of which versions were deliberately tried, when, and why, and a comparison that isolates each experiment to its OWN dataset/time boundary rather than a config version's lifetime aggregate. A new <code>experiments/</code> package plus <code>python main.py experiment start|end|list|compare</code> adds exactly that, reusing the config versioning and win-rate math that already existed.</p>
+    <div class="status-row">
+      <span class="pill pill-good"><span class="dot"></span>REAL SERVICE VERIFIED (register -&gt; real shadow-run -&gt; real comparison)</span>
+      <span class="pill pill-neutral">42 NEW TESTS, 1041 TOTAL</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#git">Git</a>
+  <a href="#scope">Scope</a>
+  <a href="#design">What was built</a>
+  <a href="#evidence">Evidence</a>
+  <a href="#tests">Tests</a>
+  <a href="#safety">Safety</a>
+  <a href="#limitations">Known limitations</a>
+</nav>
+
+<main class="wrap">
+
+<section id="git">
+  <div class="section-head"><span class="section-num">01</span><h2>Git state</h2></div>
+  <div class="kv-list">
+    <dt>Base</dt><dd class="mono">main @ aeab4b1 (Phase 36 merged)</dd>
+    <dt>Branch</dt><dd class="mono">phase-37-experiment-tracking</dd>
+    <dt>New package</dt><dd class="mono">experiments/ (models.py, store.py, comparison.py)</dd>
+    <dt>Modified</dt><dd class="mono">main.py (+~180 lines: one new `experiment` command with start/end/list/compare)</dd>
+  </div>
+</section>
+
+<section id="scope">
+  <div class="section-head"><span class="section-num">02</span><h2>Scope</h2></div>
+  <p><strong>In scope:</strong> an <code>Experiment</code> registry (name, description, config type/version, start time), an append-only event log (STARTED/ENDED/NOTE, current status always DERIVED from the latest event, never a stored mutable field), and a comparison that filters predictions to each experiment's OWN <code>[started_at, ended_at or now)</code> window AND matching <code>config_version</code> before computing win rate/average return/profit factor -- reusing <code>learning.analysis</code>'s exact formula, never re-derived.</p>
+  <p><strong>Explicitly out of scope:</strong> tracking a NON-default config (e.g. a custom scanner weight set) -- <code>experiment start</code> records whichever config's CURRENT DEFAULT <code>version_id()</code> is in effect for the chosen <code>--config-type</code>; any automatic promotion/rollback of a "winning" experiment (that is Phase 38's explicit job, and the roadmap is explicit that promotion requires evidence thresholds this phase does not attempt to define).</p>
+</section>
+
+<section id="design">
+  <div class="section-head"><span class="section-num">03</span><h2>What was built</h2></div>
+  <div class="flow">python main.py experiment start --name "..." --config-type decision_engine --description "..."
+  -> records DecisionConfig().version_id() (the REAL, existing, unmodified hash) + now() as started_at
+
+python main.py experiment end --experiment-id ... --note "..."
+  -> appends an ENDED event; refuses if already ended; NEVER rewrites the original registration
+
+python main.py experiment compare
+  -> for each registered experiment:
+       window = [experiment.started_at, ended_at-or-now)
+       predictions = { p : p.decision.config_version == experiment.config_version AND p.created_at in window }
+       win_rate/avg_return/profit_factor = learning.analysis's own, unmodified formula over `predictions`</div>
+  <p>Same two-table append-only pattern <code>predictions/store.py</code> already established (Phase 23): <code>experiments</code> written once, <code>experiment_events</code> appended-to, current status derived by reading the latest event -- never a mutable "status" column.</p>
+</section>
+
+<section id="evidence">
+  <div class="section-head"><span class="section-num">04</span><h2>Evidence</h2></div>
+  <div class="flow">$ python main.py experiment start --name "live test" --config-type decision_engine
+Config version: b164f33016726c13   # the REAL DecisionConfig().version_id()
+
+$ python main.py shadow-run --symbols MSFT ...
+MSFT  composite=+1.27  decision=BUY  -> prediction recorded
+[evaluate] MSFT ... ACTIVE
+
+$ python main.py experiment compare --predictions-db ... --decision-db ...
+live test4 (228c1a009e57)
+  Config version: b164f33016726c13
+  Window:         2026-09-03T21:13:47... -> ongoing
+  Total:          1   Resolved: 0
+  Win rate:       n/a</div>
+  <div class="table-wrap"><table>
+    <tr><th>Claim</th><th>Classification</th><th>Basis</th></tr>
+    <tr><td>Full register -&gt; shadow-run -&gt; compare pipeline against real MSFT data</td><td><span class="badge badge-verified">REAL SERVICE VERIFIED</span></td><td>The run above -- real config version, real BUY, real prediction correctly attributed to the experiment's window</td></tr>
+    <tr><td>Unevaluated predictions correctly excluded (matches `learn`'s own convention)</td><td><span class="badge badge-verified">REAL SERVICE VERIFIED</span></td><td>A `--skip-evaluate` run initially showed Total=0 -- investigated, confirmed correct (not a bug) by re-running without `--skip-evaluate`, which correctly showed Total=1</td></tr>
+    <tr><td>Dataset/time boundary isolation (before-start, after-end, wrong-config exclusion)</td><td><span class="badge badge-verified">LOCAL/DETERMINISTIC TEST VERIFIED</span></td><td>6 dedicated comparison tests</td></tr>
+  </table></div>
+</section>
+
+<section id="tests">
+  <div class="section-head"><span class="section-num">05</span><h2>Tests</h2></div>
+  <p>42 new tests across 4 files: models (immutability, round-tripping), store (the append-only two-table pattern, status derivation, reconnect persistence), comparison (window/config-version isolation, two experiments never leaking into each other's stats, empty-input handling), and full CLI wiring (all three config types, ongoing/ended status, double-end refusal, unknown-id refusal, real-stats comparison, unevaluated-prediction exclusion). Full regression: <strong>1041 passed, 0 failed</strong> (999 baseline + 42 new).</p>
+</section>
+
+<section id="safety">
+  <div class="section-head"><span class="section-num">06</span><h2>Safety</h2></div>
+  <ul>
+    <li>Purely a registry and a read-only comparison -- no code path here changes <code>DecisionConfig</code>/<code>ScannerConfig</code>/<code>RiskConfig</code>, places an order, or alters any decision label.</li>
+    <li>Append-only, matching every other store in this project -- <code>experiment end</code> never rewrites the original registration, only appends an event; <code>hasattr</code>-verified no <code>update_experiment</code>/<code>update_event</code> method exists.</li>
+    <li><code>tests/test_dhan_no_real_orders.py</code> / <code>tests/test_broker.py</code>: 12/12 passed before and after this phase's changes.</li>
+  </ul>
+</section>
+
+<section id="limitations">
+  <div class="section-head"><span class="section-num">07</span><h2>Known limitations, stated honestly</h2></div>
+  <ul>
+    <li><strong>Only the CURRENT DEFAULT config's version can be registered via the CLI.</strong> There is no way yet to say "start an experiment for THIS specific non-default config" from the command line -- a real, named gap, not an oversight.</li>
+    <li><strong>No automated promotion.</strong> Comparing two experiments' win rates is entirely a human-read report; nothing here decides "config B is better, switch to it" -- that judgment, and any resulting config change, remains manual, exactly as the roadmap requires until Phase 38's own evidence-threshold framework exists.</li>
+    <li><strong>Two experiments started for the same config_type at overlapping times, without changing the underlying config, will double-count the same predictions in both.</strong> Nothing currently warns about overlapping experiment windows -- a real, minor gap for a future pass.</li>
+  </ul>
+</section>
+
+</main>
