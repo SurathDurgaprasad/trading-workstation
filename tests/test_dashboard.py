@@ -82,6 +82,8 @@ def test_index_renders_empty_workstation(client):
     assert "SIMULATED PAPER TRADING" in response.text
     assert "No signals pending human approval." in response.text
     assert "No open positions." in response.text
+    # Phase 26: the new /intelligence page must be linked from here.
+    assert 'href="/intelligence"' in response.text
 
 
 def test_index_shows_no_feed_data_when_nothing_processed_yet(client):

@@ -35,6 +35,7 @@ from starlette.responses import HTMLResponse, RedirectResponse
 from starlette.routing import Route
 
 import live.workstation as workstation
+from dashboard import intelligence
 
 _REFRESH_SECONDS = 15
 
@@ -164,6 +165,7 @@ async def index(request: Request) -> HTMLResponse:
 
     body = f"""
 {kill_banner}
+<p><a href="/intelligence">Market intelligence &amp; prediction performance &rarr;</a></p>
 <h2>KILL SWITCH <span class="tag tag-sim">{'ACTIVE' if status['kill_switch_active'] else 'INACTIVE'}</span></h2>
 {kill_form}
 
@@ -234,10 +236,96 @@ async def kill_switch_reset(request: Request) -> RedirectResponse:
     return RedirectResponse("/", status_code=303)
 
 
+async def intelligence_page(request: Request) -> HTMLResponse:
+    """Phase 26 -- a READ-ONLY snapshot of the Phase 18-25 intelligence
+    pipeline's last persisted scan/decision/prediction state. No market
+    data fetch, no LLM call, and no store write happens on this GET --
+    see dashboard/intelligence.py's own module docstring. Nothing here
+    can place an order; there is no action route on this page at all."""
+    scan = intelligence.get_latest_scan()
+    learning_snapshot = intelligence.get_learning_snapshot()
+
+    if scan is None:
+        candidates_section = (
+            "<p class='muted'>No scan has been run yet &mdash; run "
+            "<code>python main.py scan --symbols ...</code> first.</p>"
+        )
+    else:
+        scan_meta = (
+            "<div class='kv'>"
+            f"<div>As of</div><div>{html.escape(scan.as_of.isoformat())}</div>"
+            f"<div>Universe</div><div>{html.escape(scan.universe_mode)} ({scan.universe_size} symbols)</div>"
+            f"<div>Config version</div><div>{html.escape(scan.config_version)}</div>"
+            f"<div>Candidates</div><div>{len(scan.candidates)}</div>"
+            "</div>"
+        )
+        candidate_rows = []
+        for candidate in scan.candidates:
+            decision = intelligence.get_latest_decision(candidate.symbol)
+            if decision is not None:
+                decision_class = "tag-long" if decision.label.value == "BUY" else "tag-sim"
+                decision_cell = (
+                    f"<span class='tag {decision_class}'>{html.escape(decision.label.value)}</span> "
+                    f"<span class='muted'>{html.escape(decision.as_of.isoformat())}</span>"
+                )
+            else:
+                decision_cell = "<span class='muted'>no decision recorded</span>"
+            candidate_rows.append(
+                f"<tr><td>{html.escape(candidate.symbol)}</td>"
+                f"<td>{candidate.composite_score:+.2f}</td>"
+                f"<td>{candidate.trend_score:+.2f}</td>"
+                f"<td>{candidate.momentum_score:+.2f}</td>"
+                f"<td>{decision_cell}</td></tr>"
+            )
+        candidates_table = "".join(candidate_rows) or "<tr><td colspan='5' class='muted'>No candidates in the latest scan.</td></tr>"
+        candidates_section = (
+            f"{scan_meta}"
+            f"<table><tr><th>Symbol</th><th>Composite</th><th>Trend</th><th>Momentum</th><th>Latest Decision</th></tr>{candidates_table}</table>"
+        )
+
+    if learning_snapshot is None:
+        learning_section = (
+            "<p class='muted'>No evaluated predictions yet &mdash; run "
+            "<code>python main.py predict --symbol ...</code> then <code>python main.py evaluate</code> first.</p>"
+        )
+    else:
+        strategy_rows = "".join(
+            f"<tr><td>{html.escape(s.config_version)}</td><td>{s.total}</td><td>{s.resolved}</td>"
+            f"<td>{f'{s.win_rate:.1%}' if s.win_rate is not None else 'n/a'}</td>"
+            f"<td>{f'{s.average_return:+.2%}' if s.average_return is not None else 'n/a'}</td></tr>"
+            for s in learning_snapshot["strategy_comparison"]
+        ) or "<tr><td colspan='5' class='muted'>(none)</td></tr>"
+        quality = learning_snapshot["signal_quality"]
+        mfe_text = f"{quality.average_favorable_excursion:+.2%}" if quality.average_favorable_excursion is not None else "n/a"
+        mae_text = f"{quality.average_adverse_excursion:+.2%}" if quality.average_adverse_excursion is not None else "n/a"
+        learning_section = (
+            f"<p class='muted'>{learning_snapshot['total']} evaluated prediction(s) considered.</p>"
+            f"<table><tr><th>Config Version</th><th>Total</th><th>Resolved</th><th>Win Rate</th><th>Avg Return</th></tr>{strategy_rows}</table>"
+            "<div class='kv'>"
+            f"<div>Resolved (signal quality)</div><div>{quality.resolved}</div>"
+            f"<div>Avg favorable excursion</div><div>{mfe_text}</div>"
+            f"<div>Avg adverse excursion</div><div>{mae_text}</div>"
+            "</div>"
+        )
+
+    body = f"""
+<p><a href="/">&larr; back to paper-live workstation</a></p>
+<div class="banner">READ-ONLY SNAPSHOT of the last scan/research/decide/predict/evaluate/learn runs &mdash; not live, and no order of any kind can be placed from this page.</div>
+
+<h2>MARKET INTELLIGENCE &mdash; LATEST SCAN</h2>
+{candidates_section}
+
+<h2>PREDICTION PERFORMANCE</h2>
+{learning_section}
+"""
+    return HTMLResponse(_page(body))
+
+
 app = Starlette(routes=[
     Route("/", index, methods=["GET"]),
     Route("/approve", approve, methods=["POST"]),
     Route("/reject", reject, methods=["POST"]),
     Route("/kill-switch/activate", kill_switch_activate, methods=["POST"]),
     Route("/kill-switch/reset", kill_switch_reset, methods=["POST"]),
+    Route("/intelligence", intelligence_page, methods=["GET"]),
 ])
