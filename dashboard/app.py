@@ -321,6 +321,21 @@ async def intelligence_page(request: Request) -> HTMLResponse:
             f"<td>{f'{c.average_return:+.2%}' if c.average_return is not None else 'n/a'}</td></tr>"
             for c in learning_snapshot["real_calibration"]
         ) or "<tr><td colspan='5' class='muted'>(no decisions with a recorded confidence score yet)</td></tr>"
+        p = learning_snapshot["profitability"]
+        verdict_class = "tag-long" if p.verdict.value == "POSITIVE_PERFORMANCE" else ("tag-short" if p.verdict.value == "NEGATIVE_PERFORMANCE" else "tag-sim")
+        profitability_section = (
+            "<h3 style='font-size:14px;color:#9aa4b2;'>Profitability evidence &mdash; NOT a profitability claim, a verdict over recorded evidence only</h3>"
+            "<div class='kv'>"
+            f"<div>Verdict</div><div><span class='tag {verdict_class}'>{html.escape(p.verdict.value)}</span></div>"
+            f"<div>Sample size (resolved)</div><div>{p.sample_size}</div>"
+            f"<div>Win rate</div><div>{f'{p.win_rate:.1%} (95% CI {p.win_rate_ci_low:.1%}-{p.win_rate_ci_high:.1%})' if p.win_rate is not None else 'n/a'}</div>"
+            f"<div>Expectancy (per trade)</div><div>{f'{p.expectancy:+.2%}' if p.expectancy is not None else 'n/a'}</div>"
+            f"<div>Profit factor</div><div>{f'{p.profit_factor:.2f}' if p.profit_factor is not None else 'n/a'}</div>"
+            f"<div>Max drawdown</div><div>{f'{p.max_drawdown:.2%}' if p.max_drawdown is not None else 'n/a'}</div>"
+            f"<div>Mean return 95% CI</div><div>{f'[{p.mean_return_ci_low:+.2%}, {p.mean_return_ci_high:+.2%}]' if p.mean_return_ci_low is not None else 'n/a'}</div>"
+            "</div>"
+            f"<ul>{''.join(f'<li class=\"muted\">{html.escape(line)}</li>' for line in p.reasoning)}</ul>"
+        )
         learning_section = (
             f"<p class='muted'>{learning_snapshot['total']} evaluated prediction(s) considered.</p>"
             f"<table><tr><th>Config Version</th><th>Total</th><th>Resolved</th><th>Win Rate</th><th>Avg Return</th></tr>{strategy_rows}</table>"
@@ -331,6 +346,7 @@ async def intelligence_page(request: Request) -> HTMLResponse:
             f"<div>Avg favorable excursion</div><div>{mfe_text}</div>"
             f"<div>Avg adverse excursion</div><div>{mae_text}</div>"
             "</div>"
+            f"{profitability_section}"
         )
 
     body = f"""

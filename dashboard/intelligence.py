@@ -80,6 +80,7 @@ def get_learning_snapshot() -> dict | None:
         compute_real_confidence_calibration,
         compute_signal_quality,
     )
+    from learning.profitability import compute_profitability_report
     from predictions.store import PredictionStore
 
     if not PREDICTIONS_DB_PATH.exists():
@@ -109,6 +110,7 @@ def get_learning_snapshot() -> dict | None:
         "calibration": compute_confidence_calibration(items),
         "real_calibration": compute_real_confidence_calibration(items),
         "signal_quality": compute_signal_quality(items),
+        "profitability": compute_profitability_report(items),
     }
 
 

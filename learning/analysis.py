@@ -168,6 +168,8 @@ def compute_signal_quality(items: list[EvaluatedPrediction]) -> SignalQualityRep
 def build_learning_report(
     items: list[EvaluatedPrediction], *, provider: MarketDataProvider, now: datetime | None = None
 ) -> LearningReport:
+    from learning.profitability import compute_profitability_report, compute_sector_performance
+
     return LearningReport(
         generated_at=now or datetime.now(timezone.utc),
         total_predictions_considered=len(items),
@@ -176,13 +178,18 @@ def build_learning_report(
         confidence_calibration=compute_confidence_calibration(items),
         real_confidence_calibration=compute_real_confidence_calibration(items),
         signal_quality=compute_signal_quality(items),
+        sector_performance=compute_sector_performance(items),
+        profitability=compute_profitability_report(items),
         notes=[
-            "Experiment Tracking is not implemented this phase -- no experiment-tracking framework exists in this system yet.",
-            "Model Comparison is not implemented this phase -- there is exactly one deterministic decision rule "
-            "(decision_engine.rules.classify) with one toggleable flag, not multiple competing models; see "
-            "strategy_comparison (grouped by DecisionConfig.version_id) for the closest available comparison.",
+            "Experiment Tracking (Phase 37) and Controlled Adaptive Learning (Phase 38) exist as separate "
+            "commands (`python main.py experiment start|end|list|compare|recommend`), not embedded in this report -- "
+            "see strategy_comparison (grouped by DecisionConfig.version_id) for the closest comparison shown here.",
+            "Model Comparison remains not applicable -- there is exactly one deterministic decision rule "
+            "(decision_engine.rules.classify) with one toggleable flag, not multiple competing models.",
             "confidence_calibration (composite-score median split) is a legacy proxy kept for continuity -- "
             "real_confidence_calibration (Phase 34) uses decision_engine.confidence's actual deterministic "
             "score against fixed LOW/MEDIUM/HIGH bands and is the more meaningful of the two.",
+            "profitability (Phase 41) is the only field in this report that states a verdict -- every other "
+            "field is descriptive statistics only, deliberately never phrased as a claim of future performance.",
         ],
     )

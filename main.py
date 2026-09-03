@@ -1246,6 +1246,29 @@ def run_learn_command(args: argparse.Namespace) -> None:
     print(f"  Avg favorable excursion: {_fmt_pct(report.signal_quality.average_favorable_excursion)}")
     print(f"  Avg adverse excursion:   {_fmt_pct(report.signal_quality.average_adverse_excursion)}")
 
+    print("\nSector performance (at decision time):")
+    if not report.sector_performance:
+        print("  (none -- no decisions with recorded research/sector evidence)")
+    for s in report.sector_performance:
+        print(f"  {s.sector:24s} total={s.total:4d} resolved={s.resolved:4d} win_rate={_fmt_pct(s.win_rate)} avg_return={_fmt_pct(s.average_return)}")
+
+    p = report.profitability
+    print("\nProfitability evidence (Phase 41 -- this project makes NO profitability claim beyond this verdict):")
+    print(f"  Verdict:                {p.verdict.value}")
+    print(f"  Sample size (resolved): {p.sample_size}")
+    print(f"  Win rate:               {_fmt_pct(p.win_rate)}  (95% CI [{_fmt_pct(p.win_rate_ci_low)}, {_fmt_pct(p.win_rate_ci_high)}])" if p.win_rate is not None else "  Win rate:               n/a")
+    print(f"  Average win:            {_fmt_pct(p.average_win)}")
+    print(f"  Average loss:           {_fmt_pct(p.average_loss)}")
+    print(f"  Expectancy (per trade): {_fmt_pct(p.expectancy)}")
+    print(f"  Profit factor:          {_fmt_ratio(p.profit_factor)}")
+    print(f"  Max drawdown:           {_fmt_pct(p.max_drawdown)}")
+    print(f"  Return volatility:      {_fmt_pct(p.return_volatility)} (per-trade stdev -- NOT a time-normalized Sharpe ratio)")
+    if p.mean_return_ci_low is not None:
+        print(f"  Mean return 95% CI:     [{_fmt_pct(p.mean_return_ci_low)}, {_fmt_pct(p.mean_return_ci_high)}]")
+    print("  Reasoning:")
+    for line in p.reasoning:
+        print(f"    - {line}")
+
     print("\nNotes:")
     for note in report.notes:
         print(f"  - {note}")

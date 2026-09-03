@@ -191,6 +191,21 @@ def test_intelligence_page_shows_learning_snapshot(client, _isolated_intelligenc
     assert "100.0%" in response.text  # win rate: 1/1 resolved, all wins
 
 
+def test_intelligence_page_shows_profitability_evidence_insufficient_data_for_one_prediction(client, _isolated_intelligence_dbs):
+    """Phase 41: a single resolved prediction is nowhere near the
+    evidence threshold -- the page must show INSUFFICIENT_DATA, never a
+    profitability claim from one data point."""
+    tmp_path = _isolated_intelligence_dbs
+    _save_decision(tmp_path / "decisions.db", "AAPL", DecisionLabel.BUY, _candidate("AAPL"))
+    _save_prediction_and_evaluation(tmp_path / "predictions.db", "AAPL", "dec-AAPL", PredictionOutcomeState.TARGET_HIT, 0.10)
+
+    response = client.get("/intelligence")
+
+    assert "Profitability evidence" in response.text
+    assert "INSUFFICIENT_DATA" in response.text
+    assert "NOT a profitability claim" in response.text
+
+
 # --- HTML escaping -----------------------------------------------------------------
 
 

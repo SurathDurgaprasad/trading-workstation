@@ -9,8 +9,9 @@ analysis over Phase 23's prediction/evaluation history, full stop.
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
+from learning.profitability import ProfitabilityReport, SectorPerformance
 from learning.regime import MarketRegime
 
 
@@ -85,6 +86,15 @@ class LearningReport(BaseModel):
     proxy, kept for continuity). Empty for any prediction set with no
     Decision.confidence recorded (e.g. all pre-Phase-34 decisions)."""
     signal_quality: SignalQualityReport
+    sector_performance: list[SectorPerformance] = []
+    """Phase 41 -- grouped by research.models.SectorInfo.sector at
+    decision time. Empty for any prediction set with no research
+    evidence recorded (e.g. all pre-Phase-20 decisions)."""
+    profitability: ProfitabilityReport = Field(default_factory=ProfitabilityReport.empty)
+    """Phase 41 -- the honest evidence-backed verdict this project's own
+    roadmap requires: INSUFFICIENT_DATA / STATISTICALLY_MEANINGLESS /
+    POSITIVE_PERFORMANCE / NEGATIVE_PERFORMANCE, never a bare claim of
+    profitability. See learning.profitability's own module docstring."""
     notes: list[str]
     """Honest statements of what this report does NOT cover -- e.g.
     Experiment Tracking and Model Comparison, recognized roadmap features
