@@ -1135,9 +1135,13 @@ def run_evaluate_command(args: argparse.Namespace) -> None:
 
     for prediction in pending:
         logger.info("Evaluating prediction %s (%s)", prediction.prediction_id, prediction.symbol)
-        evaluation = evaluate_prediction(prediction, provider=provider, period=args.period)
-        store.save_evaluation(evaluation)
-        print(f"{prediction.symbol:10s} {prediction.prediction_id[:12]}  {evaluation.outcome.value:18s} {evaluation.detail}")
+        try:
+            evaluation = evaluate_prediction(prediction, provider=provider, period=args.period)
+            store.save_evaluation(evaluation)
+            print(f"{prediction.symbol:10s} {prediction.prediction_id[:12]}  {evaluation.outcome.value:18s} {evaluation.detail}")
+        except Exception as exc:  # noqa: BLE001 -- one prediction's failure (an unexpected error beyond the MarketDataError evaluate_prediction already handles internally) must never abort evaluation of the rest of the batch, same posture as shadow-run's per-symbol isolation.
+            logger.warning("evaluate: %s (%s) failed, continuing with the rest of the batch: %s", prediction.symbol, prediction.prediction_id, exc)
+            print(f"{prediction.symbol:10s} {prediction.prediction_id[:12]}  FAILED               {exc}")
 
     summary = summarize_predictions(store.list_all_evaluations())
     store.close()
@@ -1613,9 +1617,13 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     pending = prediction_store.list_predictions_needing_evaluation()
     print(f"  {len(pending)} prediction(s) needing evaluation.")
     for prediction in pending:
-        evaluation = evaluate_prediction(prediction, provider=provider, period=args.period)
-        prediction_store.save_evaluation(evaluation)
-        print(f"  {prediction.symbol:10s} {prediction.prediction_id[:12]}  {evaluation.outcome.value:18s} {evaluation.detail}")
+        try:
+            evaluation = evaluate_prediction(prediction, provider=provider, period=args.period)
+            prediction_store.save_evaluation(evaluation)
+            print(f"  {prediction.symbol:10s} {prediction.prediction_id[:12]}  {evaluation.outcome.value:18s} {evaluation.detail}")
+        except Exception as exc:  # noqa: BLE001 -- one prediction's failure must never abort evaluation of the rest of the batch or skip the learning summary below, same posture as this run's own per-symbol scan/decide isolation above.
+            logger.warning("shadow-run: evaluating %s (%s) failed, continuing with the rest of the batch: %s", prediction.symbol, prediction.prediction_id, exc)
+            print(f"  {prediction.symbol:10s} {prediction.prediction_id[:12]}  FAILED               {exc}")
 
     summary = summarize_predictions(prediction_store.list_all_evaluations())
     prediction_store.close()
