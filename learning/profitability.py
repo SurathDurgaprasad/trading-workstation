@@ -29,6 +29,7 @@ in two different places.
 from __future__ import annotations
 
 import math
+from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -177,10 +178,22 @@ def _max_drawdown(returns_in_order: list[float]) -> float | None:
     return max_dd
 
 
+def _normalize_for_sort(value: datetime) -> datetime:
+    """Both naive (Yahoo/mock convention) and UTC-aware (real Dhan
+    live-overlay convention, since Phase 16) `entry_time` values can
+    coexist across different predictions in the SAME store -- e.g. some
+    shadow-runs used --live-source dhan and others didn't. Sorting them
+    directly raises TypeError ("can't compare offset-naive and
+    offset-aware datetimes"); normalize to UTC-aware first, same fix
+    class as market.data_provider._to_timestamp / learning.regime.
+    classify_regime_at / experiments.comparison._naive_utc."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
 def compute_profitability_report(items: list["EvaluatedPrediction"]) -> ProfitabilityReport:
     from learning.analysis import _resolution_stats, _resolved_returns
 
-    chronological = sorted(items, key=lambda item: item.prediction.entry_time)
+    chronological = sorted(items, key=lambda item: _normalize_for_sort(item.prediction.entry_time))
     returns = _resolved_returns(chronological)
     n = len(returns)
 

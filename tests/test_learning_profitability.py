@@ -101,6 +101,37 @@ def test_noisy_near_zero_returns_is_statistically_meaningless():
     assert report.mean_return_ci_low <= 0.0 <= report.mean_return_ci_high
 
 
+def test_handles_a_mix_of_naive_and_aware_entry_times_without_crashing():
+    """Regression (Phase 42 audit): a real predictions store can
+    accumulate entry_time values with different tzinfo across different
+    predictions -- Yahoo-only shadow-runs produce naive entry_time,
+    --live-source dhan runs produce UTC-aware entry_time (Phase 16's own
+    convention). Sorting a mix of the two directly raises TypeError;
+    compute_profitability_report must not crash on this, the exact
+    naive/aware bug class already found in Phase 33/37."""
+    naive_start = datetime(2024, 1, 1)  # deliberately no tzinfo -- the Yahoo/mock convention
+    naive_items = []
+    for i in range(15):
+        prediction = PredictionRecord(
+            prediction_id=f"np{i}", decision_id=f"nd{i}", symbol="AAPL", created_at=naive_start + timedelta(days=i),
+            label=DecisionLabel.BUY, entry_price=100.0, stop_price=95.0, target_price=110.0,
+            entry_time=naive_start + timedelta(days=i), horizon_bars=20, interval="1d",
+        )
+        evaluation = PredictionEvaluation(
+            evaluation_id=f"ne{i}", prediction_id=f"np{i}", evaluated_at=naive_start + timedelta(days=i, hours=1),
+            outcome=PredictionOutcomeState.TARGET_HIT, bars_observed=5, exit_time=None, exit_price=None,
+            actual_return=0.05, max_favorable_excursion=0.05, max_adverse_excursion=0.01, detail="test",
+        )
+        naive_items.append(EvaluatedPrediction(prediction=prediction, evaluation=evaluation, decision=None))
+
+    aware_items = [_item(i, 0.05) for i in range(15, 30)]  # entry_time is UTC-aware, derived from _START
+
+    report = compute_profitability_report(naive_items + aware_items)  # must not raise
+
+    assert report.sample_size == 30
+    assert report.verdict == ProfitabilityVerdict.POSITIVE_PERFORMANCE
+
+
 def test_unresolved_predictions_are_excluded_from_the_sample():
     resolved = [_item(i, 0.05) for i in range(MIN_SAMPLE_SIZE_FOR_A_VERDICT)]
     active = [_item(100 + i, None, outcome=PredictionOutcomeState.ACTIVE) for i in range(5)]
