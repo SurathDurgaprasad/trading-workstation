@@ -8,6 +8,7 @@ from main import (
     run_paper_live_command,
     run_predict_command,
     run_research_command,
+    run_review_command,
     run_scan_command,
     run_size_command,
 )
@@ -598,6 +599,67 @@ def test_run_learn_command_end_to_end_with_real_stores(tmp_path, capsys, monkeyp
     assert "PERFORMANCE LEARNING REPORT -- READ-ONLY (no configuration changed, no order placed)" in output
     assert "Predictions considered: 1" in output
     assert "cfg1" in output
+
+
+def test_review_subcommand_defaults():
+    args = parse_args(["review", "--symbol", "AAPL"])
+    assert args.command == "review"
+    assert args.symbol == "AAPL"
+    assert args.decision_db is None
+
+
+def test_review_subcommand_overrides():
+    args = parse_args(["review", "--symbol", "RELIANCE.NS", "--decision-db", "/tmp/decisions.db"])
+    assert args.symbol == "RELIANCE.NS"
+    assert args.decision_db == "/tmp/decisions.db"
+
+
+def test_run_review_command_reports_missing_decision_honestly(tmp_path):
+    args = parse_args(["review", "--symbol", "ZZZZ", "--decision-db", str(tmp_path / "no-such-decisions.db")])
+    with pytest.raises(SystemExit):
+        run_review_command(args)
+
+
+def test_run_review_command_end_to_end_with_a_real_decision_store(tmp_path, capsys, monkeypatch):
+    from datetime import datetime, timezone
+
+    from agents import analyst
+    from decision_engine.models import Decision, DecisionLabel, DecisionReview, RiskContext
+    from decision_engine.store import DecisionStore
+    from llm import provider as llm_provider
+    from market_intelligence.models import CandidateScore
+    from tests.conftest import FakeChatModel
+
+    decision_db = tmp_path / "decisions.db"
+    store = DecisionStore(decision_db)
+    candidate = CandidateScore(
+        symbol="AAPL", as_of=datetime(2024, 6, 1), last_close=190.0, avg_daily_value=1_000_000.0,
+        volume_ratio=1.1, trend_score=1.0, momentum_score=0.5, breakout_score=0.01,
+        relative_strength_score=0.02, sector_strength_score=None, composite_score=1.5,
+        explanation=["fake"],
+    )
+    store.save_decision(Decision(
+        decision_id="dec-1", symbol="AAPL", as_of=datetime(2024, 6, 1, tzinfo=timezone.utc), label=DecisionLabel.BUY,
+        rationale=["all factors agree"], config_version="cfg1", scanner_evidence=candidate, research_evidence=None,
+        market_context=None, risk_context=RiskContext.unknown(), narrative=None, narrative_unavailable_reason=None,
+    ))
+    store.close()
+
+    fake_review = DecisionReview(
+        concerns=["Un-tuned composite weights."], supporting_points=["Trend and momentum corroborate."],
+        overall_assessment="Defensible given the recorded evidence.",
+    )
+    monkeypatch.setattr(analyst, "get_analyst_llm", lambda role: FakeChatModel({DecisionReview: fake_review}))
+    monkeypatch.setattr(llm_provider, "check_ollama_availability", lambda **kwargs: None)
+
+    args = parse_args(["review", "--symbol", "AAPL", "--decision-db", str(decision_db)])
+    run_review_command(args)
+
+    output = capsys.readouterr().out
+    assert "INDEPENDENT DECISION REVIEW -- AI CRITIQUE ONLY, CANNOT CHANGE THE LABEL" in output
+    assert "Label:   BUY" in output
+    assert "Un-tuned composite weights." in output
+    assert "Defensible given the recorded evidence." in output
 
 
 def test_paper_live_kill_switch_flags_parse_without_a_symbol():

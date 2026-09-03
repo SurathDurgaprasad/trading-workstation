@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 AgentRole = Literal[
     "technical", "risk", "critic", "debate", "supervisor",
-    "signal_explainer", "research_summarizer", "decision_narrator",
+    "signal_explainer", "research_summarizer", "decision_narrator", "decision_reviewer",
 ]
 
 
@@ -44,6 +44,7 @@ class Settings(BaseModel):
     signal_explainer_temperature: float = 0.2
     research_summarizer_temperature: float = 0.2
     decision_narrator_temperature: float = 0.2
+    decision_reviewer_temperature: float = 0.2
 
     vectorstore_dir: Path = Field(default=PROJECT_ROOT / "vectorstore")
     documents_dir: Path = Field(default=PROJECT_ROOT / "documents")
@@ -65,6 +66,7 @@ class Settings(BaseModel):
             "signal_explainer": self.signal_explainer_temperature,
             "research_summarizer": self.research_summarizer_temperature,
             "decision_narrator": self.decision_narrator_temperature,
+            "decision_reviewer": self.decision_reviewer_temperature,
         }[role]
 
 

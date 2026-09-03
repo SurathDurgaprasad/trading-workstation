@@ -78,6 +78,21 @@ class DecisionNarrative(BaseModel):
     narrative: str = Field(description="Plain-language explanation of why this already-decided label was reached, using only the recorded rationale/evidence.")
 
 
+class DecisionReview(BaseModel):
+    """Phase 25 -- the LLM's ONLY allowed output shape for an independent
+    critique of an already-fixed Decision (agents/decision_reviewer.py).
+    Same "cannot change the decision" type-level guarantee as
+    DecisionNarrative: no field here can hold a revised label, price, or
+    action -- this is adversarial review, not narration, but the
+    constraint is identical."""
+
+    model_config = ConfigDict(frozen=True)
+
+    concerns: list[str] = Field(description="Specific reasons this decision might be wrong, weak, or premature, each grounded in the recorded evidence -- not generic caution.")
+    supporting_points: list[str] = Field(description="Specific reasons the recorded evidence genuinely supports this decision.")
+    overall_assessment: str = Field(description="A short, balanced summary weighing the above. Cannot state or imply a different label.")
+
+
 class Decision(BaseModel):
     model_config = ConfigDict(frozen=True)
 

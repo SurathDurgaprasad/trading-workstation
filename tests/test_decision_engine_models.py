@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from decision_engine.config import DecisionConfig
-from decision_engine.models import Decision, DecisionLabel, RiskContext
+from decision_engine.models import Decision, DecisionLabel, DecisionReview, RiskContext
 from market_intelligence.models import CandidateScore
 
 
@@ -59,3 +59,8 @@ def test_decision_config_version_id_is_deterministic_and_change_sensitive():
 
     assert a.version_id() == b.version_id()
     assert a.version_id() != c.version_id()
+
+
+def test_decision_review_has_no_field_that_could_hold_a_label_price_or_action():
+    review = DecisionReview(concerns=["x"], supporting_points=["y"], overall_assessment="z")
+    assert set(DecisionReview.model_fields) == {"concerns", "supporting_points", "overall_assessment"}

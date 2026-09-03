@@ -43,7 +43,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn")
+_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -1092,6 +1092,64 @@ def run_learn_command(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+# `review` -- Phase 25 AI Multi-Agent Market Research: an independent,
+# adversarial second opinion on the latest persisted Decision. Requires
+# Ollama (unlike `decide`'s optional narrative, there is no meaningful
+# evidence-only fallback for a command whose entire purpose is the AI
+# critique) -- fails clearly via check_ollama_availability if unavailable,
+# same posture as the `analyze` command. NOT an order; agents/
+# decision_reviewer.py cannot change the label, only critique it.
+# --------------------------------------------------------------------------
+
+
+def run_review_command(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
+    from decision_engine.store import DecisionStore
+    from llm.provider import check_ollama_availability
+
+    normalized = args.symbol.strip().upper()
+
+    decision_db = args.decision_db or DEFAULT_DECISION_DB_PATH
+    decision = None
+    if Path(decision_db).exists():
+        store = DecisionStore(decision_db)
+        decision = store.latest_decision_for_symbol(normalized)
+        store.close()
+
+    if decision is None:
+        print(f"review: no decision found for {normalized} in {decision_db} -- run `decide --symbol {normalized}` first.", file=sys.stderr)
+        sys.exit(1)
+
+    check_ollama_availability()
+
+    from agents.decision_reviewer import review_decision
+
+    logger.info("Requesting an independent review of the %s decision for %s", decision.label.value, normalized)
+    review = review_decision(decision)
+
+    print("=" * 70)
+    print("INDEPENDENT DECISION REVIEW -- AI CRITIQUE ONLY, CANNOT CHANGE THE LABEL")
+    print("=" * 70)
+    print(f"Symbol:  {decision.symbol}")
+    print(f"Label:   {decision.label.value} (decision_id={decision.decision_id})")
+
+    print("\nSupporting points:")
+    if not review.supporting_points:
+        print("  (none)")
+    for point in review.supporting_points:
+        print(f"  + {point}")
+
+    print("\nConcerns:")
+    if not review.concerns:
+        print("  (none)")
+    for concern in review.concerns:
+        print(f"  - {concern}")
+
+    print(f"\nOverall: {review.overall_assessment}")
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -1394,6 +1452,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     learn_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
     learn_parser.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path, for strategy/calibration grouping (default: {DEFAULT_DECISION_DB_PATH}).")
 
+    review_parser = subparsers.add_parser(
+        "review",
+        help=(
+            "Phase 25: an independent, adversarial AI second opinion on the latest decision for a symbol. "
+            "Requires Ollama. Cannot change the label -- narration/critique only, not an order."
+        ),
+    )
+    review_parser.add_argument("--symbol", required=True, help="Ticker to review (e.g. AAPL, RELIANCE.NS).")
+    review_parser.add_argument("--decision-db", type=str, default=None, help=f"Read the latest decision from this path (default: {DEFAULT_DECISION_DB_PATH}).")
+
     return parser.parse_args(argv)
 
 
@@ -1429,6 +1497,8 @@ def main() -> None:
             run_evaluate_command(args)
         elif args.command == "learn":
             run_learn_command(args)
+        elif args.command == "review":
+            run_review_command(args)
         else:
             run_analyze_command(args)
     except _CONTROLLED_ERRORS as exc:
