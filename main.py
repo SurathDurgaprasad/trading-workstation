@@ -1205,10 +1205,16 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
 
     provider, resilient = _build_provider(args)
     benchmark_symbol = args.benchmark or None
+    live_snapshot_provider = _build_live_snapshot_provider(args)
 
     print("=" * 70)
     print("SHADOW RUN -- FULL PIPELINE, ONE PASS -- NOT AN ORDER (no real or paper trade is placed)")
     print("=" * 70)
+    from live.dhan.market_session import current_market_session
+
+    session = current_market_session()
+    print(f"Market session:  {session.state.value} (as of {session.as_of_ist.strftime('%H:%M:%S IST')}, does not account for exchange holidays)")
+    print(f"Live overlay:    {'DHAN (--live-source dhan)' if live_snapshot_provider is not None else 'none -- Yahoo historical only'}")
 
     logger.info("shadow-run: scanning %d symbols", len(universe))
     scan_report = run_scan(
@@ -1257,7 +1263,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
                 )
                 paper_store.close()
 
-            market_context = get_market_context(symbol, period=args.period, interval=args.interval)
+            market_context = get_market_context(symbol, period=args.period, interval=args.interval, live_snapshot_provider=live_snapshot_provider)
             decision = make_decision(
                 symbol, candidate=candidate, research=research_report, market_context=market_context,
                 risk_context=risk_context, include_narrative=args.with_ai,
@@ -1283,6 +1289,9 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
 
     research_store.close()
     decision_store.close()
+
+    if live_snapshot_provider is not None:
+        live_snapshot_provider.close()
 
     if args.skip_evaluate:
         prediction_store.close()
@@ -1464,8 +1473,8 @@ def _run_tick_from_args(args: argparse.Namespace, schedule_config, store, *, now
         schedule_config=schedule_config, run_store=store, symbols=args.symbols, watchlist_file=args.watchlist_file,
         period=args.period, interval=args.interval, benchmark=args.benchmark, news_limit=args.news_limit,
         horizon_bars=args.horizon_bars, paper_db=args.paper_db, with_ai=args.with_ai, resilient=args.resilient,
-        scanner_db=args.scanner_db, research_db=args.research_db, decision_db=args.decision_db,
-        predictions_db=args.predictions_db, staleness_seconds=args.staleness_seconds, now=now,
+        live_source=args.live_source, scanner_db=args.scanner_db, research_db=args.research_db,
+        decision_db=args.decision_db, predictions_db=args.predictions_db, staleness_seconds=args.staleness_seconds, now=now,
     )
 
 
@@ -1881,6 +1890,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     shadow_run_parser.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")
     shadow_run_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
     shadow_run_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker/rate-limit protection across the whole run (default: off, matches prior behavior exactly). Prints a provider-metrics summary at the end.")
+    shadow_run_parser.add_argument("--live-source", choices=["dhan"], default=None, help="Phase 32: overlay every candidate's price with a real Dhan live quote (requires DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN) instead of the Yahoo historical close. One adapter is built for the whole run and closed at the end. A failed/unhealthy live source silently falls back to the Yahoo historical price per symbol.")
 
     schedule_parser = subparsers.add_parser(
         "schedule",
@@ -1903,6 +1913,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         p.add_argument("--paper-db", type=str, default=None, help="Optional: check this paper-trading database for an existing open position per symbol, to distinguish BUY/WATCH from EXIT.")
         p.add_argument("--with-ai", action="store_true", help="Include the optional AI research summary and decision narrative for every symbol (default: off).")
         p.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker/rate-limit protection for every tick (default: off, recommended for unattended `schedule loop` operation).")
+        p.add_argument("--live-source", choices=["dhan"], default=None, help="Phase 32: overlay every candidate's price with a real Dhan live quote on shadow_run slots (requires DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN). Ignored for evaluate_and_learn slots.")
         p.add_argument("--scanner-db", type=str, default=None, help=f"SQLite scan-history path (default: {DEFAULT_SCANNER_DB_PATH}).")
         p.add_argument("--research-db", type=str, default=None, help=f"SQLite research-history path (default: {DEFAULT_RESEARCH_DB_PATH}).")
         p.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")

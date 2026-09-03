@@ -59,12 +59,12 @@ def _save_scan(db_path, *candidates: CandidateScore):
     store.close()
 
 
-def _save_decision(db_path, symbol: str, label: DecisionLabel, candidate: CandidateScore | None):
+def _save_decision(db_path, symbol: str, label: DecisionLabel, candidate: CandidateScore | None, market_context=None):
     store = DecisionStore(db_path)
     store.save_decision(Decision(
         decision_id=f"dec-{symbol}", symbol=symbol, as_of=datetime(2024, 6, 1, tzinfo=timezone.utc), label=label,
         rationale=["fake rationale"], config_version="cfg1", scanner_evidence=candidate, research_evidence=None,
-        market_context=None, risk_context=RiskContext.unknown(), narrative=None, narrative_unavailable_reason=None,
+        market_context=market_context, risk_context=RiskContext.unknown(), narrative=None, narrative_unavailable_reason=None,
     ))
     store.close()
 
@@ -110,6 +110,38 @@ def test_intelligence_page_shows_latest_scan_and_decision(client, _isolated_inte
     assert "+1.75" in response.text
     assert "BUY" in response.text
     assert "cfg1" in response.text
+
+
+def test_intelligence_page_shows_data_source_and_status_when_present(client, _isolated_intelligence_dbs):
+    """Phase 32: a decision whose market_context was populated (e.g. by
+    shadow-run) must surface its data_source/data_status on the page --
+    the honest "is this live or historical" answer the roadmap's own
+    safety rule asks for."""
+    from market.context import MarketContext
+
+    tmp_path = _isolated_intelligence_dbs
+    candidate = _candidate("AAPL", composite=1.75)
+    _save_scan(tmp_path / "scanner.db", candidate)
+    context = MarketContext(symbol="AAPL", as_of=datetime(2024, 6, 1), price=190.0, data_source="DHAN", data_status="LIVE")
+    _save_decision(tmp_path / "decisions.db", "AAPL", DecisionLabel.BUY, candidate, market_context=context)
+
+    response = client.get("/intelligence")
+
+    assert "DHAN / LIVE" in response.text
+
+
+def test_intelligence_page_shows_n_a_when_market_context_absent(client, _isolated_intelligence_dbs):
+    """A decision with no market_context at all (e.g. from standalone
+    `decide`, which does not build one) must show an honest "n/a" --
+    never a fabricated source/status."""
+    tmp_path = _isolated_intelligence_dbs
+    candidate = _candidate("AAPL", composite=1.75)
+    _save_scan(tmp_path / "scanner.db", candidate)
+    _save_decision(tmp_path / "decisions.db", "AAPL", DecisionLabel.BUY, candidate)  # market_context=None
+
+    response = client.get("/intelligence")
+
+    assert "n/a" in response.text
 
 
 def test_intelligence_page_handles_a_candidate_with_no_decision_gracefully(client, _isolated_intelligence_dbs):

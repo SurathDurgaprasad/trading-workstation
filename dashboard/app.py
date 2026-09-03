@@ -268,19 +268,30 @@ async def intelligence_page(request: Request) -> HTMLResponse:
                     f"<span class='tag {decision_class}'>{html.escape(decision.label.value)}</span> "
                     f"<span class='muted'>{html.escape(decision.as_of.isoformat())}</span>"
                 )
+                # Phase 32: data_source/data_status only exist on a Decision whose
+                # market_context was populated (currently only shadow-run does this --
+                # standalone `decide` does not build a MarketContext at all) -- shown
+                # honestly as "n/a", never fabricated, when absent.
+                if decision.market_context is not None and decision.market_context.data_status is not None:
+                    status_class = "tag-long" if decision.market_context.data_status == "LIVE" else "tag-sim"
+                    data_cell = f"<span class='tag {status_class}'>{html.escape(decision.market_context.data_source or '')} / {html.escape(decision.market_context.data_status)}</span>"
+                else:
+                    data_cell = "<span class='muted'>n/a</span>"
             else:
                 decision_cell = "<span class='muted'>no decision recorded</span>"
+                data_cell = "<span class='muted'>n/a</span>"
             candidate_rows.append(
                 f"<tr><td>{html.escape(candidate.symbol)}</td>"
                 f"<td>{candidate.composite_score:+.2f}</td>"
                 f"<td>{candidate.trend_score:+.2f}</td>"
                 f"<td>{candidate.momentum_score:+.2f}</td>"
-                f"<td>{decision_cell}</td></tr>"
+                f"<td>{decision_cell}</td>"
+                f"<td>{data_cell}</td></tr>"
             )
-        candidates_table = "".join(candidate_rows) or "<tr><td colspan='5' class='muted'>No candidates in the latest scan.</td></tr>"
+        candidates_table = "".join(candidate_rows) or "<tr><td colspan='6' class='muted'>No candidates in the latest scan.</td></tr>"
         candidates_section = (
             f"{scan_meta}"
-            f"<table><tr><th>Symbol</th><th>Composite</th><th>Trend</th><th>Momentum</th><th>Latest Decision</th></tr>{candidates_table}</table>"
+            f"<table><tr><th>Symbol</th><th>Composite</th><th>Trend</th><th>Momentum</th><th>Latest Decision</th><th>Data Source/Status</th></tr>{candidates_table}</table>"
         )
 
     if learning_snapshot is None:

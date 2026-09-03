@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from main import parse_args, run_shadow_run_command
+from market.context import get_market_context as _real_get_market_context
 from market.data_provider import OHLCV, MarketDataError, OHLCVBar
 
 _START = datetime(2023, 1, 2)
@@ -200,6 +201,74 @@ def test_shadow_run_continues_when_one_symbols_decide_stage_fails(tmp_path, caps
     assert store.latest_decision_for_symbol("AAPL") is not None
     assert store.latest_decision_for_symbol("MSFT") is None  # never reached decide -- failed before it
     store.close()
+
+
+def test_shadow_run_prints_market_session_and_live_overlay_status(tmp_path, capsys):
+    args = parse_args([
+        "shadow-run", "--symbols", "AAPL", "--benchmark", "", "--skip-evaluate",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--research-db", str(tmp_path / "research.db"),
+        "--decision-db", str(tmp_path / "decisions.db"), "--predictions-db", str(tmp_path / "predictions.db"),
+    ])
+    run_shadow_run_command(args)
+
+    output = capsys.readouterr().out
+    assert "Market session:" in output
+    assert "Live overlay:    none -- Yahoo historical only" in output
+
+
+def test_shadow_run_with_live_source_dhan_overlays_every_candidate_and_closes_the_adapter(tmp_path, capsys, monkeypatch):
+    """Phase 32: --live-source dhan must build ONE adapter for the whole
+    run, pass it to get_market_context for every candidate, and close it
+    exactly once at the end -- no real Dhan connection anywhere here."""
+    import live.dhan.config as dhan_config_module
+    import live.dhan.instruments as dhan_instruments_module
+    import market_data.adapters.dhan as dhan_adapter_module
+    from market.context import MarketContext
+    from market_data.models import InstrumentSnapshot
+    from market_data.quality import SourceHealth, SourceStatus
+
+    close_calls = {"count": 0}
+
+    class _FakeLiveAdapter:
+        def get_snapshot(self, symbol):
+            bar_time = _START + timedelta(days=80)
+            from market.data_provider import DataSource, DataStatus, OHLCVBar
+
+            bar = OHLCVBar(timestamp=bar_time, open=999.0, high=999.0, low=999.0, close=999.0, volume=1.0, source=DataSource.DHAN, status=DataStatus.LIVE)
+            return InstrumentSnapshot(symbol=symbol, latest_bar=bar, health=SourceHealth(status=SourceStatus.HEALTHY, last_updated=bar_time, age_seconds=1.0), as_of=bar_time)
+
+        def close(self):
+            close_calls["count"] += 1
+
+    monkeypatch.setattr(dhan_config_module, "load_dhan_credentials", lambda: object())
+    monkeypatch.setattr(dhan_instruments_module.DhanInstrumentMap, "download", classmethod(lambda cls, **kw: object()))
+    monkeypatch.setattr(dhan_adapter_module, "build_dhan_adapter", lambda **kw: _FakeLiveAdapter())
+    # The file's own autouse _wire_fakes fixture replaces get_market_context
+    # itself (to avoid needing a real Yahoo call in every other test in this
+    # file) -- THIS test specifically needs the REAL get_market_context, so
+    # its live-overlay composition logic actually runs against the fake
+    # Dhan adapter above. get_market_data_provider stays faked underneath it.
+    monkeypatch.setattr("market.context.get_market_context", _real_get_market_context)
+
+    args = parse_args([
+        "shadow-run", "--symbols", "AAPL", "--benchmark", "", "--skip-evaluate", "--live-source", "dhan",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--research-db", str(tmp_path / "research.db"),
+        "--decision-db", str(tmp_path / "decisions.db"), "--predictions-db", str(tmp_path / "predictions.db"),
+    ])
+    run_shadow_run_command(args)
+
+    output = capsys.readouterr().out
+    assert "Live overlay:    DHAN (--live-source dhan)" in output
+    assert close_calls["count"] == 1
+
+    from decision_engine.store import DecisionStore
+
+    store = DecisionStore(tmp_path / "decisions.db")
+    decision = store.latest_decision_for_symbol("AAPL")
+    store.close()
+    assert decision.market_context.data_source == "DHAN"
+    assert decision.market_context.data_status == "LIVE"
+    assert decision.market_context.price == 999.0
 
 
 def test_shadow_run_records_no_predictions_for_a_declining_universe(tmp_path, capsys, monkeypatch):
