@@ -88,7 +88,7 @@
     <div class="status-row">
       <span class="pill pill-good"><span class="dot"></span>NO AI RECOMMENDATIONS</span>
       <span class="pill pill-good"><span class="dot"></span>NO CHANGES TO live/dhan/ INTERNALS</span>
-      <span class="pill pill-neutral">36 NEW TESTS, NO REAL NETWORK CALLS</span>
+      <span class="pill pill-neutral">44 NEW TESTS, NO REAL NETWORK CALLS</span>
     </div>
   </div>
 </header>
@@ -102,6 +102,7 @@
   <a href="#naming">Naming decisions</a>
   <a href="#tests">Tests</a>
   <a href="#limitations">Known limitations</a>
+  <a href="#audit">Reconciliation audit</a>
 </nav>
 
 <main class="wrap">
@@ -170,6 +171,39 @@
     <li>No persistence layer for <code>MarketSnapshot</code> was added &mdash; the roadmap's "market state can be persisted" criterion is satisfied in the sense that the model is a plain, serializable dataclass; actually writing it to storage is left to whichever future phase has a concrete need.</li>
     <li><code>MarketUniverse</code> is watchlist-only; index-membership modes remain unimplemented by design.</li>
   </ul>
+</section>
+
+<section id="audit">
+  <div class="section-head"><span class="section-num">09</span><h2>Final reconciliation audit, before merge</h2></div>
+  <p>A fresh audit (not from memory) covering architecture, model correctness, universe edge cases, dependency hygiene, and safety. Two real, demonstrated issues were found and fixed; everything else audited was already correct.</p>
+
+  <div class="card">
+    <h4>1. Snapshot freshness could falsely report healthy data for a future-dated bar <span class="badge badge-verified">FIXED</span></h4>
+    <p class="muted"><code>SourceHealth.from_bar_timestamp</code> delegated entirely to <code>FreshnessPolicy.check()</code>, which treats a negative age (a bar timestamped in the future relative to now) as trivially "fresh" &mdash; a negative number is always &le; any positive threshold. This is exactly the blind spot that let the original Dhan IST/UTC bug (~5.5 hours in the future) go undetected before Phase 16 found and fixed it at the source. Fixed with a configurable future-tolerance guard (default 300s) directly in <code>market_data/quality.py</code> &mdash; large enough to correctly still classify the real, observed Dhan clock skew (~2 minutes, from Phase 16 live testing) as HEALTHY, small enough to catch a genuine anomaly of that original bug's magnitude as ERROR. <code>live/freshness.py</code> itself was not touched.</p>
+  </div>
+
+  <div class="card">
+    <h4>2. Watchlist symbols were not deduplicated or case-normalized <span class="badge badge-verified">FIXED</span></h4>
+    <p class="muted">A duplicate or differently-cased entry (<code>"RELIANCE"</code> and <code>"reliance"</code>) was treated as two distinct symbols, inflating <code>len(universe)</code> and causing <code>UnifiedMarketDataFacade.get_market_snapshot()</code> to redundantly re-fetch the same instrument. Fixed: <code>MarketUniverse.from_watchlist</code> now strips, uppercases (matching <code>YahooFinanceProvider</code>'s own existing internal normalization), and deduplicates while preserving first-occurrence order; <code>__contains__</code> normalizes its query the same way.</p>
+  </div>
+
+  <h3>Everything else audited, confirmed correct without a change</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Item</th><th>Result</th></tr>
+    <tr><td>No duplication of <code>MarketDataProvider</code>/<code>MarketDataSource</code></td><td><span class="badge badge-verified">CONFIRMED</span> &mdash; SnapshotAdapter answers a genuinely new question</td></tr>
+    <tr><td>No duplicate OHLCV/bar model</td><td><span class="badge badge-verified">CONFIRMED</span> &mdash; fresh grep of every class in market_data/</td></tr>
+    <tr><td>Dhan adapter construction triggers no network call</td><td><span class="badge badge-verified">CONFIRMED</span> &mdash; subscribe() only happens lazily on first get_snapshot()</td></tr>
+    <tr><td>Yahoo adapter does not alter YahooFinanceProvider behavior</td><td><span class="badge badge-verified">CONFIRMED</span> &mdash; identical call signature, unmodified</td></tr>
+    <tr><td>Empty universe behavior</td><td><span class="badge badge-verified">CONFIRMED</span> &mdash; impossible by construction (from_watchlist rejects it)</td></tr>
+    <tr><td>Partial source failure in MarketSnapshot</td><td><span class="badge badge-verified">CONFIRMED</span> &mdash; one symbol's failure never affects another's snapshot</td></tr>
+    <tr><td>Deterministic MarketSnapshot ordering</td><td><span class="badge badge-verified">CONFIRMED</span> &mdash; iterates universe.symbols in order</td></tr>
+    <tr><td>PyYAML genuinely required, pinned consistently</td><td><span class="badge badge-verified">CONFIRMED</span> &mdash; used directly in universe.py; version matches what was already installed</td></tr>
+    <tr><td>No real order execution path introduced</td><td><span class="badge badge-verified">CONFIRMED</span> &mdash; fresh grep across market_data/</td></tr>
+    <tr><td>No credential leakage</td><td><span class="badge badge-verified">CONFIRMED</span> &mdash; DhanCredentials passed through by reference only, never its fields</td></tr>
+    <tr><td>No hidden network calls in tests</td><td><span class="badge badge-verified">CONFIRMED</span> &mdash; verified CachedMarketDataProvider serves a cache hit from disk with zero network I/O</td></tr>
+  </table></div>
+
+  <p class="muted">8 new regression tests added for the two fixes. Full regression after this audit: 580 passed (572 + 8), 0 failed, 0 new failures.</p>
 </section>
 
 </main>

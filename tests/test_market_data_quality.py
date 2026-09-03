@@ -72,6 +72,37 @@ def test_from_bar_timestamp_handles_naive_and_aware_datetimes_identically():
     assert aware_health.age_seconds == naive_health.age_seconds == 30.0
 
 
+def test_from_bar_timestamp_flags_a_far_future_timestamp_as_error_not_healthy():
+    """Phase 18 audit fix: FreshnessPolicy.check() alone treats a negative
+    age (a bar timestamped in the future) as trivially "fresh" -- exactly
+    the blind spot that let the original Dhan IST/UTC bug (~5.5 hours in
+    the future) go undetected before Phase 16 found and fixed it. This
+    module must never silently report that as HEALTHY."""
+    now = datetime(2026, 9, 3, 10, 0, tzinfo=timezone.utc)
+    bar_ts = now + timedelta(hours=5, minutes=30)  # the magnitude of the real Phase 16 bug
+    health = SourceHealth.from_bar_timestamp(bar_timestamp=bar_ts, interval="1m", now=now)
+    assert health.status == SourceStatus.ERROR
+    assert "future" in health.detail
+
+
+def test_from_bar_timestamp_tolerates_small_real_world_clock_skew():
+    """The real, observed Dhan-server-vs-local clock skew from Phase 16
+    testing was ~2 minutes ahead -- well within the default 5-minute
+    tolerance, and must still be classified HEALTHY, not flagged as an
+    anomaly."""
+    now = datetime(2026, 9, 3, 10, 0, tzinfo=timezone.utc)
+    bar_ts = now + timedelta(seconds=121)  # matches the real magnitude observed live in Phase 16
+    health = SourceHealth.from_bar_timestamp(bar_timestamp=bar_ts, interval="1m", now=now)
+    assert health.status == SourceStatus.HEALTHY
+
+
+def test_from_bar_timestamp_future_tolerance_is_configurable():
+    now = datetime(2026, 9, 3, 10, 0, tzinfo=timezone.utc)
+    bar_ts = now + timedelta(seconds=10)
+    health = SourceHealth.from_bar_timestamp(bar_timestamp=bar_ts, interval="1m", now=now, max_future_tolerance_seconds=5.0)
+    assert health.status == SourceStatus.ERROR
+
+
 def test_from_bar_timestamp_accepts_a_custom_policy():
     now = datetime(2026, 9, 3, 10, 0, tzinfo=timezone.utc)
     bar_ts = now - timedelta(minutes=3)

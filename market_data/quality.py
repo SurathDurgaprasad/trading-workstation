@@ -62,6 +62,7 @@ class SourceHealth:
         interval: str,
         now: datetime | None = None,
         policy: FreshnessPolicy = DEFAULT_FRESHNESS_POLICY,
+        max_future_tolerance_seconds: float = 300.0,
     ) -> "SourceHealth":
         """Classifies freshness using the SAME FreshnessPolicy the live
         pipeline itself uses. `policy.check()` already normalizes
@@ -69,10 +70,36 @@ class SourceHealth:
         `_naive` docstring) -- this project's bars are a genuine mix
         (Yahoo/mock are naive by convention, real Dhan bars are UTC-aware
         since the Phase 16 timezone fix), so that existing robustness
-        carries through here without extra handling."""
+        carries through here without extra handling.
+
+        Phase 18 audit fix -- VERIFIED against real Phase 16 observations:
+        FreshnessPolicy.check() alone treats a bar timestamped in the
+        FUTURE relative to `now` as trivially "fresh" (a negative age is
+        always <= any positive threshold) -- exactly the failure mode
+        that let the original Dhan IST/UTC timestamp bug (~5.5 hours in
+        the future) go undetected before it was found and fixed in Phase
+        16. `max_future_tolerance_seconds` (default 300s / 5 minutes)
+        distinguishes that genuine anomaly from ordinary, small,
+        already-observed clock skew between a real broker's server and
+        this machine (Dhan's own clock ran ~2 minutes ahead of local in
+        Phase 16 testing -- well within this tolerance, still HEALTHY).
+        A future timestamp beyond the tolerance is reported ERROR, never
+        silently passed through as HEALTHY -- this module is meant to
+        ground broader future market-intelligence reasoning (roadmap §3.1,
+        §8), not just one pipeline's own internal gate, so it does not
+        inherit FreshnessPolicy's narrower "never flags the future"
+        blind spot."""
         now = now or datetime.now(timezone.utc)
         result = policy.check(bar_timestamp, interval=interval, now=now)
         age_seconds = result.age.total_seconds()
+        if age_seconds < -max_future_tolerance_seconds:
+            return cls(
+                SourceStatus.ERROR,
+                bar_timestamp,
+                age_seconds,
+                f"bar timestamp is {abs(age_seconds):.0f}s in the future relative to now, beyond the "
+                f"{max_future_tolerance_seconds:.0f}s tolerance -- treated as a data anomaly, not fresh data",
+            )
         if result.is_fresh:
             return cls(SourceStatus.HEALTHY, bar_timestamp, age_seconds)
         return cls(

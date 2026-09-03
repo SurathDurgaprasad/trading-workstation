@@ -17,6 +17,39 @@ def test_from_watchlist_rejects_empty_list():
         MarketUniverse.from_watchlist([])
 
 
+def test_from_watchlist_deduplicates_preserving_first_occurrence_order():
+    """Phase 18 audit fix: a duplicate entry must not inflate len(universe)
+    or cause UnifiedMarketDataFacade.get_market_snapshot() to redundantly
+    re-fetch the same instrument."""
+    universe = MarketUniverse.from_watchlist(["RELIANCE", "TCS", "RELIANCE", "INFY", "TCS"])
+    assert universe.symbols == ("RELIANCE", "TCS", "INFY")
+    assert len(universe) == 3
+
+
+def test_from_watchlist_normalizes_case_and_whitespace():
+    """Phase 18 audit fix: matches market.data_provider.YahooFinanceProvider's
+    own internal symbol.strip().upper() normalization, so a universe entry
+    and the adapter that fetches it never silently disagree on casing."""
+    universe = MarketUniverse.from_watchlist([" reliance ", "Tcs", "INFY"])
+    assert universe.symbols == ("RELIANCE", "TCS", "INFY")
+
+
+def test_from_watchlist_case_and_duplicate_normalization_combine():
+    universe = MarketUniverse.from_watchlist(["reliance", "RELIANCE", " Reliance "])
+    assert universe.symbols == ("RELIANCE",)
+
+
+def test_from_watchlist_rejects_a_blank_symbol():
+    with pytest.raises(ValueError, match="empty/blank"):
+        MarketUniverse.from_watchlist(["RELIANCE", "   "])
+
+
+def test_contains_normalizes_the_query_symbol():
+    universe = MarketUniverse.from_watchlist(["RELIANCE"])
+    assert "reliance" in universe
+    assert " RELIANCE " in universe
+
+
 def test_from_config_watchlist_mode():
     universe = MarketUniverse.from_config({"mode": "watchlist", "symbols": ["RELIANCE", "TCS"]})
     assert universe.symbols == ("RELIANCE", "TCS")

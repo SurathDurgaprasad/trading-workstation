@@ -31,9 +31,26 @@ class MarketUniverse:
 
     @classmethod
     def from_watchlist(cls, symbols: list[str]) -> "MarketUniverse":
+        """Phase 18 audit fix: symbols are normalized (stripped, uppercased
+        -- matching market.data_provider.YahooFinanceProvider's own
+        internal `symbol.strip().upper()`, so a universe symbol and the
+        adapter that fetches it never silently disagree on casing) and
+        deduplicated (first occurrence wins, order otherwise preserved) --
+        without this, a duplicate or differently-cased entry would inflate
+        len(universe) and cause UnifiedMarketDataFacade.get_market_snapshot()
+        to redundantly re-fetch the same instrument."""
         if not symbols:
             raise ValueError("A watchlist universe must contain at least one symbol.")
-        return cls(mode="watchlist", symbols=tuple(symbols))
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for raw in symbols:
+            symbol = raw.strip().upper()
+            if not symbol:
+                raise ValueError(f"Watchlist contains an empty/blank symbol: {raw!r}.")
+            if symbol not in seen:
+                seen.add(symbol)
+                normalized.append(symbol)
+        return cls(mode="watchlist", symbols=tuple(normalized))
 
     @classmethod
     def from_config(cls, config: dict) -> "MarketUniverse":
@@ -62,4 +79,4 @@ class MarketUniverse:
         return len(self.symbols)
 
     def __contains__(self, symbol: str) -> bool:
-        return symbol in self.symbols
+        return symbol.strip().upper() in self.symbols

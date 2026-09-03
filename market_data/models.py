@@ -32,6 +32,13 @@ class InstrumentSnapshot:
     latest_bar: OHLCVBar | None
     health: SourceHealth
     as_of: datetime
+    """UTC-aware: the moment THIS snapshot was constructed (always
+    `datetime.now(timezone.utc)` in every adapter -- see
+    market_data/adapters/), not necessarily when the underlying bar was
+    produced. That is a DIFFERENT timestamp: `latest_bar.timestamp` (the
+    bar's own time) and `health.last_updated` (what SourceHealth judged
+    freshness against) may be naive (Yahoo/mock) or UTC-aware (real Dhan,
+    since Phase 16) and are generally earlier than `as_of`."""
 
 
 @dataclass(frozen=True)
