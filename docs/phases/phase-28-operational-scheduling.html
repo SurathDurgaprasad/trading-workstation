@@ -1,0 +1,226 @@
+<title>Phase 28 Operational Scheduling</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+  :root {
+    --bg: #0b0f14; --surface: #121922; --surface-2: #17202b; --border: #253140; --border-soft: #1c2530;
+    --text: #dbe4ec; --text-muted: #8ca0b3; --text-dim: #5f7284;
+    --accent: #4fd1c5; --accent-soft: #1b3a38;
+    --warn: #e8b84b; --warn-soft: #3a3016;
+    --good: #34d399; --good-soft: #123326;
+    --bad: #f87171; --bad-soft: #3a1a1a;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15.5px; line-height: 1.65; margin: 0; padding: 0 0 80px 0; }
+  ::selection { background: var(--accent-soft); color: var(--accent); }
+  a { color: var(--accent); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 28px; }
+  header.hero { border-bottom: 1px solid var(--border); padding: 56px 0 36px 0; background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%); }
+  .eyebrow { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px 0; }
+  h1 { font-family: var(--mono); font-weight: 600; font-size: clamp(26px, 4vw, 38px); line-height: 1.18; margin: 0 0 14px 0; text-wrap: balance; letter-spacing: -0.01em; }
+  .hero-sub { color: var(--text-muted); font-size: 16.5px; max-width: 66ch; margin: 0 0 28px 0; }
+  .status-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill { font-family: var(--mono); font-size: 12.5px; font-weight: 500; letter-spacing: 0.02em; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
+  .pill-good { color: var(--good); background: var(--good-soft); border-color: #16472f; }
+  .pill-neutral { color: var(--text-muted); background: var(--surface-2); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  nav.toc { max-width: 960px; margin: 0 auto; padding: 22px 28px; display: flex; flex-wrap: wrap; gap: 4px 18px; font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--border-soft); }
+  nav.toc a { color: var(--text-dim); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
+  main { padding-top: 8px; }
+  section { padding: 44px 0; border-bottom: 1px solid var(--border-soft); }
+  section:last-of-type { border-bottom: none; }
+  .section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  .section-num { font-family: var(--mono); color: var(--text-dim); font-size: 14px; min-width: 26px; }
+  h2 { font-family: var(--mono); font-size: 19px; font-weight: 600; margin: 0; color: var(--text); letter-spacing: -0.01em; }
+  h3 { font-family: var(--sans); font-size: 15.5px; font-weight: 600; color: var(--accent); margin: 26px 0 10px 0; }
+  p { margin: 0 0 14px 0; color: var(--text); max-width: 74ch; }
+  p.muted { color: var(--text-muted); }
+  ul, ol { margin: 0 0 14px 0; padding-left: 22px; max-width: 72ch; }
+  li { margin-bottom: 6px; }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; background: var(--surface-2); border: 1px solid var(--border-soft); padding: 1px 6px; border-radius: 3px; color: #a8d8f0; }
+  .flow { font-family: var(--mono); font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; overflow-x: auto; color: var(--text-muted); line-height: 1.9; white-space: pre; margin: 16px 0; }
+  .flow .node { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 14px 0; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.mono, td code { font-family: var(--mono); }
+  td strong { color: var(--text); font-weight: 500; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin: 18px 0; }
+  .stat { background: var(--surface); padding: 16px 18px; }
+  .stat .n { font-family: var(--mono); font-size: 24px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; margin: 14px 0; }
+  .card h4 { font-family: var(--mono); font-size: 13.5px; color: var(--text); margin: 0 0 8px 0; }
+  .badge { font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.03em; white-space: nowrap; }
+  .badge-verified { background: var(--good-soft); color: var(--good); }
+  .badge-na { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+  .callout { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 14px 18px; border-radius: 0 6px 6px 0; margin: 18px 0; color: #f0dca3; font-size: 14px; }
+  .callout p { margin: 0; color: inherit; }
+  .kv-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; font-size: 14px; margin: 14px 0; }
+  .kv-list dt { color: var(--text-dim); font-family: var(--mono); font-size: 12.5px; padding-top: 2px; }
+  .kv-list dd { margin: 0; color: var(--text); }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="light"]) {
+      --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+      --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+      --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+    }
+    :root:not([data-theme="light"]) code, :root:not([data-theme="light"]) .mono { color: #0f5c66; }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+    --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+    --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+  }
+  :root[data-theme="light"] code, :root[data-theme="light"] .mono { color: #0f5c66; }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Phase 28 &mdash; Operational Scheduling &amp; Continuous Shadow Mode</p>
+    <h1>shadow-run Can Now Run Itself</h1>
+    <p class="hero-sub">A new <code>scheduler/</code> package plus a <code>schedule</code> CLI command turns the existing, unchanged <code>shadow-run</code>/<code>evaluate</code>/<code>learn</code> commands into something that can be safely triggered unattended: a configurable pre-market/market-open/intraday/pre-close/post-market schedule, market-session and holiday awareness, an on-disk lock that survives a process crash, and an explicit, never-the-default continuous loop mode.</p>
+    <div class="status-row">
+      <span class="pill pill-good"><span class="dot"></span>REAL SERVICE VERIFIED (shadow_run + evaluate_and_learn slots)</span>
+      <span class="pill pill-good"><span class="dot"></span>TWO REAL BUGS FOUND &amp; FIXED DURING SELF-AUDIT</span>
+      <span class="pill pill-neutral">55 NEW TESTS, 848 TOTAL</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#git">Git</a>
+  <a href="#reconciliation">Reconciliation</a>
+  <a href="#scope">Scope</a>
+  <a href="#design">What was built</a>
+  <a href="#reuse">Reuse, not duplication</a>
+  <a href="#bugs">Bugs found and fixed by self-audit</a>
+  <a href="#evidence">Evidence</a>
+  <a href="#tests">Tests</a>
+  <a href="#safety">Safety</a>
+  <a href="#limitations">Known limitations</a>
+</nav>
+
+<main class="wrap">
+
+<section id="git">
+  <div class="section-head"><span class="section-num">01</span><h2>Git state</h2></div>
+  <div class="kv-list">
+    <dt>Base</dt><dd class="mono">main @ 70050c3 (Phase 16-27 + final audit, merged)</dd>
+    <dt>Branch</dt><dd class="mono">phase-28-operational-scheduling</dd>
+    <dt>New package</dt><dd class="mono">scheduler/ (models.py, config.py, store.py, runner.py, errors.py)</dd>
+    <dt>Modified</dt><dd class="mono">main.py (+~120 lines: one new `schedule` command with tick/loop/status)</dd>
+    <dt>New tests</dt><dd class="mono">tests/test_scheduler_{models,config,store,runner}.py, tests/test_cli_schedule.py</dd>
+  </div>
+</section>
+
+<section id="reconciliation">
+  <div class="section-head"><span class="section-num">02</span><h2>Reconciliation</h2></div>
+  <p>The authoritative roadmap (<code>PROJECT_GOAL_AND_ROADMAP.md</code>) explicitly marks everything past Phase 27 as "Future Expansion... not automatically approved, requires separate architecture review." That review was supplied directly: a detailed, numbered specification for Phase 28 (scheduling abstraction, market-session/holiday awareness, idempotent run identity, overlap prevention, restart recovery, graceful shutdown, no default infinite loop) was given as an explicit operator instruction, which this phase implements as scoped.</p>
+  <p>Phase 27's own report named the exact gap this phase closes: <em>"No built-in scheduler. Deliberately not built &mdash; the user's own cron/Task Scheduler pointed at <code>python main.py shadow-run ...</code> is sufficient infrastructure."</em> That remained true for an EXTERNAL trigger, but the operator's Phase 28 spec asks for more: idempotency, overlap prevention, and restart recovery that a bare cron entry calling <code>shadow-run</code> repeatedly does not provide on its own (a cron job has no way to know "did today's pre-market run already happen" or "is another instance still running").</p>
+</section>
+
+<section id="scope">
+  <div class="section-head"><span class="section-num">03</span><h2>Scope</h2></div>
+  <p><strong>In scope:</strong> a configurable schedule (5 default slots matching the roadmap's own pre-market/market-open/intraday/pre-close/post-market concepts, YAML-overridable), an on-disk run-history store that doubles as an overlap-prevention lock and a restart-recovery mechanism, a <code>schedule tick</code> (one check-and-maybe-run cycle, safe to call from an external cron) and <code>schedule loop</code> (explicit, opt-in continuous polling) CLI, and a <code>schedule status</code> read-only audit view.</p>
+  <p><strong>Explicitly out of scope:</strong> any new market-data source, any change to <code>shadow-run</code>/<code>evaluate</code>/<code>learn</code>'s own logic (the scheduler calls them exactly as they already exist), and real NSE/BSE holiday-calendar integration (holidays are a plain user-supplied date list &mdash; see &sect;10).</p>
+</section>
+
+<section id="design">
+  <div class="section-head"><span class="section-num">04</span><h2>What was built</h2></div>
+  <div class="flow">python main.py schedule tick   --symbols ... [--config schedule.yaml] [--now ISO8601]
+python main.py schedule loop   --symbols ... [--interval-seconds 60] [--max-ticks N]
+python main.py schedule status [--limit 20]
+
+scheduler.runner.run_tick(now):
+  reclaim_stale_locks(staleness_seconds)   -&gt; restart recovery
+  if holiday(now.date()): SKIP
+  if active_lock(): SKIP                    -&gt; fast-path overlap check
+  if not weekday: SKIP
+  due = schedule_config.due_slot(now)       -&gt; None if nothing due
+  try_start_run(...)                        -&gt; atomic (BEGIN IMMEDIATE); None if lost a race
+  execute the slot:
+    shadow_run       -&gt; main.run_shadow_run_command (unchanged)
+    evaluate_and_learn -&gt; main.run_evaluate_command + main.run_learn_command (unchanged)
+  finish_run(COMPLETED | FAILED)            -&gt; never raises out of run_tick</div>
+  <p>Default schedule (every field YAML-overridable, per the roadmap's "do not hardcode exact times as immutable business logic"):</p>
+  <div class="table-wrap"><table>
+    <tr><th>Slot</th><th>Window (IST)</th><th>Frequency</th><th>Action</th></tr>
+    <tr><td class="mono">pre_market</td><td class="mono">08:45&ndash;09:15</td><td>once/day</td><td class="mono">shadow_run</td></tr>
+    <tr><td class="mono">market_open</td><td class="mono">09:15&ndash;09:30</td><td>once/day</td><td class="mono">shadow_run</td></tr>
+    <tr><td class="mono">intraday</td><td class="mono">09:30&ndash;15:15</td><td>every 60 min</td><td class="mono">shadow_run</td></tr>
+    <tr><td class="mono">pre_close</td><td class="mono">15:15&ndash;15:30</td><td>once/day</td><td class="mono">shadow_run</td></tr>
+    <tr><td class="mono">post_market</td><td class="mono">15:30&ndash;end of day</td><td>once/day</td><td class="mono">evaluate_and_learn</td></tr>
+  </table></div>
+</section>
+
+<section id="reuse">
+  <div class="section-head"><span class="section-num">05</span><h2>Reuse, not duplication</h2></div>
+  <ul>
+    <li><code>live.dhan.market_session.current_market_session</code> (Phase 15) is reused verbatim for weekday/session awareness &mdash; not reimplemented.</li>
+    <li><code>scheduler.runner._execute_slot</code> calls <code>main.run_shadow_run_command</code> / <code>main.run_evaluate_command</code> / <code>main.run_learn_command</code> directly (via a synthetic <code>argparse.Namespace</code> built with the existing <code>parse_args</code>), exactly the same functions the standalone CLI commands call &mdash; zero reimplementation of scan/research/decide/predict/evaluate/learn wiring.</li>
+    <li><code>scheduler/store.py</code> follows the exact SQLite convention every other store in this project uses (stdlib <code>sqlite3</code>, explicit <code>BEGIN</code>/<code>COMMIT</code>/<code>ROLLBACK</code>, one <code>data_json</code> column).</li>
+  </ul>
+</section>
+
+<section id="bugs">
+  <div class="section-head"><span class="section-num">06</span><h2>Bugs found and fixed by self-audit</h2></div>
+  <div class="card">
+    <h4>1. `finished_at` silently used real wall-clock instead of the tick's own injected `now`</h4>
+    <p class="muted">Caught by a failing test, not by inspection: <code>run_tick</code> called <code>run_store.finish_run(...)</code> without an explicit <code>finished_at</code>, so it defaulted to <code>datetime.now(timezone.utc)</code> &mdash; the REAL current time &mdash; even when the caller had injected a synthetic <code>now</code> (the <code>--now</code> dry-run flag, or a test). This made the intraday slot's 60-minute re-trigger frequency check compare against the wrong reference point, and made the documented <code>--now</code> "what would run at 09:20 IST" feature silently inconsistent. Fixed by passing <code>finished_at=now_utc</code> explicitly in both the success and failure paths, with a regression test (<code>test_finished_at_is_anchored_to_the_injected_now_not_real_wall_clock</code>) pinning the fix.</p>
+  </div>
+  <div class="card">
+    <h4>2. A TOCTOU race could let two scheduler processes both start an overlapping run</h4>
+    <p class="muted">Found by re-reading the lock-acquisition code adversarially (not by a failing test): the original design checked <code>active_lock()</code> and then, as a SEPARATE call, <code>start_run()</code> &mdash; two operations with a gap between them. Two scheduler processes racing on the same run-db (e.g. an operator accidentally running both <code>schedule loop</code> and a cron-triggered <code>schedule tick</code> against one database) could both observe "no lock held" before either had inserted its own row, and both then execute overlapping shadow-runs &mdash; a direct violation of the roadmap's "prevent overlapping runs" requirement. Fixed by adding <code>SchedulerRunStore.try_start_run</code>, an atomic check-then-insert inside one <code>BEGIN IMMEDIATE</code> transaction, which SQLite serializes at the file-lock level. Verified with a genuine concurrency test: two separate SQLite connections (simulating two OS processes) racing via a <code>threading.Barrier</code>, asserting exactly one wins.</p>
+  </div>
+</section>
+
+<section id="evidence">
+  <div class="section-head"><span class="section-num">07</span><h2>Evidence</h2></div>
+  <p>Two real, bounded runs against live Yahoo Finance data (no Dhan, no credentials):</p>
+  <div class="flow">$ python main.py schedule tick --symbols AAPL --benchmark "" --now "2026-09-03T11:00:00+05:30" ...
+[RAN] Slot 'intraday' completed: Run summary: 1 candidate(s) scanned; decisions: AVOID=1; predictions recorded: 0.
+
+$ python main.py schedule tick --symbols AAPL --now &lt;real current IST time, landed in post_market&gt; ...
+[RAN] Slot 'post_market' completed: evaluate: ... | learn: ...</div>
+  <div class="table-wrap"><table>
+    <tr><th>Claim</th><th>Classification</th><th>Basis</th></tr>
+    <tr><td>shadow_run slot execution against real market data</td><td><span class="badge badge-verified">REAL SERVICE VERIFIED</span></td><td>Real Yahoo fetch, real scan, real decision (AVOID), real persistence to scanner/research/decisions.db, confirmed above</td></tr>
+    <tr><td>evaluate_and_learn slot execution</td><td><span class="badge badge-verified">REAL SERVICE VERIFIED</span></td><td>Real invocation against a live-clock <code>--now</code>, confirmed above</td></tr>
+    <tr><td>Overlap prevention under genuine concurrent contention</td><td><span class="badge badge-verified">LOCAL/DETERMINISTIC TEST VERIFIED</span></td><td><code>test_try_start_run_is_atomic_under_real_concurrent_contention</code> &mdash; two real SQLite connections, real thread-level race, real file locking</td></tr>
+    <tr><td>Restart recovery after a genuinely killed process</td><td><span class="badge badge-na">NOT VERIFIED</span></td><td>Tested via a synthetic stale lock, not an actual killed OS process &mdash; the underlying mechanism (a staleness-timeout reclaim) is the same either way, but a real kill -9 has not been performed</td></tr>
+    <tr><td>Multi-day continuous unattended operation</td><td><span class="badge badge-na">NOT VERIFIED</span></td><td>Same "requires real elapsed time" limitation Phase 27 already stated &mdash; this phase provides the mechanism, not the elapsed-time evidence</td></tr>
+  </table></div>
+</section>
+
+<section id="tests">
+  <div class="section-head"><span class="section-num">08</span><h2>Tests</h2></div>
+  <p>55 new tests across 5 files: schedule-config window/frequency/YAML-parsing logic, store persistence/locking/idempotency/concurrency, runner end-to-end ticks (weekend skip, holiday skip, overlap skip, stale-lock reclaim, missing-universe graceful failure, provider-failure graceful failure, frequency re-trigger), and CLI argparse/tick/loop/status wiring including a genuine Ctrl+C-mid-loop test asserting a clean message and no traceback. No real network/Ollama call anywhere in the unit suite &mdash; same fake-provider fixtures <code>tests/test_shadow_run.py</code> established. Full regression: <strong>848 passed, 0 failed</strong> (793 baseline + 55 new).</p>
+</section>
+
+<section id="safety">
+  <div class="section-head"><span class="section-num">09</span><h2>Safety</h2></div>
+  <ul>
+    <li>Every scheduler code path routes through the existing, unchanged <code>run_shadow_run_command</code>/<code>run_evaluate_command</code>/<code>run_learn_command</code> &mdash; no new order-placement, broker, or paper-mutation code path exists anywhere in <code>scheduler/</code>.</li>
+    <li><code>schedule loop</code> is never the default; only <code>schedule tick</code> (one cycle, exits) and <code>schedule status</code> (read-only) are, satisfying "no infinite loop by default CLI accident."</li>
+    <li>Ctrl+C during <code>schedule loop</code> is caught explicitly, prints a clean shutdown message, and closes the run-store &mdash; matching <code>paper-live</code>'s own established graceful-shutdown pattern.</li>
+    <li><code>tests/test_dhan_no_real_orders.py</code> / <code>tests/test_broker.py</code>: 12/12 passed before and after this phase's changes.</li>
+  </ul>
+</section>
+
+<section id="limitations">
+  <div class="section-head"><span class="section-num">10</span><h2>Known limitations, stated honestly</h2></div>
+  <ul>
+    <li><strong>No real NSE/BSE holiday calendar integration.</strong> Holidays are a plain, user-supplied date list (empty by default) &mdash; the same "recognized, never silently faked" posture <code>market_data.universe.py</code> already applies to unimplemented NIFTY index modes, and the same documented limitation <code>live/dhan/market_session.py</code> already states for session detection.</li>
+    <li><strong>The scheduler is still a foreground process.</strong> <code>schedule loop</code> must be kept running by something (a terminal, a Windows service wrapper, <code>nohup</code>/systemd on Linux) &mdash; this phase does not install itself as an OS-level service, which was not asked for and would be a separate, larger scope.</li>
+    <li><strong>Restart recovery is deterministically tested, not battle-tested against a real kill -9.</strong> See &sect;07's evidence table.</li>
+    <li><strong>Multi-day continuous operation remains unproven</strong>, same honest gap Phase 27 already stated &mdash; this phase supplies the mechanism that makes it possible, not the elapsed-time evidence itself.</li>
+  </ul>
+</section>
+
+</main>

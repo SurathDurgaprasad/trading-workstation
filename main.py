@@ -2,6 +2,7 @@ import argparse
 import logging
 import sys
 import time
+from datetime import datetime
 
 from pydantic import BaseModel
 
@@ -43,7 +44,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run")
+_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -1328,6 +1329,107 @@ def run_review_command(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+# `schedule` -- Phase 28 operational scheduling: makes `shadow-run` (and
+# post-market evaluate/learn) capable of running unattended, without
+# reimplementing any of that orchestration -- see scheduler/runner.py's
+# module docstring. `tick` performs at most ONE check-and-maybe-execute
+# cycle and exits; `loop` is the explicit, opt-in continuous mode (never
+# the default -- "no infinite loop by default CLI accident" per the
+# roadmap). `status` is a read-only audit view over scheduler_runs.db.
+# --------------------------------------------------------------------------
+
+DEFAULT_SCHEDULER_DB_PATH = PROJECT_ROOT / "data" / "scheduler_runs.db"
+
+
+def _load_schedule_config(args: argparse.Namespace):
+    from scheduler.config import ScheduleConfig
+
+    if args.config:
+        return ScheduleConfig.from_yaml_file(args.config)
+    return ScheduleConfig()
+
+
+def _print_tick_result(result) -> None:
+    marker = "RAN" if result.ran else "SKIPPED"
+    print(f"[{marker}] {result.reason}")
+    if result.reclaimed_run_ids:
+        ids = ", ".join(r[:12] for r in result.reclaimed_run_ids)
+        print(f"  Reclaimed {len(result.reclaimed_run_ids)} stale lock(s) from a prior crashed/killed run: {ids}")
+
+
+def _run_tick_from_args(args: argparse.Namespace, schedule_config, store, *, now: datetime | None = None):
+    from scheduler.runner import run_tick
+
+    return run_tick(
+        schedule_config=schedule_config, run_store=store, symbols=args.symbols, watchlist_file=args.watchlist_file,
+        period=args.period, interval=args.interval, benchmark=args.benchmark, news_limit=args.news_limit,
+        horizon_bars=args.horizon_bars, paper_db=args.paper_db, with_ai=args.with_ai,
+        scanner_db=args.scanner_db, research_db=args.research_db, decision_db=args.decision_db,
+        predictions_db=args.predictions_db, staleness_seconds=args.staleness_seconds, now=now,
+    )
+
+
+def run_schedule_command(args: argparse.Namespace) -> None:
+    from scheduler.store import SchedulerRunStore
+
+    run_db_path = args.run_db or DEFAULT_SCHEDULER_DB_PATH
+
+    if args.schedule_command == "status":
+        store = SchedulerRunStore(run_db_path)
+        runs = store.list_runs(limit=args.limit)
+        store.close()
+
+        print("=" * 70)
+        print("SCHEDULER RUN HISTORY -- READ-ONLY AUDIT")
+        print("=" * 70)
+        print(f"Database: {run_db_path}\n")
+        if not runs:
+            print("No scheduler runs recorded yet -- run `schedule tick` or `schedule loop` first.")
+        for run in runs:
+            finished = run.finished_at.isoformat() if run.finished_at else "(in progress)"
+            print(f"{run.started_at.isoformat()}  {run.slot_name:12s} {run.status.value:10s} finished={finished:32s} {run.detail}")
+        return
+
+    schedule_config = _load_schedule_config(args)
+
+    if args.schedule_command == "tick":
+        now = datetime.fromisoformat(args.now) if args.now else None
+        store = SchedulerRunStore(run_db_path)
+        try:
+            result = _run_tick_from_args(args, schedule_config, store, now=now)
+        finally:
+            store.close()
+        print("=" * 70)
+        print("SCHEDULER TICK -- AT MOST ONE SLOT EXECUTED, THEN EXITS")
+        print("=" * 70)
+        _print_tick_result(result)
+        return
+
+    if args.schedule_command == "loop":
+        store = SchedulerRunStore(run_db_path)
+        print("=" * 70)
+        print("SCHEDULER LOOP -- CONTINUOUS, EXPLICIT MODE (Ctrl+C to stop cleanly)")
+        print("=" * 70)
+        print(f"Polling every {args.interval_seconds:.0f}s. Database: {run_db_path}")
+        print("No real or paper order is ever placed by this command.")
+
+        ticks = 0
+        try:
+            while args.max_ticks is None or ticks < args.max_ticks:
+                result = _run_tick_from_args(args, schedule_config, store)
+                _print_tick_result(result)
+                ticks += 1
+                if args.max_ticks is None or ticks < args.max_ticks:
+                    time.sleep(args.interval_seconds)
+        except KeyboardInterrupt:
+            print("\n[SCHEDULER] Interrupted by user (Ctrl+C) -- shutting down cleanly. No new tick will start.")
+        finally:
+            store.close()
+        print(f"\n[SCHEDULER] Loop stopped after {ticks} tick(s).")
+        return
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -1662,6 +1764,46 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     shadow_run_parser.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")
     shadow_run_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
 
+    schedule_parser = subparsers.add_parser(
+        "schedule",
+        help=(
+            "Phase 28: run shadow-run (and post-market evaluate/learn) on a configurable schedule, unattended. "
+            "`tick` runs at most one due slot and exits; `loop` is explicit continuous mode; `status` audits run history."
+        ),
+    )
+    schedule_subparsers = schedule_parser.add_subparsers(dest="schedule_command", required=True)
+
+    def _add_schedule_common_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--symbols", type=str, default=None, help="Comma-separated watchlist (e.g. AAPL,MSFT,RELIANCE.NS). Required (or --watchlist-file) for any shadow_run slot to be able to execute.")
+        p.add_argument("--watchlist-file", type=str, default=None, help="Path to a YAML file with a top-level `market_universe: {mode: watchlist, symbols: [...]}` key.")
+        p.add_argument("--config", type=str, default=None, help="Path to a YAML schedule-definition file (slots + holidays). Default: the built-in pre_market/market_open/intraday/pre_close/post_market schedule.")
+        p.add_argument("--period", default="1y", help="Historical window used for scanning, market context, and evaluation (default: 1y).")
+        p.add_argument("--interval", default="1d", help="Bar interval (default: 1d).")
+        p.add_argument("--benchmark", default="^NSEI", help="Benchmark symbol for scanner relative strength (default: ^NSEI). Pass an empty string to disable.")
+        p.add_argument("--news-limit", type=int, default=10, help="Max news items to fetch per symbol (default: 10).")
+        p.add_argument("--horizon-bars", type=int, default=20, help="Bars after entry before an unresolved prediction is marked EXPIRED (default: 20).")
+        p.add_argument("--paper-db", type=str, default=None, help="Optional: check this paper-trading database for an existing open position per symbol, to distinguish BUY/WATCH from EXIT.")
+        p.add_argument("--with-ai", action="store_true", help="Include the optional AI research summary and decision narrative for every symbol (default: off).")
+        p.add_argument("--scanner-db", type=str, default=None, help=f"SQLite scan-history path (default: {DEFAULT_SCANNER_DB_PATH}).")
+        p.add_argument("--research-db", type=str, default=None, help=f"SQLite research-history path (default: {DEFAULT_RESEARCH_DB_PATH}).")
+        p.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")
+        p.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
+        p.add_argument("--run-db", type=str, default=None, help=f"SQLite scheduler-run-history path (default: {DEFAULT_SCHEDULER_DB_PATH}).")
+        p.add_argument("--staleness-seconds", type=float, default=1800.0, help="A RUNNING lock older than this with no completion is treated as an orphaned/crashed run and reclaimed (default: 1800 = 30 minutes).")
+
+    tick_parser = schedule_subparsers.add_parser("tick", help="Check whether a configured slot is due right now; if so, run it exactly once, then exit. Never loops.")
+    _add_schedule_common_args(tick_parser)
+    tick_parser.add_argument("--now", type=str, default=None, help="ISO 8601 datetime to evaluate against instead of the real current time (for a dry-run / 'what would run at 09:20 IST' check, and for deterministic tests).")
+
+    loop_parser = schedule_subparsers.add_parser("loop", help="Explicit continuous mode: poll and tick repeatedly until Ctrl+C (or --max-ticks is reached). Never the default -- must be requested explicitly.")
+    _add_schedule_common_args(loop_parser)
+    loop_parser.add_argument("--interval-seconds", type=float, default=60.0, help="Seconds to sleep between ticks (default: 60).")
+    loop_parser.add_argument("--max-ticks", type=int, default=None, help="Stop after this many ticks (default: run until Ctrl+C).")
+
+    status_parser = schedule_subparsers.add_parser("status", help="Read-only: print recent scheduler run history (audit trail).")
+    status_parser.add_argument("--run-db", type=str, default=None, help=f"SQLite scheduler-run-history path (default: {DEFAULT_SCHEDULER_DB_PATH}).")
+    status_parser.add_argument("--limit", type=int, default=20, help="Max runs to print, most recent first (default: 20).")
+
     return parser.parse_args(argv)
 
 
@@ -1701,6 +1843,8 @@ def main() -> None:
             run_review_command(args)
         elif args.command == "shadow-run":
             run_shadow_run_command(args)
+        elif args.command == "schedule":
+            run_schedule_command(args)
         else:
             run_analyze_command(args)
     except _CONTROLLED_ERRORS as exc:

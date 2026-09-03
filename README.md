@@ -54,6 +54,7 @@ Position monitoring
 - `agents/decision_reviewer.py` (Phase 25): an independent, adversarial AI second opinion on the latest decision for a symbol (`python main.py review --symbol X`) — five of the roadmap's six suggested research agents turned out to already exist (the original `analyze` pipeline, `research/summarizer.py`); this is the one genuine gap. **Review only — cannot change the label, no order is placed.** See [`docs/phases/phase-25-ai-multi-agent-research.html`](docs/phases/phase-25-ai-multi-agent-research.html)
 - `/intelligence` dashboard page (Phase 26): a new read-only view on the existing `python main.py dashboard` app — the latest scan's ranked candidates with their decision labels, plus prediction performance. No market-data fetch, LLM call, or write happens on page load. See [`docs/phases/phase-26-live-dashboard.html`](docs/phases/phase-26-live-dashboard.html)
 - `shadow-run` (Phase 27): one command chaining scan → research → decide → predict → evaluate → learn over a watchlist (`python main.py shadow-run --symbols X,Y,Z`) — pure orchestration over already-tested functions, one symbol's failure never aborts the rest. **This is infrastructure for validation, not validation itself** — the roadmap's own "run for sufficient time" criterion requires real elapsed operating time and is honestly reported as not yet met. See [`docs/phases/phase-27-shadow-trading-validation.html`](docs/phases/phase-27-shadow-trading-validation.html)
+- `scheduler/` (Phase 28): makes `shadow-run`/`evaluate`/`learn` safe to trigger unattended (`python main.py schedule tick|loop|status`) — a configurable pre-market/market-open/intraday/pre-close/post-market schedule (YAML-overridable), market-session/weekend/holiday awareness, an on-disk lock (atomic under real concurrent contention) that prevents overlapping runs and survives a crashed process on restart, and an explicit, never-default continuous loop mode. Calls the exact same, unchanged `shadow-run`/`evaluate`/`learn` command functions — no new business logic. See [`docs/phases/phase-28-operational-scheduling.html`](docs/phases/phase-28-operational-scheduling.html)
 
 ## Running it
 
@@ -83,6 +84,14 @@ python main.py size --symbol AAPL --initial-capital 100000
 python main.py predict --symbol AAPL
 python main.py evaluate
 python main.py learn
+```
+
+To run that pipeline unattended (Phase 28), on a configurable schedule, with overlap prevention and crash recovery:
+
+```bash
+python main.py schedule tick --symbols AAPL,MSFT,RELIANCE.NS   # one check-and-maybe-run cycle, safe from cron
+python main.py schedule loop --symbols AAPL,MSFT,RELIANCE.NS   # explicit continuous mode, Ctrl+C to stop
+python main.py schedule status                                  # read-only run-history audit
 ```
 
 To try the real Dhan market-data feed instead of the mock replay (still paper execution — see the two caveats above), copy `.env.example` to `.env`, fill in `DHAN_CLIENT_ID`/`DHAN_ACCESS_TOKEN` (never commit that file — it's already gitignored), and:
