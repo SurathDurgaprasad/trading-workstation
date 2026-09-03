@@ -50,6 +50,7 @@ provided for reference, not as a substitute for a committed file.
 | 14 | Real market data + broker integration investigation (research/design only, no code) | [`docs/phases/phase-14-broker-research.html`](phases/phase-14-broker-research.html) |
 | 15 | Dhan live market data integration, read-only first | [`docs/phases/phase-15-dhan-integration.html`](phases/phase-15-dhan-integration.html) |
 | &mdash; | GitHub Reconciliation Audit (this repository's own forensic audit, pre-Phase-16) | [`https://claude.ai/code/artifact/e44ea528-f8b2-4efb-bc60-3d15d77ca174`](https://claude.ai/code/artifact/e44ea528-f8b2-4efb-bc60-3d15d77ca174) — Claude Artifact only |
+| 16 | Real Dhan connectivity verification — real REST calls, real WebSocket data, four real bugs found and fixed (including a reconnect storm and a timezone decoding bug), 10 real bars traced through the pipeline to strategy invocation. No natural signal occurred; risk/approval/paper remain deterministic-test-only, not real-service-verified | [`docs/phases/phase-16-dhan-real-connectivity.html`](phases/phase-16-dhan-real-connectivity.html) |
 
 ## Artifact-only reports (for reference; not committed as files)
 
@@ -71,14 +72,25 @@ was explicitly scoped to Phase 8–15.
 Note: these links point to artifacts owned by the project's operator. They
 may not be reachable by other people without being explicitly shared.
 
-## What this project actually is, as of Phase 15
+## What this project actually is, as of Phase 16
 
 - A deterministic, rule-based intraday strategy and a fail-closed risk
   engine — the strategy itself is classified **unproven** (Phase 8–11); this
   has not changed and nothing here should be read as investment advice.
-- A simulated and, as of Phase 15, real-market-data-capable pipeline
-  (`live/dhan/`) feeding the same unchanged strategy/risk/approval chain.
+- A real-market-data-capable pipeline (`live/dhan/`) feeding the same
+  unchanged strategy/risk/approval chain — as of Phase 16, this has
+  actually been connected to the live DhanHQ v2 service: real REST account
+  calls, a real WebSocket handshake, real market packets, and real OHLCV
+  bars reaching the unmodified pipeline through strategy invocation. Four
+  real bugs were found and fixed along the way (an undocumented Dhan
+  `/holdings` empty-state response, a connection-lifecycle race, a
+  reconnect storm that got the account rate-limited by Dhan, and a
+  timezone decoding bug in Dhan's own "Last Trade Time" field) — see the
+  Phase 16 report for full detail.
 - Paper execution only. No code path in this repository can place a real
-  order — see the Phase 15 report's explicit safety findings.
+  order — see the Phase 15 and Phase 16 reports' explicit safety findings.
 - A human-approval workflow with a second, independent risk check, a local
-  CLI and dashboard, and read-only MCP tools.
+  CLI and dashboard, and read-only MCP tools. As of Phase 16, no natural
+  real-market signal has yet been observed to exercise this workflow
+  end-to-end against real data — that chain is verified only by the
+  existing deterministic test suite, not yet by a live signal.
