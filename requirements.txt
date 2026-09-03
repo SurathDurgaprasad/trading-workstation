@@ -32,5 +32,11 @@ websocket-client==1.9.0
 starlette==1.6.0
 uvicorn==0.49.0
 
+# Directly imported by market_data/universe.py (Phase 18) for
+# MarketUniverse.from_yaml_file -- previously a transitive dependency of
+# langchain only, now imported by name directly. Pinned to the version
+# already in venv/, same convention as the rest of this file.
+pyyaml==6.0.3
+
 # test-only
 pytest==9.1.1
