@@ -115,6 +115,43 @@ def test_no_update_methods_exist_predictions_and_evaluations_are_append_only(tmp
     store.close()
 
 
+def test_list_predictions_for_symbol_filters_and_orders_most_recent_first(tmp_path):
+    store = PredictionStore(tmp_path / "predictions.db")
+    store.save_prediction(_prediction("p1", symbol="AAPL", created_at=datetime(2024, 1, 1, tzinfo=timezone.utc)))
+    store.save_prediction(_prediction("p2", symbol="MSFT", created_at=datetime(2024, 1, 2, tzinfo=timezone.utc)))
+    store.save_prediction(_prediction("p3", symbol="AAPL", created_at=datetime(2024, 1, 3, tzinfo=timezone.utc)))
+
+    result = store.list_predictions_for_symbol("AAPL")
+
+    store.close()
+    assert [p.prediction_id for p in result] == ["p3", "p1"]  # most recent first, MSFT excluded
+
+
+def test_list_predictions_for_symbol_normalizes_case(tmp_path):
+    store = PredictionStore(tmp_path / "predictions.db")
+    store.save_prediction(_prediction("p1", symbol="AAPL"))
+    result = store.list_predictions_for_symbol("aapl")
+    store.close()
+    assert len(result) == 1
+
+
+def test_list_predictions_for_symbol_empty_for_unknown_symbol(tmp_path):
+    store = PredictionStore(tmp_path / "predictions.db")
+    store.save_prediction(_prediction("p1", symbol="AAPL"))
+    result = store.list_predictions_for_symbol("ZZZZ")
+    store.close()
+    assert result == []
+
+
+def test_list_predictions_for_symbol_respects_limit(tmp_path):
+    store = PredictionStore(tmp_path / "predictions.db")
+    for i in range(5):
+        store.save_prediction(_prediction(f"p{i}", symbol="AAPL", created_at=datetime(2024, 1, 1 + i, tzinfo=timezone.utc)))
+    result = store.list_predictions_for_symbol("AAPL", limit=2)
+    store.close()
+    assert len(result) == 2
+
+
 def test_store_persists_across_reconnect(tmp_path):
     db_path = tmp_path / "predictions.db"
     store = PredictionStore(db_path)

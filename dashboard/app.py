@@ -286,7 +286,7 @@ async def intelligence_page(request: Request) -> HTMLResponse:
                 data_cell = "<span class='muted'>n/a</span>"
                 confidence_cell = "<span class='muted'>n/a</span>"
             candidate_rows.append(
-                f"<tr><td>{html.escape(candidate.symbol)}</td>"
+                f"<tr><td><a href='/intelligence/{html.escape(candidate.symbol)}'>{html.escape(candidate.symbol)}</a></td>"
                 f"<td>{candidate.composite_score:+.2f}</td>"
                 f"<td>{candidate.trend_score:+.2f}</td>"
                 f"<td>{candidate.momentum_score:+.2f}</td>"
@@ -315,9 +315,17 @@ async def intelligence_page(request: Request) -> HTMLResponse:
         quality = learning_snapshot["signal_quality"]
         mfe_text = f"{quality.average_favorable_excursion:+.2%}" if quality.average_favorable_excursion is not None else "n/a"
         mae_text = f"{quality.average_adverse_excursion:+.2%}" if quality.average_adverse_excursion is not None else "n/a"
+        real_calibration_rows = "".join(
+            f"<tr><td>{html.escape(c.bucket_label)}</td><td>{c.total}</td><td>{c.resolved}</td>"
+            f"<td>{f'{c.win_rate:.1%}' if c.win_rate is not None else 'n/a'}</td>"
+            f"<td>{f'{c.average_return:+.2%}' if c.average_return is not None else 'n/a'}</td></tr>"
+            for c in learning_snapshot["real_calibration"]
+        ) or "<tr><td colspan='5' class='muted'>(no decisions with a recorded confidence score yet)</td></tr>"
         learning_section = (
             f"<p class='muted'>{learning_snapshot['total']} evaluated prediction(s) considered.</p>"
             f"<table><tr><th>Config Version</th><th>Total</th><th>Resolved</th><th>Win Rate</th><th>Avg Return</th></tr>{strategy_rows}</table>"
+            "<h3 style='font-size:14px;color:#9aa4b2;'>Confidence calibration (real decision_engine.confidence score)</h3>"
+            f"<table><tr><th>Bucket</th><th>Total</th><th>Resolved</th><th>Win Rate</th><th>Avg Return</th></tr>{real_calibration_rows}</table>"
             "<div class='kv'>"
             f"<div>Resolved (signal quality)</div><div>{quality.resolved}</div>"
             f"<div>Avg favorable excursion</div><div>{mfe_text}</div>"
@@ -338,6 +346,128 @@ async def intelligence_page(request: Request) -> HTMLResponse:
     return HTMLResponse(_page(body))
 
 
+async def decision_detail_page(request: Request) -> HTMLResponse:
+    """Phase 35 -- the full picture for ONE symbol: decision history
+    (label/confidence/rationale), scanner evidence, research evidence
+    (news/sector/AI summary), and prediction history (entry/stop/target/
+    outcome). Read-only, same no-fetch discipline as intelligence_page --
+    every field here is something scan/research/decide/predict/evaluate
+    already persisted, nothing computed fresh on this GET."""
+    symbol = request.path_params["symbol"].strip().upper()
+    decisions = intelligence.get_decision_history(symbol)
+    research_reports = intelligence.get_research_history(symbol)
+    prediction_history = intelligence.get_prediction_history(symbol)
+
+    from market_data.universe import exchange_for_symbol
+
+    exchange = exchange_for_symbol(symbol)
+
+    if not decisions:
+        decision_section = f"<p class='muted'>No decision recorded for {html.escape(symbol)} yet &mdash; run <code>python main.py decide --symbol {html.escape(symbol)}</code> first.</p>"
+        evidence_section = ""
+    else:
+        latest = decisions[0]
+        decision_class = "tag-long" if latest.label.value == "BUY" else "tag-sim"
+        confidence_text = f"{latest.confidence:.0%}" if latest.confidence is not None else "n/a"
+        data_source_text = (
+            f"{html.escape(latest.market_context.data_source or '')} / {html.escape(latest.market_context.data_status or '')}"
+            if latest.market_context is not None and latest.market_context.data_status is not None
+            else "n/a"
+        )
+        rationale_items = "".join(f"<li>{html.escape(line)}</li>" for line in latest.rationale)
+        history_rows = "".join(
+            f"<tr><td>{html.escape(d.as_of.isoformat())}</td>"
+            f"<td><span class='tag {'tag-long' if d.label.value == 'BUY' else 'tag-sim'}'>{html.escape(d.label.value)}</span></td>"
+            f"<td>{f'{d.confidence:.0%}' if d.confidence is not None else 'n/a'}</td>"
+            f"<td>{html.escape(d.config_version)}</td></tr>"
+            for d in decisions
+        )
+        decision_section = f"""
+<div class="kv">
+<div>Latest label</div><div><span class='tag {decision_class}'>{html.escape(latest.label.value)}</span></div>
+<div>Confidence</div><div>{confidence_text}</div>
+<div>Confidence explanation</div><div>{html.escape(latest.confidence_explanation or 'n/a')}</div>
+<div>As of</div><div>{html.escape(latest.as_of.isoformat())}</div>
+<div>Config version</div><div>{html.escape(latest.config_version)}</div>
+<div>Data source/status</div><div>{data_source_text}</div>
+</div>
+<p><strong>Rationale:</strong></p>
+<ul>{rationale_items}</ul>
+<h3 style='font-size:14px;color:#9aa4b2;'>Decision history ({len(decisions)})</h3>
+<table><tr><th>As Of</th><th>Label</th><th>Confidence</th><th>Config Version</th></tr>{history_rows}</table>
+"""
+        if latest.scanner_evidence is not None:
+            c = latest.scanner_evidence
+            explanation_items = "".join(f"<li>{html.escape(line)}</li>" for line in c.explanation)
+            evidence_section = f"""
+<h2>SCANNER EVIDENCE</h2>
+<div class="kv">
+<div>Composite</div><div>{c.composite_score:+.2f}</div>
+<div>Trend</div><div>{c.trend_score:+.2f}</div>
+<div>Momentum</div><div>{c.momentum_score:+.2f}</div>
+<div>Breakout</div><div>{c.breakout_score:+.4f}</div>
+<div>Relative strength</div><div>{f'{c.relative_strength_score:+.4f}' if c.relative_strength_score is not None else 'n/a'}</div>
+<div>Sector strength</div><div>{f'{c.sector_strength_score:+.4f}' if c.sector_strength_score is not None else 'n/a'}</div>
+<div>Last close</div><div>{c.last_close:.2f}</div>
+</div>
+<ul>{explanation_items}</ul>
+"""
+        else:
+            evidence_section = "<h2>SCANNER EVIDENCE</h2><p class='muted'>None recorded on the latest decision.</p>"
+
+    if not research_reports:
+        research_section = f"<p class='muted'>No research recorded for {html.escape(symbol)} yet &mdash; run <code>python main.py research --symbol {html.escape(symbol)}</code> first.</p>"
+    else:
+        latest_research = research_reports[0]
+        news_items = "".join(
+            f"<li>[{html.escape(item.published_at.isoformat())}] ({html.escape(item.source)}) {html.escape(item.title)}</li>"
+            for item in latest_research.news
+        ) or "<li class='muted'>(no news items)</li>"
+        sector_text = html.escape(latest_research.sector.sector or "UNKNOWN") if latest_research.sector is not None else "n/a"
+        ai_summary_text = html.escape(latest_research.ai_summary.summary) if latest_research.ai_summary is not None else "not available"
+        research_section = f"""
+<div class="kv">
+<div>Sector</div><div>{sector_text}</div>
+<div>As of</div><div>{html.escape(latest_research.as_of.isoformat())}</div>
+</div>
+<p><strong>AI summary (narration only):</strong> {ai_summary_text}</p>
+<p><strong>News ({len(latest_research.news)}):</strong></p>
+<ul>{news_items}</ul>
+"""
+
+    if not prediction_history:
+        prediction_section = f"<p class='muted'>No shadow predictions recorded for {html.escape(symbol)} yet &mdash; run <code>python main.py predict --symbol {html.escape(symbol)}</code> after a BUY decision.</p>"
+    else:
+        prediction_rows = []
+        for prediction, evaluation in prediction_history:
+            outcome_text = html.escape(evaluation.outcome.value) if evaluation is not None else "not yet evaluated"
+            return_text = f"{evaluation.actual_return:+.2%}" if evaluation is not None and evaluation.actual_return is not None else "n/a"
+            outcome_class = "tag-long" if evaluation is not None and evaluation.outcome.value == "TARGET_HIT" else "tag-sim"
+            prediction_rows.append(
+                f"<tr><td>{html.escape(prediction.created_at.isoformat())}</td>"
+                f"<td>{prediction.entry_price:.2f}</td><td>{prediction.stop_price:.2f}</td><td>{prediction.target_price:.2f}</td>"
+                f"<td><span class='tag {outcome_class}'>{outcome_text}</span></td><td>{return_text}</td></tr>"
+            )
+        prediction_section = f"<table><tr><th>Created</th><th>Entry</th><th>Stop</th><th>Target</th><th>Outcome</th><th>Return</th></tr>{''.join(prediction_rows)}</table>"
+
+    body = f"""
+<p><a href="/intelligence">&larr; back to market intelligence</a></p>
+<div class="banner">READ-ONLY DECISION DETAIL for {html.escape(symbol)} ({html.escape(exchange)}) &mdash; no order of any kind can be placed from this page.</div>
+
+<h2>DECISION</h2>
+{decision_section}
+
+{evidence_section}
+
+<h2>RESEARCH EVIDENCE</h2>
+{research_section}
+
+<h2>PREDICTION HISTORY</h2>
+{prediction_section}
+"""
+    return HTMLResponse(_page(body))
+
+
 app = Starlette(routes=[
     Route("/", index, methods=["GET"]),
     Route("/approve", approve, methods=["POST"]),
@@ -345,4 +475,5 @@ app = Starlette(routes=[
     Route("/kill-switch/activate", kill_switch_activate, methods=["POST"]),
     Route("/kill-switch/reset", kill_switch_reset, methods=["POST"]),
     Route("/intelligence", intelligence_page, methods=["GET"]),
+    Route("/intelligence/{symbol}", decision_detail_page, methods=["GET"]),
 ])

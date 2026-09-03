@@ -203,3 +203,111 @@ def test_intelligence_page_escapes_symbol_names(client, _isolated_intelligence_d
 
     assert "<script>alert(1)</script>" not in response.text
     assert "&lt;script&gt;" in response.text
+
+
+def test_intelligence_page_links_to_the_decision_detail_page(client, _isolated_intelligence_dbs):
+    tmp_path = _isolated_intelligence_dbs
+    _save_scan(tmp_path / "scanner.db", _candidate("AAPL"))
+
+    response = client.get("/intelligence")
+    assert "href='/intelligence/AAPL'" in response.text
+
+
+# --- Phase 35: /intelligence/{symbol} decision detail page -----------------------
+
+
+def _save_research(db_path, symbol: str, *, news=None, sector=None, ai_summary=None):
+    from research.models import ResearchReport
+    from research.store import ResearchStore
+
+    store = ResearchStore(db_path)
+    store.save_report(ResearchReport(
+        report_id=f"report-{symbol}", symbol=symbol, as_of=datetime(2024, 6, 1, tzinfo=timezone.utc),
+        news=news or [], sector=sector, ai_summary=ai_summary, ai_summary_unavailable_reason=None if ai_summary else "skipped",
+    ))
+    store.close()
+
+
+def test_decision_detail_page_no_decision_yet(client, _isolated_intelligence_dbs):
+    response = client.get("/intelligence/AAPL")
+    assert response.status_code == 200
+    assert "No decision recorded for AAPL" in response.text
+
+
+def test_decision_detail_page_shows_decision_confidence_and_rationale(client, _isolated_intelligence_dbs):
+    tmp_path = _isolated_intelligence_dbs
+    candidate = _candidate("AAPL", composite=1.75)
+    _save_decision(tmp_path / "decisions.db", "AAPL", DecisionLabel.BUY, candidate)
+
+    response = client.get("/intelligence/AAPL")
+
+    assert response.status_code == 200
+    assert "AAPL" in response.text
+    assert "BUY" in response.text
+    assert "fake rationale" in response.text
+    assert "SCANNER EVIDENCE" in response.text
+
+
+def test_decision_detail_page_shows_decision_history_most_recent_first(client, _isolated_intelligence_dbs):
+    tmp_path = _isolated_intelligence_dbs
+    store = DecisionStore(tmp_path / "decisions.db")
+    for i, label in enumerate([DecisionLabel.WATCH, DecisionLabel.BUY]):
+        store.save_decision(Decision(
+            decision_id=f"dec-{i}", symbol="AAPL", as_of=datetime(2024, 6, 1 + i, tzinfo=timezone.utc), label=label,
+            rationale=["fake"], config_version="cfg1", scanner_evidence=_candidate("AAPL"), research_evidence=None,
+            market_context=None, risk_context=RiskContext.unknown(), narrative=None, narrative_unavailable_reason=None,
+        ))
+    store.close()
+
+    response = client.get("/intelligence/AAPL")
+    assert "Decision history (2)" in response.text
+
+
+def test_decision_detail_page_shows_research_news_and_sector(client, _isolated_intelligence_dbs):
+    from research.models import NewsItem, SectorInfo
+
+    tmp_path = _isolated_intelligence_dbs
+    _save_research(
+        tmp_path / "research.db", "AAPL",
+        news=[NewsItem(title="Apple announces new product", summary="fake summary", source="Reuters", published_at=datetime(2024, 6, 1, tzinfo=timezone.utc), url=None)],
+        sector=SectorInfo(symbol="AAPL", sector="Technology", industry="Consumer Electronics", as_of=datetime(2024, 6, 1, tzinfo=timezone.utc)),
+    )
+
+    response = client.get("/intelligence/AAPL")
+
+    assert "Apple announces new product" in response.text
+    assert "Technology" in response.text
+
+
+def test_decision_detail_page_no_research_yet(client, _isolated_intelligence_dbs):
+    response = client.get("/intelligence/AAPL")
+    assert "No research recorded for AAPL" in response.text
+
+
+def test_decision_detail_page_shows_prediction_history(client, _isolated_intelligence_dbs):
+    tmp_path = _isolated_intelligence_dbs
+    _save_prediction_and_evaluation(tmp_path / "predictions.db", "AAPL", "dec-AAPL", PredictionOutcomeState.TARGET_HIT, 0.15)
+
+    response = client.get("/intelligence/AAPL")
+
+    assert "TARGET_HIT" in response.text
+    assert "+15.00%" in response.text
+
+
+def test_decision_detail_page_no_predictions_yet(client, _isolated_intelligence_dbs):
+    response = client.get("/intelligence/AAPL")
+    assert "No shadow predictions recorded for AAPL" in response.text
+
+
+def test_decision_detail_page_normalizes_symbol_case(client, _isolated_intelligence_dbs):
+    tmp_path = _isolated_intelligence_dbs
+    _save_decision(tmp_path / "decisions.db", "AAPL", DecisionLabel.BUY, _candidate("AAPL"))
+
+    response = client.get("/intelligence/aapl")
+    assert response.status_code == 200
+    assert "No decision recorded" not in response.text
+
+
+def test_decision_detail_page_escapes_malicious_symbol(client, _isolated_intelligence_dbs):
+    response = client.get("/intelligence/%3Cscript%3E")
+    assert "<script>" not in response.text

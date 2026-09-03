@@ -81,6 +81,18 @@ class PredictionStore:
         rows = self._conn.execute("SELECT data_json FROM predictions ORDER BY created_at LIMIT ?", (limit,)).fetchall()
         return [PredictionRecord.model_validate_json(r[0]) for r in rows]
 
+    def list_predictions_for_symbol(self, symbol: str, limit: int = 50) -> list[PredictionRecord]:
+        """Phase 35 -- same convention as decision_engine.store.DecisionStore.
+        list_decisions_for_symbol / research.store.ResearchStore.
+        list_reports_for_symbol. Most recent first (unlike list_predictions,
+        which is oldest-first for evaluate's own processing order) -- a
+        dashboard reader wants the latest prediction at the top."""
+        rows = self._conn.execute(
+            "SELECT data_json FROM predictions WHERE symbol = ? ORDER BY created_at DESC LIMIT ?",
+            (symbol.strip().upper(), limit),
+        ).fetchall()
+        return [PredictionRecord.model_validate_json(r[0]) for r in rows]
+
     def list_predictions_needing_evaluation(self, limit: int = 200) -> list[PredictionRecord]:
         """A prediction needs evaluation if it has no evaluation yet, or its
         most recent evaluation's outcome is still ACTIVE. Resolved
