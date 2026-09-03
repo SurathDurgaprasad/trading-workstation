@@ -511,6 +511,35 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
     print("=" * 60)
 
     processed = 0
+    try:
+        processed = _run_paper_live_loop(args, pipeline, engine, store, status_label, processed)
+    except KeyboardInterrupt:
+        print(f"\n[{status_label}] Interrupted by user (Ctrl+C) -- shutting down cleanly.")
+    finally:
+        # Lifecycle fix (Phase 17, found via code review — no live network involved): source.close()
+        # was never called on ANY exit path, including normal completion. For --source dhan this left
+        # the real WebSocket connection open, relying entirely on daemon-thread/process teardown rather
+        # than a deliberate close(). Must run regardless of how the loop above exits.
+        source.close()
+
+    print(f"\n[{status_label}] Bars processed: {processed}")
+    _print_account_block(engine.account)
+    report = reconcile(store)
+    print(f"\n[{status_label}] Reconciliation: {'OK' if report.ok else 'FAILED'}")
+    # store.close()/state_store.close() moved before the reconciliation-failure exit below (Phase 17
+    # fix, same finding) -- previously a failed reconciliation triggered sys.exit(1) before either was
+    # ever closed.
+    store.close()
+    state_store.close()
+    if not report.ok:
+        for issue in report.issues:
+            print(f"  - {issue.check}: {issue.detail}", file=sys.stderr)
+        sys.exit(1)
+
+    print("\nThis is still simulated trading. No real broker is connected. No real order can be placed.")
+
+
+def _run_paper_live_loop(args: argparse.Namespace, pipeline, engine, store, status_label: str, processed: int) -> int:
     while args.max_bars is None or processed < args.max_bars:
         result = pipeline.process_next()
         for expired_id in result.expired_signal_ids:
@@ -563,18 +592,7 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
             )
         print(line)
 
-    print(f"\n[{status_label}] Bars processed: {processed}")
-    _print_account_block(engine.account)
-    report = reconcile(store)
-    print(f"\n[{status_label}] Reconciliation: {'OK' if report.ok else 'FAILED'}")
-    if not report.ok:
-        for issue in report.issues:
-            print(f"  - {issue.check}: {issue.detail}", file=sys.stderr)
-        sys.exit(1)
-
-    print("\nThis is still simulated trading. No real broker is connected. No real order can be placed.")
-    store.close()
-    state_store.close()
+    return processed
 
 
 # --------------------------------------------------------------------------

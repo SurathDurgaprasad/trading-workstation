@@ -214,6 +214,62 @@ def test_run_paper_live_command_kill_switch_activate_and_reset(tmp_path, capsys)
     assert "KILL SWITCH RESET" in capsys.readouterr().out
 
 
+@pytestmark_paper_live
+def test_run_paper_live_command_closes_the_market_data_source_on_normal_completion(tmp_path, monkeypatch):
+    """Phase 17 lifecycle fix (found via code review, no live network
+    involved): source.close() was previously never called on ANY exit
+    path, including normal completion -- for --source dhan this left a
+    real WebSocket connection open, relying entirely on daemon-thread/
+    process teardown rather than a deliberate close()."""
+    from live.mock_source import MockMarketDataSource
+
+    close_calls = []
+    original_close = MockMarketDataSource.close
+
+    def _tracked_close(self):
+        close_calls.append(self)
+        original_close(self)
+
+    monkeypatch.setattr(MockMarketDataSource, "close", _tracked_close)
+
+    args = parse_args([
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--db", str(tmp_path / "paper.db"), "--state-db", str(tmp_path / "state.db"),
+        "--max-bars", "5", "--auto-approve", "--no-ai-explanation", "--freshness-multiplier", "1000000",
+    ])
+    run_paper_live_command(args)
+    assert len(close_calls) == 1
+
+
+@pytestmark_paper_live
+def test_run_paper_live_command_closes_the_market_data_source_on_keyboard_interrupt(tmp_path, monkeypatch):
+    """Same fix, the other exit path: Ctrl+C must not leave the market
+    data source open, and must not crash with a raw traceback."""
+    from live.mock_source import MockMarketDataSource
+    from live.pipeline import LiveSimPipeline
+
+    close_calls = []
+    original_close = MockMarketDataSource.close
+
+    def _tracked_close(self):
+        close_calls.append(self)
+        original_close(self)
+
+    def _raising_process_next(self):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(MockMarketDataSource, "close", _tracked_close)
+    monkeypatch.setattr(LiveSimPipeline, "process_next", _raising_process_next)
+
+    args = parse_args([
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--db", str(tmp_path / "paper.db"), "--state-db", str(tmp_path / "state.db"),
+        "--auto-approve", "--no-ai-explanation",
+    ])
+    run_paper_live_command(args)  # must not raise -- KeyboardInterrupt is caught and handled cleanly
+    assert len(close_calls) == 1
+
+
 # --- Phase 15: --source dhan --------------------------------------------------
 
 
