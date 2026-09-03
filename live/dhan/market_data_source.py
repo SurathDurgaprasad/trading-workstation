@@ -35,6 +35,7 @@ from live.contracts import NO_NEW_BAR, FeedDisconnectedError, MarketBarEvent, Ma
 from live.dhan.candle_builder import CandleBuilder
 from live.dhan.config import DhanCredentials
 from live.dhan.instruments import DhanInstrumentMap
+from live.dhan.market_session import IST
 from live.dhan.wire import (
     MAX_INSTRUMENTS_PER_SUBSCRIBE_MESSAGE,
     DhanDisconnectPacket,
@@ -456,7 +457,7 @@ class DhanMarketDataSource:
         if price is None:
             return None
 
-        timestamp = datetime.fromtimestamp(epoch_seconds, tz=timezone.utc)
+        timestamp = self._decode_last_trade_time(epoch_seconds)
         received_at = datetime.now(timezone.utc)
         builder = self._candle_builders[symbol]
         bar = builder.on_tick(price=price, volume=volume, timestamp=timestamp, received_at=received_at)
@@ -482,3 +483,28 @@ class DhanMarketDataSource:
         if isinstance(packet, (DhanQuotePacket, DhanFullPacket)):
             return packet.last_traded_price, 0.0, packet.last_trade_time_epoch
         return None, 0.0, 0
+
+    @staticmethod
+    def _decode_last_trade_time(epoch_seconds: int) -> datetime:
+        """Phase 16 fix -- VERIFIED against a real account, 2026-09-03:
+        Dhan's "Last Trade Time" field is documented as an epoch but is NOT
+        a true Unix UTC epoch. A real tick's LTT, decoded the naive way
+        (`datetime.fromtimestamp(epoch, tz=UTC)`), produced wall-clock
+        digits matching the CURRENT IST time, not the current UTC time --
+        confirmed with an independent cross-check (this project's own local
+        clock was itself verified accurate to within ~2 minutes of Dhan's
+        own real HTTP `Date` response header from an earlier session, so
+        the anomaly is not a local-clock artifact). The evidence points to
+        Dhan computing this field from IST wall-clock digits encoded as if
+        they were already UTC (a naive-local-epoch pattern), not documented
+        anywhere in the current live docs.
+
+        Uncorrected, this silently broke FreshnessPolicy for every real
+        Dhan bar: bar.timestamp ends up ~5.5 hours in the FUTURE relative
+        to true UTC "now", making `age = now - bar_timestamp` negative --
+        which is always <= any positive threshold, so is_fresh was always
+        True regardless of actual staleness. This is the fix: reinterpret
+        the decoded wall-clock digits as IST (not UTC), then convert to the
+        genuinely correct UTC instant."""
+        naive_ist_digits = datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).replace(tzinfo=IST)
+        return naive_ist_digits.astimezone(timezone.utc)

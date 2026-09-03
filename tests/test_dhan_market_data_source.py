@@ -8,6 +8,7 @@ import struct
 import threading
 import time
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
@@ -136,6 +137,46 @@ def test_subscribe_with_wrong_interval_raises(instrument_map, credentials):
     source, factory = _source(instrument_map, credentials)
     with pytest.raises(ValueError):
         source.subscribe(["RELIANCE.NS"], "5m")
+
+
+def test_decode_last_trade_time_corrects_the_ist_labeled_as_utc_epoch():
+    """Phase 16 fix (VERIFIED against a real account, 2026-09-03): a real
+    tick's LTT, decoded the naive way (fromtimestamp(epoch, tz=UTC)),
+    produced wall-clock digits matching the CURRENT IST time, not the
+    current UTC time -- confirmed via an independent cross-check against
+    Dhan's own real HTTP Date header (ruling out a local-clock artifact).
+    _decode_last_trade_time must reinterpret those digits as IST and
+    return the genuinely correct UTC instant, exactly 5:30 earlier."""
+    # Dhan's raw wire value: the integer that, decoded naively as UTC, reads "10:07:00".
+    raw_dhan_epoch = int(datetime(2026, 9, 3, 10, 7, 0, tzinfo=timezone.utc).timestamp())
+    decoded = DhanMarketDataSource._decode_last_trade_time(raw_dhan_epoch)
+    assert decoded == datetime(2026, 9, 3, 4, 37, 0, tzinfo=timezone.utc)  # true UTC equivalent of IST 10:07:00
+
+
+def test_a_tick_with_a_real_time_equivalent_epoch_produces_a_bar_close_to_true_now(instrument_map, credentials):
+    """End-to-end regression for the same fix: before it, a tick whose LTT
+    reflected the genuine current moment would produce a bar timestamped
+    ~5.5 hours in the FUTURE relative to true UTC now -- which silently
+    broke FreshnessPolicy (a negative age is always <= any positive
+    threshold, so every real Dhan bar was always judged "fresh" regardless
+    of actual staleness). After the fix, a bar built from an epoch
+    representing the real current moment must land close to true now."""
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+
+    true_now_utc = datetime.now(timezone.utc)
+    # Simulate Dhan's actual wire behavior: the raw epoch that decodes (naively, as UTC) to IST "now".
+    ist_now = true_now_utc.astimezone(ZoneInfo("Asia/Kolkata")).replace(tzinfo=timezone.utc)
+    raw_dhan_epoch_for_now = int(ist_now.timestamp())
+
+    factory.current.simulate_message(_ticker_packet(2885, 1400.0, epoch=raw_dhan_epoch_for_now))
+    # cross into the next bucket to force the bar closed and observable
+    factory.current.simulate_message(_ticker_packet(2885, 1401.0, epoch=raw_dhan_epoch_for_now + 61))
+
+    event = source.next_bar()
+    assert event is not None
+    age = abs((true_now_utc - event.bar.timestamp).total_seconds())
+    assert age < 120, f"bar.timestamp should be close to true now, was off by {age}s (the pre-fix bug put it ~19800s / 5.5h away)"
 
 
 def test_a_tick_that_completes_a_bar_is_delivered_via_next_bar(instrument_map, credentials):
