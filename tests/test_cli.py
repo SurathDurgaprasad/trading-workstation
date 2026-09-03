@@ -1,6 +1,6 @@
 import pytest
 
-from main import parse_args, run_paper_live_command, run_research_command, run_scan_command
+from main import parse_args, run_decide_command, run_paper_live_command, run_research_command, run_scan_command
 from tests.conftest import AAPL_CACHE_PATH
 
 
@@ -249,6 +249,93 @@ def test_run_research_command_end_to_end_with_fake_providers(tmp_path, capsys, m
     store = ResearchStore(tmp_path / "research.db")
     assert store.latest_report_for_symbol("AAPL") is not None
     store.close()
+
+
+def test_decide_subcommand_defaults():
+    args = parse_args(["decide", "--symbol", "AAPL"])
+    assert args.command == "decide"
+    assert args.symbol == "AAPL"
+    assert args.scanner_db is None
+    assert args.research_db is None
+    assert args.paper_db is None
+    assert args.no_narrative is False
+    assert args.db is None
+
+
+def test_decide_subcommand_overrides():
+    args = parse_args([
+        "decide", "--symbol", "RELIANCE.NS", "--scanner-db", "/tmp/scanner.db", "--research-db", "/tmp/research.db",
+        "--paper-db", "/tmp/paper.db", "--no-narrative", "--db", "/tmp/decisions.db",
+    ])
+    assert args.symbol == "RELIANCE.NS"
+    assert args.scanner_db == "/tmp/scanner.db"
+    assert args.research_db == "/tmp/research.db"
+    assert args.paper_db == "/tmp/paper.db"
+    assert args.no_narrative is True
+    assert args.db == "/tmp/decisions.db"
+
+
+def test_run_decide_command_end_to_end_with_real_scanner_and_research_stores(tmp_path, capsys):
+    from datetime import datetime, timezone
+
+    from market_intelligence.models import CandidateScore, ScanReport
+    from market_intelligence.store import ScanHistoryStore
+    from research.models import ResearchReport
+    from research.store import ResearchStore
+
+    scanner_db = tmp_path / "scanner.db"
+    scan_store = ScanHistoryStore(scanner_db)
+    candidate = CandidateScore(
+        symbol="AAPL", as_of=datetime(2024, 6, 1), last_close=190.0, avg_daily_value=1_000_000.0,
+        volume_ratio=1.1, trend_score=1.0, momentum_score=0.5, breakout_score=0.01,
+        relative_strength_score=0.02, sector_strength_score=None, composite_score=1.5,
+        explanation=["Trend: uptrend -> score +1.00"],
+    )
+    scan_store.save_report(ScanReport(
+        scan_id="scan-1", as_of=datetime(2024, 6, 1, tzinfo=timezone.utc), universe_mode="watchlist",
+        universe_size=1, benchmark_symbol=None, benchmark_unavailable_reason=None, config_version="cfg1",
+        candidates=[candidate], excluded=[],
+    ))
+    scan_store.close()
+
+    research_db = tmp_path / "research.db"
+    research_store = ResearchStore(research_db)
+    research_store.save_report(ResearchReport(
+        report_id="report-1", symbol="AAPL", as_of=datetime(2024, 6, 1, tzinfo=timezone.utc),
+        news=[], sector=None, ai_summary=None, ai_summary_unavailable_reason="skipped",
+    ))
+    research_store.close()
+
+    args = parse_args([
+        "decide", "--symbol", "AAPL", "--scanner-db", str(scanner_db), "--research-db", str(research_db),
+        "--no-narrative", "--db", str(tmp_path / "decisions.db"),
+    ])
+    run_decide_command(args)
+
+    output = capsys.readouterr().out
+    assert "DECISION -- LABEL ONLY, NOT AN ORDER (no trade is placed by this command)" in output
+    assert "LABEL:          BUY" in output
+    assert "Scanner evidence: none found" not in output
+    assert "Research evidence: none found" not in output
+
+    from decision_engine.store import DecisionStore
+
+    store = DecisionStore(tmp_path / "decisions.db")
+    assert store.latest_decision_for_symbol("AAPL") is not None
+    store.close()
+
+
+def test_run_decide_command_reports_missing_evidence_honestly(tmp_path, capsys):
+    args = parse_args([
+        "decide", "--symbol", "ZZZZ", "--scanner-db", str(tmp_path / "no-such-scanner.db"),
+        "--research-db", str(tmp_path / "no-such-research.db"), "--no-narrative", "--db", str(tmp_path / "decisions.db"),
+    ])
+    run_decide_command(args)
+
+    output = capsys.readouterr().out
+    assert "LABEL:          NO_ACTION" in output
+    assert "Scanner evidence: none found for ZZZZ" in output
+    assert "Research evidence: none found for ZZZZ" in output
 
 
 def test_paper_live_kill_switch_flags_parse_without_a_symbol():

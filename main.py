@@ -41,7 +41,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research")
+_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -745,6 +745,99 @@ def run_research_command(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+# `decide` -- Phase 21 decision intelligence engine: combines the latest
+# persisted scanner + research evidence into a BUY/WATCH/AVOID/EXIT/
+# NO_ACTION LABEL, with a never-blocking, optional AI narrative. This is
+# NOT an order and places NO trade -- decision_engine/ never imports
+# paper/ or any broker adapter. Converting a label into an actual paper
+# trade remains a separate, unchanged, entirely manual step.
+# --------------------------------------------------------------------------
+
+DEFAULT_DECISION_DB_PATH = PROJECT_ROOT / "data" / "decisions.db"
+
+
+def run_decide_command(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
+    from decision_engine.engine import make_decision
+    from decision_engine.models import RiskContext
+    from decision_engine.store import DecisionStore
+    from market_intelligence.store import ScanHistoryStore
+    from research.store import ResearchStore
+
+    normalized = args.symbol.strip().upper()
+
+    scanner_db = args.scanner_db or DEFAULT_SCANNER_DB_PATH
+    candidate = None
+    if Path(scanner_db).exists():
+        scan_store = ScanHistoryStore(scanner_db)
+        latest_scan = scan_store.latest_report()
+        if latest_scan is not None:
+            candidate = latest_scan.get(normalized)
+        scan_store.close()
+
+    research_db = args.research_db or DEFAULT_RESEARCH_DB_PATH
+    research_report = None
+    if Path(research_db).exists():
+        research_store = ResearchStore(research_db)
+        research_report = research_store.latest_report_for_symbol(normalized)
+        research_store.close()
+
+    risk_context = RiskContext.unknown()
+    if args.paper_db:
+        from paper.store import PaperStore
+
+        paper_store = PaperStore(args.paper_db)
+        open_position = paper_store.get_open_position(normalized)
+        account = paper_store.get_account()
+        risk_context = RiskContext(
+            has_open_position=open_position is not None,
+            consecutive_losses=account.consecutive_losses if account is not None else 0,
+            note=f"Derived from paper account state at {args.paper_db}.",
+        )
+        paper_store.close()
+
+    logger.info("Running decision engine for %s", normalized)
+    decision = make_decision(
+        normalized, candidate=candidate, research=research_report, risk_context=risk_context,
+        include_narrative=not args.no_narrative,
+    )
+
+    db_path = args.db or DEFAULT_DECISION_DB_PATH
+    store = DecisionStore(db_path)
+    store.save_decision(decision)
+    store.close()
+
+    print("=" * 70)
+    print("DECISION -- LABEL ONLY, NOT AN ORDER (no trade is placed by this command)")
+    print("=" * 70)
+    print(f"Decision ID:    {decision.decision_id}")
+    print(f"Symbol:         {decision.symbol}")
+    print(f"As of:          {decision.as_of.isoformat()}")
+    print(f"LABEL:          {decision.label.value}")
+    print(f"Config version: {decision.config_version}")
+    print(f"Database:       {db_path}")
+
+    print("\nRationale:")
+    for line in decision.rationale:
+        print(f"  - {line}")
+
+    if candidate is None:
+        print(f"\nScanner evidence: none found for {normalized} (run `scan` first, or check --scanner-db).")
+    if research_report is None:
+        print(f"Research evidence: none found for {normalized} (run `research` first, or check --research-db).")
+    if decision.risk_context.note:
+        print(f"Risk context: {decision.risk_context.note}")
+
+    if decision.narrative is not None:
+        print("\nAI NARRATIVE (explanation only -- cannot change the label above):")
+        print(f"  {decision.narrative}")
+    else:
+        reason = decision.narrative_unavailable_reason or "AI narrative skipped (--no-narrative)."
+        print(f"\nAI NARRATIVE: not available ({reason})")
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -977,6 +1070,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     research_parser.add_argument("--no-ai-summary", action="store_true", help="Skip the optional AI summary step (default: attempt it, never blocking if Ollama is unavailable).")
     research_parser.add_argument("--db", type=str, default=None, help=f"SQLite research-history path (default: {DEFAULT_RESEARCH_DB_PATH}).")
 
+    decide_parser = subparsers.add_parser(
+        "decide",
+        help=(
+            "Phase 21: combine the latest persisted scanner + research evidence into a "
+            "BUY/WATCH/AVOID/EXIT/NO_ACTION label, with an optional AI narrative. NOT an order -- "
+            "places no trade; converting a label into a paper trade remains a separate, manual step."
+        ),
+    )
+    decide_parser.add_argument("--symbol", required=True, help="Ticker to decide on (e.g. AAPL, RELIANCE.NS).")
+    decide_parser.add_argument("--scanner-db", type=str, default=None, help=f"Read the latest scan from this path (default: {DEFAULT_SCANNER_DB_PATH}).")
+    decide_parser.add_argument("--research-db", type=str, default=None, help=f"Read the latest research report from this path (default: {DEFAULT_RESEARCH_DB_PATH}).")
+    decide_parser.add_argument("--paper-db", type=str, default=None, help="Optional: check this paper-trading database for an existing open position, to distinguish BUY/WATCH from EXIT.")
+    decide_parser.add_argument("--no-narrative", action="store_true", help="Skip the optional AI narrative step (default: attempt it, never blocking if Ollama is unavailable).")
+    decide_parser.add_argument("--db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")
+
     return parser.parse_args(argv)
 
 
@@ -1002,6 +1110,8 @@ def main() -> None:
             run_scan_command(args)
         elif args.command == "research":
             run_research_command(args)
+        elif args.command == "decide":
+            run_decide_command(args)
         else:
             run_analyze_command(args)
     except _CONTROLLED_ERRORS as exc:

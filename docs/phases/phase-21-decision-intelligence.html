@@ -1,0 +1,199 @@
+<title>Phase 21 Decision Intelligence</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+  :root {
+    --bg: #0b0f14; --surface: #121922; --surface-2: #17202b; --border: #253140; --border-soft: #1c2530;
+    --text: #dbe4ec; --text-muted: #8ca0b3; --text-dim: #5f7284;
+    --accent: #4fd1c5; --accent-soft: #1b3a38;
+    --warn: #e8b84b; --warn-soft: #3a3016;
+    --good: #34d399; --good-soft: #123326;
+    --bad: #f87171; --bad-soft: #3a1a1a;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15.5px; line-height: 1.65; margin: 0; padding: 0 0 80px 0; }
+  ::selection { background: var(--accent-soft); color: var(--accent); }
+  a { color: var(--accent); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 28px; }
+  header.hero { border-bottom: 1px solid var(--border); padding: 56px 0 36px 0; background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%); }
+  .eyebrow { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px 0; }
+  h1 { font-family: var(--mono); font-weight: 600; font-size: clamp(26px, 4vw, 38px); line-height: 1.18; margin: 0 0 14px 0; text-wrap: balance; letter-spacing: -0.01em; }
+  .hero-sub { color: var(--text-muted); font-size: 16.5px; max-width: 66ch; margin: 0 0 28px 0; }
+  .status-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill { font-family: var(--mono); font-size: 12.5px; font-weight: 500; letter-spacing: 0.02em; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
+  .pill-good { color: var(--good); background: var(--good-soft); border-color: #16472f; }
+  .pill-neutral { color: var(--text-muted); background: var(--surface-2); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  nav.toc { max-width: 960px; margin: 0 auto; padding: 22px 28px; display: flex; flex-wrap: wrap; gap: 4px 18px; font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--border-soft); }
+  nav.toc a { color: var(--text-dim); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
+  main { padding-top: 8px; }
+  section { padding: 44px 0; border-bottom: 1px solid var(--border-soft); }
+  section:last-of-type { border-bottom: none; }
+  .section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  .section-num { font-family: var(--mono); color: var(--text-dim); font-size: 14px; min-width: 26px; }
+  h2 { font-family: var(--mono); font-size: 19px; font-weight: 600; margin: 0; color: var(--text); letter-spacing: -0.01em; }
+  h3 { font-family: var(--sans); font-size: 15.5px; font-weight: 600; color: var(--accent); margin: 26px 0 10px 0; }
+  p { margin: 0 0 14px 0; color: var(--text); max-width: 74ch; }
+  p.muted { color: var(--text-muted); }
+  ul, ol { margin: 0 0 14px 0; padding-left: 22px; max-width: 72ch; }
+  li { margin-bottom: 6px; }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; background: var(--surface-2); border: 1px solid var(--border-soft); padding: 1px 6px; border-radius: 3px; color: #a8d8f0; }
+  .flow { font-family: var(--mono); font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; overflow-x: auto; color: var(--text-muted); line-height: 1.9; white-space: pre; margin: 16px 0; }
+  .flow .node { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 14px 0; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.mono, td code { font-family: var(--mono); }
+  td strong { color: var(--text); font-weight: 500; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin: 18px 0; }
+  .stat { background: var(--surface); padding: 16px 18px; }
+  .stat .n { font-family: var(--mono); font-size: 24px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; margin: 14px 0; }
+  .card h4 { font-family: var(--mono); font-size: 13.5px; color: var(--text); margin: 0 0 8px 0; }
+  .badge { font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.03em; white-space: nowrap; }
+  .badge-verified { background: var(--good-soft); color: var(--good); }
+  .badge-na { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+  .callout { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 14px 18px; border-radius: 0 6px 6px 0; margin: 18px 0; color: #f0dca3; font-size: 14px; }
+  .callout p { margin: 0; color: inherit; }
+  .kv-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; font-size: 14px; margin: 14px 0; }
+  .kv-list dt { color: var(--text-dim); font-family: var(--mono); font-size: 12.5px; padding-top: 2px; }
+  .kv-list dd { margin: 0; color: var(--text); }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="light"]) {
+      --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+      --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+      --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+    }
+    :root:not([data-theme="light"]) code, :root:not([data-theme="light"]) .mono { color: #0f5c66; }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+    --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+    --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+  }
+  :root[data-theme="light"] code, :root[data-theme="light"] .mono { color: #0f5c66; }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Phase 21 &mdash; Decision Intelligence Engine</p>
+    <h1>A Label, Not an Order</h1>
+    <p class="hero-sub">A new <code>decision_engine/</code> package combines the last persisted scanner evidence and an open-position flag into one of BUY / WATCH / AVOID / EXIT / NO_ACTION &mdash; a deterministic classification, evidence-backed and reproducible by construction, with an optional AI layer that can only narrate the label, never choose it. No order is placed, and nothing in this package can reach one.</p>
+    <div class="status-row">
+      <span class="pill pill-good"><span class="dot"></span>LABEL ONLY -- NO ORDER, NO paper/ IMPORT</span>
+      <span class="pill pill-good"><span class="dot"></span>NO FABRICATED SCORE THRESHOLD</span>
+      <span class="pill pill-neutral">41 NEW TESTS, ONE BUG FOUND BY SELF-AUDIT</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#git">Git</a>
+  <a href="#safety">Safety framing, stated first</a>
+  <a href="#scope">Scope</a>
+  <a href="#design">What was built</a>
+  <a href="#rule">The classification rule, and why it has no magic number</a>
+  <a href="#evidence">Evidence requirement: how it's structural</a>
+  <a href="#reuse">What was reused, not rewritten</a>
+  <a href="#bug">A bug found by self-audit, fixed</a>
+  <a href="#tests">Tests</a>
+  <a href="#limitations">Known limitations, stated honestly</a>
+</nav>
+
+<main class="wrap">
+
+<section id="git">
+  <div class="section-head"><span class="section-num">01</span><h2>Git state</h2></div>
+  <div class="kv-list">
+    <dt>Base</dt><dd class="mono">main (Phase 16-20 + roadmap, merged)</dd>
+    <dt>Branch</dt><dd class="mono">phase-21-decision-intelligence</dd>
+    <dt>New package</dt><dd class="mono">decision_engine/ (5 files) + 4 new test files, main.py `decide` subcommand</dd>
+  </div>
+  <p class="muted">A process note, for the record: the Phase 20 merge to <code>origin/main</code> was performed locally but its push was missed before this phase's implementation began directly on the <code>main</code> checkout instead of a new branch. Caught before any commit was made: the uncommitted work was stashed, a clean full regression was run against Phase 20 alone on <code>main</code> (645 passed), <code>origin/main</code> was then pushed, and the stashed work was restored onto a correctly-named <code>phase-21-decision-intelligence</code> branch before continuing. No code or history was lost; git workflow discipline (Section 20) is back to normal for this phase and beyond.</p>
+</section>
+
+<section id="safety">
+  <div class="section-head"><span class="section-num">02</span><h2>Safety framing, stated first</h2></div>
+  <p>A <code>Decision</code> is a label (<code>BUY</code>/<code>WATCH</code>/<code>AVOID</code>/<code>EXIT</code>/<code>NO_ACTION</code>) plus recorded evidence and rationale &mdash; not an order, not an authorization. <code>decision_engine/</code> imports nothing from <code>paper/</code>, nothing from any broker adapter, and calls no order-placing code path (none exists anywhere in this repository to call). Converting a label into an actual paper trade remains a separate, unchanged, entirely manual step: the existing <code>paper</code>/<code>paper-live</code> commands are untouched by this phase. The CLI prints this explicitly on every run: <code>"DECISION -- LABEL ONLY, NOT AN ORDER (no trade is placed by this command)"</code>.</p>
+</section>
+
+<section id="scope">
+  <div class="section-head"><span class="section-num">03</span><h2>Scope</h2></div>
+  <p><strong>In scope:</strong> a deterministic BUY/WATCH/AVOID/EXIT/NO_ACTION classification from a <code>market_intelligence.CandidateScore</code> and an open-position flag; full evidence recording (scanner + research + risk context) on every <code>Decision</code>; SQLite persistence; an optional, never-blocking AI narrative; a <code>decide</code> CLI subcommand that reads the latest persisted scanner/research evidence.</p>
+  <p><strong>Explicitly out of scope:</strong> position sizing, capital allocation, stop/target/quantity (roadmap Phase 22 &mdash; see &sect;09's limitations), account-level circuit breakers (kill switch/drawdown/daily-loss &mdash; <code>risk/engine.py</code>'s unchanged job at actual order-approval time, a separate downstream stage per the roadmap's own pipeline diagram), any change to <code>market_intelligence/</code>, <code>research/</code>, <code>risk/</code>, <code>paper/</code>, or any existing agent.</p>
+</section>
+
+<section id="design">
+  <div class="section-head"><span class="section-num">04</span><h2>What was built</h2></div>
+  <div class="flow">decision_engine/
+  models.py    <span class="node">DecisionLabel</span>, <span class="node">RiskContext</span>, <span class="node">DecisionNarrative</span>, <span class="node">Decision</span> -- Pydantic, evidence-enforcing (see &sect;06)
+  config.py    <span class="node">DecisionConfig</span> -- one behavioral knob, versioned (see &sect;05)
+  rules.py     <span class="node">classify()</span> -- the ONLY place the label is decided; pure function, no I/O, no LLM
+  engine.py    <span class="node">make_decision()</span>, <span class="node">narrate_decision()</span> -- orchestration + optional AI narration
+  store.py     <span class="node">DecisionStore</span> -- SQLite, same convention as paper/store.py, market_intelligence/store.py, research/store.py</div>
+  <p><code>main.py decide --symbol X [--scanner-db P] [--research-db P] [--paper-db P] [--no-narrative] [--db P]</code> wires it up: reads the latest scan report and research report for the symbol from their own existing SQLite stores (no re-scan, no re-research triggered), optionally checks a paper-trading database for an open position, calls <code>make_decision</code>, prints the label + rationale + evidence-availability + narrative, and persists every decision to <code>data/decisions.db</code>.</p>
+</section>
+
+<section id="rule">
+  <div class="section-head"><span class="section-num">05</span><h2>The classification rule, and why it has no magic number</h2></div>
+  <div class="flow">Already holding this symbol?
+  ├─ yes, no scanner data       -&gt; NO_ACTION
+  ├─ yes, composite_score &lt;= 0  -&gt; EXIT
+  └─ yes, composite_score &gt; 0   -&gt; WATCH  (keep holding, no exit signal)
+
+Not holding:
+  ├─ no scanner data                                      -&gt; NO_ACTION
+  ├─ composite, trend, AND momentum all positive           -&gt; BUY
+  ├─ composite positive, but trend/momentum don't agree    -&gt; WATCH
+  └─ composite not positive                                -&gt; AVOID</div>
+  <p>Phase 19's own report states its scanner factor weights are "equal-weighted by default, not tuned" &mdash; no historical study has validated what a specific <code>composite_score</code> value means "good enough to buy." Rather than invent a numeric cutoff this project has no evidence for, BUY requires <strong>sign agreement across three independent factors</strong> (composite, trend, momentum all positive) &mdash; meaningful regardless of the composite score's uncalibrated scale, and a materially more conservative bar than trusting one blended number's exact magnitude. <code>DecisionConfig.require_corroboration_for_buy</code> (default <code>True</code>) is the one behavioral knob this phase exposes, versioned via the same sha256-of-config pattern <code>RiskConfig</code>/<code>ScannerConfig</code> already use.</p>
+</section>
+
+<section id="evidence">
+  <div class="section-head"><span class="section-num">06</span><h2>Evidence requirement: how it's structural</h2></div>
+  <p>Roadmap acceptance criterion: <em>"No recommendation without recorded evidence."</em> Enforced by a Pydantic <code>model_validator</code> on <code>Decision</code> itself, not by convention: any label other than <code>NO_ACTION</code> requires <code>scanner_evidence</code> to be present, or construction raises <code>ValueError</code> &mdash; a <code>Decision</code> that violates this cannot exist, regardless of how it's constructed or by which future caller. <em>"Decision is reproducible"</em>: <code>classify()</code> is a pure function of typed inputs with no randomness, I/O, or LLM call &mdash; proven directly by a dedicated test (<code>test_classify_is_a_pure_function_of_its_inputs</code>). <em>"Decision version is stored"</em>: every <code>Decision.config_version</code> records <code>DecisionConfig.version_id()</code>.</p>
+</section>
+
+<section id="reuse">
+  <div class="section-head"><span class="section-num">07</span><h2>What was reused, not rewritten</h2></div>
+  <ul>
+    <li><code>market_intelligence.models.CandidateScore</code> (Phase 19) &mdash; the sole scanner-evidence type; not duplicated or re-derived.</li>
+    <li><code>research.models.ResearchReport</code> (Phase 20) &mdash; recorded as supporting context on every Decision (see &sect;09's limitation on what drives the label).</li>
+    <li><code>agents.analyst.invoke_structured</code> &mdash; the exact retrying, schema-validating LLM call <code>agents/signal_explainer.py</code> and <code>research/summarizer.py</code> already use. One new <code>AgentRole</code> ("decision_narrator") added to <code>core/config.py</code>, the same way "research_summarizer" was added before it.</li>
+    <li>The "AI must never block" posture from <code>research.summarizer.build_research_report</code>/<code>main.py</code>'s <code>_try_ai_explain</code> &mdash; <code>make_decision</code>'s narrative step is a direct structural analog, including the same deferred-import discipline (<code>decide --no-narrative</code> never pays the <code>langchain_core</code> import cost).</li>
+    <li><code>paper/store.py</code>'s / <code>market_intelligence/store.py</code>'s / <code>research/store.py</code>'s persistence convention &mdash; <code>DecisionStore</code> mirrors all three exactly.</li>
+    <li><code>risk.config.RiskConfig.version_id</code>'s sha256 pattern &mdash; reused verbatim for <code>DecisionConfig.version_id</code>.</li>
+  </ul>
+  <p><code>decision_engine/</code> does not import <code>paper/</code> or <code>risk/engine.py</code>. The CLI's optional <code>--paper-db</code> open-position lookup is wired at the <code>main.py</code> layer only, keeping the package itself testable and usable with no paper-trading database at all.</p>
+</section>
+
+<section id="bug">
+  <div class="section-head"><span class="section-num">08</span><h2>A bug found by self-audit, fixed</h2></div>
+  <div class="card">
+    <h4>classify() could return WATCH with no scanner evidence, which Decision's own validator then rejected <span class="badge badge-verified">FIXED</span></h4>
+    <p class="muted">Re-reading <code>rules.py</code> adversarially (per the phase's own "check empty inputs, check partial data" self-audit step) surfaced a real crash: when a position is already held but no current scanner data exists for it, the first draft returned <code>WATCH</code> with <code>reasons</code> but no candidate. <code>make_decision</code> then constructed <code>Decision(label=WATCH, scanner_evidence=None, ...)</code> &mdash; which <code>Decision</code>'s own <code>&sect;06</code> validator immediately rejects with <code>ValueError</code>, since WATCH is not NO_ACTION. <code>make_decision("AAPL", candidate=None, risk_context=RiskContext(has_open_position=True))</code> would have raised instead of returning a Decision. Fixed by returning <code>NO_ACTION</code> in that branch instead &mdash; consistent with the not-holding branch, which already treated "no evidence" as NO_ACTION regardless of position status. A dedicated regression test (<code>test_make_decision_does_not_crash_when_holding_with_no_scanner_evidence</code>) proves this end-to-end through <code>make_decision</code>, not just <code>classify()</code> in isolation, so a future change to either function can't silently reintroduce the same crash.</p>
+  </div>
+</section>
+
+<section id="tests">
+  <div class="section-head"><span class="section-num">09</span><h2>Tests</h2></div>
+  <p>41 new tests (pytest-collected count, including parametrized cases): 12 in <code>test_decision_engine_rules.py</code> (every branch of the classification tree including the fixed holding/no-evidence case, corroboration on/off, determinism), 11 in <code>test_decision_engine_models.py</code> (3 direct, plus 2 parametrized tests x 4 labels each covering the evidence-requirement validator's accept/reject behavior for every non-NO_ACTION label; config version-id sensitivity), 8 in <code>test_decision_engine_engine.py</code> (narrative success/unavailable/opt-out, symbol normalization, the crash regression, structural proof of <code>DecisionNarrative</code>'s field set), 6 in <code>test_decision_engine_store.py</code> (save/get round-trip, per-symbol scoping, ordering/limit, reconnect persistence, an explicit assertion that no update method exists), and 4 CLI tests (arg parsing, one end-to-end run composing real <code>ScanHistoryStore</code>/<code>ResearchStore</code> data through to a BUY decision, one proving missing-evidence is reported honestly rather than silently). No real network or Ollama call anywhere in the unit suite.</p>
+</section>
+
+<section id="limitations">
+  <div class="section-head"><span class="section-num">10</span><h2>Known limitations, stated honestly</h2></div>
+  <ul>
+    <li><strong>MarketContext and ResearchEvidence do not yet drive the label.</strong> Both are recorded on every <code>Decision</code> as supporting context (and <code>ResearchReport.ai_summary</code>'s text is passed into the AI narrative prompt), but <code>classify()</code>'s deterministic rule currently reads only <code>CandidateScore</code> and the open-position flag. Extending the rule to weigh technical/research evidence directly is a natural future refinement, deliberately deferred until there's a concrete, evidence-based way to combine them rather than another fabricated weighting.</li>
+    <li><strong>No automatic composition with `scan`/`research`.</strong> <code>decide</code> reads whatever was last persisted by separate <code>scan</code>/<code>research</code> runs; it does not trigger a fresh scan or research fetch itself. A stale or missing evidence store is reported honestly ("none found"), never silently substituted.</li>
+    <li><strong>Risk context is deliberately narrow</strong> (open-position + loss-streak count only) &mdash; account-level circuit breakers remain entirely <code>risk/engine.py</code>'s job at actual order-approval time, unreachable from and untouched by this phase.</li>
+    <li><strong>No position sizing, capital, or price levels anywhere in this phase</strong> &mdash; by design; that separation is roadmap Phase 22's job.</li>
+  </ul>
+</section>
+
+</main>
