@@ -223,11 +223,17 @@ def test_evaluate_risk_tool_cannot_alter_the_signals_entry_stop_target():
 
 def test_explain_signal_tool_returns_only_the_explanation_schema(monkeypatch):
     from agents import analyst
+    from llm import provider as llm_provider
     from schemas.explanation import SignalExplanation
     from tests.conftest import FakeChatModel
 
     fake = SignalExplanation(supporting_evidence=["x"], contradicting_evidence=["y"], narrative="z")
     monkeypatch.setattr(analyst, "get_analyst_llm", lambda role: FakeChatModel({SignalExplanation: fake}))
+    # explain_signal_tool's own pre-flight guard (check_ollama_availability) runs before the
+    # mocked LLM is ever reached -- this test is about the tool's output schema, not Ollama's
+    # real availability (that guard's own failure paths are covered, offline, by
+    # tests/test_failure_handling.py), so it must not require a real daemon to be running.
+    monkeypatch.setattr(llm_provider, "check_ollama_availability", lambda **kwargs: None)
 
     mc = MarketContext(symbol="AAPL", as_of="2026-08-24T00:00:00", price=310.34)
     signal = _real_signal()
