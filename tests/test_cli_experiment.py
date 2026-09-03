@@ -213,3 +213,144 @@ def test_experiment_compare_empty_registry(tmp_path, capsys):
     args = parse_args(["experiment", "compare", "--db", str(db_path)])
     run_experiment_command(args)
     assert "No experiments registered yet" in capsys.readouterr().out
+
+
+# --- recommend (Phase 38) -----------------------------------------------------
+
+
+def _seed_resolved_predictions(decision_store, prediction_store, *, config_version: str, win_count: int, loss_count: int, id_prefix: str) -> None:
+    """Registers `win_count` TARGET_HIT + `loss_count` STOP_HIT resolved
+    predictions, all attributed to `config_version`, so an experiment's
+    comparison window over them has a deterministic, known win rate."""
+    i = 0
+    for is_win in [True] * win_count + [False] * loss_count:
+        i += 1
+        decision_id = f"{id_prefix}-dec-{i}"
+        prediction_id = f"{id_prefix}-pred-{i}"
+        decision_store.save_decision(Decision(
+            decision_id=decision_id, symbol="AAPL", as_of=datetime(2024, 6, 1, tzinfo=timezone.utc), label=DecisionLabel.BUY,
+            rationale=["fake"], config_version=config_version, scanner_evidence=_candidate(), research_evidence=None,
+            market_context=None, risk_context=RiskContext.unknown(), narrative=None, narrative_unavailable_reason=None,
+        ))
+        prediction_store.save_prediction(PredictionRecord(
+            prediction_id=prediction_id, decision_id=decision_id, symbol="AAPL", created_at=datetime.now(timezone.utc),
+            label=DecisionLabel.BUY, entry_price=100.0, stop_price=95.0, target_price=110.0,
+            entry_time=datetime(2024, 6, 1), horizon_bars=20, interval="1d",
+        ))
+        outcome = PredictionOutcomeState.TARGET_HIT if is_win else PredictionOutcomeState.STOP_HIT
+        actual_return = 0.10 if is_win else -0.05
+        prediction_store.save_evaluation(PredictionEvaluation(
+            evaluation_id=f"eval-{prediction_id}", prediction_id=prediction_id, evaluated_at=datetime.now(timezone.utc),
+            outcome=outcome, bars_observed=5, exit_time=None, exit_price=None, actual_return=actual_return,
+            max_favorable_excursion=0.10, max_adverse_excursion=0.0, detail="test",
+        ))
+
+
+def test_experiment_recommend_unknown_baseline_id_fails_cleanly(tmp_path, capsys):
+    db_path = tmp_path / "experiments.db"
+    _run(["start", "--name", "exp1", "--config-type", "decision_engine"], db_path)
+    start_output = capsys.readouterr().out
+    candidate_id = next(line for line in start_output.splitlines() if line.startswith("Experiment ID:")).split()[-1]
+
+    with pytest.raises(SystemExit):
+        _run(["recommend", "--baseline-id", "does-not-exist", "--candidate-id", candidate_id], db_path)
+    assert "no experiment found" in capsys.readouterr().err
+
+
+def test_experiment_recommend_unknown_candidate_id_fails_cleanly(tmp_path, capsys):
+    db_path = tmp_path / "experiments.db"
+    _run(["start", "--name", "exp1", "--config-type", "decision_engine"], db_path)
+    start_output = capsys.readouterr().out
+    baseline_id = next(line for line in start_output.splitlines() if line.startswith("Experiment ID:")).split()[-1]
+
+    with pytest.raises(SystemExit):
+        _run(["recommend", "--baseline-id", baseline_id, "--candidate-id", "does-not-exist"], db_path)
+    assert "no experiment found" in capsys.readouterr().err
+
+
+def test_experiment_recommend_insufficient_evidence_with_no_predictions(tmp_path, capsys):
+    from experiments.models import ConfigType, Experiment
+    from experiments.store import ExperimentStore
+
+    db_path = tmp_path / "experiments.db"
+    store = ExperimentStore(db_path)
+    baseline = Experiment(experiment_id="exp-base", name="baseline", description="", config_type=ConfigType.DECISION_ENGINE, config_version="cfg-A", started_at=datetime(2024, 1, 1, tzinfo=timezone.utc))
+    candidate = Experiment(experiment_id="exp-cand", name="candidate", description="", config_type=ConfigType.DECISION_ENGINE, config_version="cfg-B", started_at=datetime(2024, 1, 1, tzinfo=timezone.utc))
+    store.save_experiment(baseline)
+    store.save_experiment(candidate)
+    store.close()
+
+    args = parse_args(["experiment", "recommend", "--db", str(db_path), "--baseline-id", "exp-base", "--candidate-id", "exp-cand"])
+    run_experiment_command(args)
+
+    output = capsys.readouterr().out
+    assert "Verdict: INSUFFICIENT_EVIDENCE" in output
+    assert "ADVISORY ONLY, NO CONFIGURATION IS CHANGED" in output
+
+
+def test_experiment_recommend_end_to_end_recommends_promotion(tmp_path, capsys):
+    from experiments.models import ConfigType, Experiment
+    from experiments.store import ExperimentStore
+
+    db_path = tmp_path / "experiments.db"
+    decision_db = tmp_path / "decisions.db"
+    predictions_db = tmp_path / "predictions.db"
+
+    store = ExperimentStore(db_path)
+    started = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    baseline = Experiment(experiment_id="exp-base", name="baseline", description="", config_type=ConfigType.DECISION_ENGINE, config_version="cfg-A", started_at=started)
+    candidate = Experiment(experiment_id="exp-cand", name="candidate", description="", config_type=ConfigType.DECISION_ENGINE, config_version="cfg-B", started_at=started)
+    store.save_experiment(baseline)
+    store.save_experiment(candidate)
+    store.close()
+
+    decision_store = DecisionStore(decision_db)
+    prediction_store = PredictionStore(predictions_db)
+    _seed_resolved_predictions(decision_store, prediction_store, config_version="cfg-A", win_count=15, loss_count=15, id_prefix="base")  # 50% win rate, 30 resolved
+    _seed_resolved_predictions(decision_store, prediction_store, config_version="cfg-B", win_count=21, loss_count=9, id_prefix="cand")  # 70% win rate, 30 resolved
+    decision_store.close()
+    prediction_store.close()
+
+    args = parse_args([
+        "experiment", "recommend", "--db", str(db_path), "--baseline-id", "exp-base", "--candidate-id", "exp-cand",
+        "--predictions-db", str(predictions_db), "--decision-db", str(decision_db),
+    ])
+    run_experiment_command(args)
+
+    output = capsys.readouterr().out
+    assert "Verdict: RECOMMEND_PROMOTION" in output
+    assert "Baseline win rate: +50.00%" in output
+    assert "Candidate win rate: +70.00%" in output
+    assert "RECOMMENDATION ONLY" in output
+
+
+def test_experiment_recommend_no_improvement_with_a_small_margin(tmp_path, capsys):
+    from experiments.models import ConfigType, Experiment
+    from experiments.store import ExperimentStore
+
+    db_path = tmp_path / "experiments.db"
+    decision_db = tmp_path / "decisions.db"
+    predictions_db = tmp_path / "predictions.db"
+
+    store = ExperimentStore(db_path)
+    started = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    baseline = Experiment(experiment_id="exp-base", name="baseline", description="", config_type=ConfigType.DECISION_ENGINE, config_version="cfg-A", started_at=started)
+    candidate = Experiment(experiment_id="exp-cand", name="candidate", description="", config_type=ConfigType.DECISION_ENGINE, config_version="cfg-B", started_at=started)
+    store.save_experiment(baseline)
+    store.save_experiment(candidate)
+    store.close()
+
+    decision_store = DecisionStore(decision_db)
+    prediction_store = PredictionStore(predictions_db)
+    _seed_resolved_predictions(decision_store, prediction_store, config_version="cfg-A", win_count=15, loss_count=15, id_prefix="base")  # 50%
+    _seed_resolved_predictions(decision_store, prediction_store, config_version="cfg-B", win_count=17, loss_count=13, id_prefix="cand")  # ~56.7%, below the 10pp bar
+    decision_store.close()
+    prediction_store.close()
+
+    args = parse_args([
+        "experiment", "recommend", "--db", str(db_path), "--baseline-id", "exp-base", "--candidate-id", "exp-cand",
+        "--predictions-db", str(predictions_db), "--decision-db", str(decision_db),
+    ])
+    run_experiment_command(args)
+
+    assert "Verdict: NO_IMPROVEMENT" in capsys.readouterr().out

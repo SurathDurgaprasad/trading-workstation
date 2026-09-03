@@ -1396,6 +1396,59 @@ def run_experiment_command(args: argparse.Namespace) -> None:
             print(f"  Profit factor:  {_fmt_ratio(c.profit_factor) if c.profit_factor is not None else 'n/a'}")
         return
 
+    if args.experiment_command == "recommend":
+        from pathlib import Path
+
+        from decision_engine.store import DecisionStore
+        from experiments.comparison import compare_experiments
+        from learning.adaptation import compare_and_recommend
+        from learning.analysis import EvaluatedPrediction
+        from predictions.store import PredictionStore
+
+        baseline_experiment = store.get_experiment(args.baseline_id)
+        candidate_experiment = store.get_experiment(args.candidate_id)
+        if baseline_experiment is None:
+            store.close()
+            print(f"experiment recommend: no experiment found with id {args.baseline_id} in {db_path}.", file=sys.stderr)
+            sys.exit(1)
+        if candidate_experiment is None:
+            store.close()
+            print(f"experiment recommend: no experiment found with id {args.candidate_id} in {db_path}.", file=sys.stderr)
+            sys.exit(1)
+
+        predictions_db = args.predictions_db or DEFAULT_PREDICTIONS_DB_PATH
+        decision_db = args.decision_db or DEFAULT_DECISION_DB_PATH
+        items: list[EvaluatedPrediction] = []
+        if Path(predictions_db).exists():
+            prediction_store = PredictionStore(predictions_db)
+            decision_store = DecisionStore(decision_db) if Path(decision_db).exists() else None
+            for prediction in prediction_store.list_predictions():
+                evaluation = prediction_store.latest_evaluation_for_prediction(prediction.prediction_id)
+                if evaluation is None:
+                    continue
+                decision = decision_store.get_decision(prediction.decision_id) if decision_store is not None else None
+                items.append(EvaluatedPrediction(prediction=prediction, evaluation=evaluation, decision=decision))
+            prediction_store.close()
+            if decision_store is not None:
+                decision_store.close()
+
+        comparisons = compare_experiments([baseline_experiment, candidate_experiment], items, store)
+        store.close()
+        by_id = {c.experiment.experiment_id: c for c in comparisons}
+        recommendation = compare_and_recommend(baseline=by_id[args.baseline_id], candidate=by_id[args.candidate_id])
+
+        print("=" * 70)
+        print("PROMOTION RECOMMENDATION -- ADVISORY ONLY, NO CONFIGURATION IS CHANGED")
+        print("=" * 70)
+        print(f"Baseline:  {baseline_experiment.name} ({baseline_experiment.experiment_id[:12]})")
+        print(f"Candidate: {candidate_experiment.name} ({candidate_experiment.experiment_id[:12]})")
+        print(f"\nVerdict: {recommendation.verdict.value}\n")
+        for line in recommendation.reasoning:
+            print(f"  - {line}")
+        print("\nThis command never edits any configuration file. Promotion, if desired, remains a manual step:")
+        print("edit the relevant config's own source, then run `experiment start` again to track the promoted version.")
+        return
+
 
 # --------------------------------------------------------------------------
 # `shadow-run` -- Phase 27 end-to-end shadow trading validation: ONE pass
@@ -2156,6 +2209,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     experiment_compare_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
     experiment_compare_parser.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")
     experiment_compare_parser.add_argument("--limit", type=int, default=50, help="Max experiments to compare (default: 50).")
+
+    experiment_recommend_parser = experiment_subparsers.add_parser(
+        "recommend",
+        help=(
+            "Phase 38: read-only promotion RECOMMENDATION between two already-registered experiments -- "
+            "never changes any configuration. See learning.adaptation for the fixed evidence thresholds."
+        ),
+    )
+    experiment_recommend_parser.add_argument("--baseline-id", required=True, help="experiment_id of the baseline (current/reference) experiment.")
+    experiment_recommend_parser.add_argument("--candidate-id", required=True, help="experiment_id of the candidate (deliberately changed) experiment.")
+    experiment_recommend_parser.add_argument("--db", type=str, default=None, help=f"SQLite experiment-registry path (default: {DEFAULT_EXPERIMENTS_DB_PATH}).")
+    experiment_recommend_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
+    experiment_recommend_parser.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")
 
     review_parser = subparsers.add_parser(
         "review",
