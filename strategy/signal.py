@@ -17,6 +17,13 @@ class ReasonCode(str, Enum):
     TREND_CONFIRMED = "TREND_CONFIRMED"
     MOMENTUM_CONFIRMED = "MOMENTUM_CONFIRMED"
     VOLUME_CONFIRMED = "VOLUME_CONFIRMED"
+    # Phase 22: a Signal built by risk.sizing.build_signal_for_buy from a
+    # decision_engine BUY label -- did NOT necessarily satisfy
+    # TrendMomentumBaseline's own SMA/RSI/MACD/volume rule (a different,
+    # independent condition: market_intelligence's composite/trend/momentum
+    # sign-agreement). Kept distinct so a Signal's provenance is never
+    # misrepresented as "the baseline strategy fired here."
+    DECISION_ENGINE_SCORED = "DECISION_ENGINE_SCORED"
 
 
 class Signal(BaseModel):

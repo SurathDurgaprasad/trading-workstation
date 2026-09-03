@@ -27,6 +27,7 @@ from llm.errors import ModelNotAvailableError, OllamaUnavailableError
 from market.data_provider import MarketDataError
 from rag.errors import RagStoreNotFoundError
 from risk.config import RiskConfig
+from risk.sizing import SizingUnavailableError
 from state import TradingState
 from strategy.registry import UnknownStrategyError, get_strategy
 
@@ -41,7 +42,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide")
+_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -56,6 +57,7 @@ _CONTROLLED_ERRORS = (
     DhanCredentialsMissingError,
     DhanRestError,
     InstrumentNotFoundError,
+    SizingUnavailableError,
 )
 
 
@@ -838,6 +840,72 @@ def run_decide_command(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+# `size` -- Phase 22: bridges decision_engine's BUY label to the EXISTING,
+# UNCHANGED RiskEngine/Account/RiskConfig dynamic position-sizing math.
+# A PREVIEW ONLY -- no order, real or paper, is placed by this command;
+# it only reports what the existing paper-trading risk engine would size
+# this decision at, given the specified capital.
+# --------------------------------------------------------------------------
+
+
+def run_size_command(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
+    from decision_engine.store import DecisionStore
+    from market.context import get_market_context
+    from risk.account import new_account
+    from risk.sizing import size_decision
+
+    normalized = args.symbol.strip().upper()
+
+    decision_db = args.decision_db or DEFAULT_DECISION_DB_PATH
+    decision = None
+    if Path(decision_db).exists():
+        decision_store = DecisionStore(decision_db)
+        decision = decision_store.latest_decision_for_symbol(normalized)
+        decision_store.close()
+
+    if decision is None:
+        print(f"size: no decision found for {normalized} in {decision_db} -- run `decide --symbol {normalized}` first.", file=sys.stderr)
+        sys.exit(1)
+
+    risk_config = RiskConfig(
+        risk_per_trade_pct=args.risk_per_trade,
+        max_daily_loss_pct=args.max_daily_loss,
+        max_drawdown_pct=args.max_drawdown,
+        max_exposure_pct=args.max_exposure,
+        max_consecutive_losses=args.max_consecutive_losses,
+        consecutive_loss_risk_multiplier=args.consecutive_loss_risk_multiplier,
+        consecutive_loss_hard_limit=args.consecutive_loss_hard_limit,
+        min_risk_reward=args.min_risk_reward,
+    )
+    account = new_account(args.initial_capital)
+
+    logger.info("Sizing %s decision for %s against %.2f capital", decision.label.value, normalized, args.initial_capital)
+    market_context = get_market_context(normalized, period=args.period, interval=args.interval)
+    risk_decision = size_decision(decision, market_context=market_context, account=account, risk_config=risk_config)
+
+    print("=" * 70)
+    print("POSITION SIZING PREVIEW -- NOT AN ORDER (no real or paper trade is placed)")
+    print("=" * 70)
+    print(f"Symbol:         {normalized}")
+    print(f"Decision:       {decision.label.value} (as of {decision.as_of.isoformat()}, decision_id={decision.decision_id})")
+    print(f"Capital:        {args.initial_capital:,.2f}")
+    print(f"\n{risk_decision.explanation}")
+    print(f"Approved:       {risk_decision.approved}")
+    if risk_decision.position_size is not None:
+        print(f"Quantity:       {risk_decision.position_size.quantity}")
+        print(f"Risk amount:    {risk_decision.risk_amount:,.2f} ({risk_decision.risk_percent:.2f}% of equity)")
+        print(f"Notional:       {risk_decision.position_size.notional_value:,.2f}")
+    if risk_decision.exposure is not None:
+        print(f"Exposure:       {risk_decision.exposure.exposure_pct:.2f}% of equity")
+    if risk_decision.veto_reasons:
+        print("Veto reasons:")
+        for reason in risk_decision.veto_reasons:
+            print(f"  - {reason.value}")
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -1085,6 +1153,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     decide_parser.add_argument("--no-narrative", action="store_true", help="Skip the optional AI narrative step (default: attempt it, never blocking if Ollama is unavailable).")
     decide_parser.add_argument("--db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")
 
+    size_parser = subparsers.add_parser(
+        "size",
+        help=(
+            "Phase 22: preview how the EXISTING, UNCHANGED risk engine would size the latest BUY decision "
+            "for a symbol, given the specified capital. NOT an order -- places no real or paper trade."
+        ),
+    )
+    size_parser.add_argument("--symbol", required=True, help="Ticker to size (e.g. AAPL, RELIANCE.NS).")
+    size_parser.add_argument("--decision-db", type=str, default=None, help=f"Read the latest decision from this path (default: {DEFAULT_DECISION_DB_PATH}).")
+    size_parser.add_argument("--period", default="6mo", help="Historical window to fetch for the current market context (default: 6mo).")
+    size_parser.add_argument("--interval", default="1d", help="Bar interval (default: 1d).")
+    size_parser.add_argument("--initial-capital", type=float, default=100_000.0, help="Capital to size against (default: 100000).")
+    size_parser.add_argument("--risk-per-trade", type=float, default=default_risk.risk_per_trade_pct, help=f"Percent of equity risked per trade (default: {default_risk.risk_per_trade_pct}).")
+    size_parser.add_argument("--max-daily-loss", type=float, default=default_risk.max_daily_loss_pct, help=f"Percent daily-loss halt threshold (default: {default_risk.max_daily_loss_pct}).")
+    size_parser.add_argument("--max-drawdown", type=float, default=default_risk.max_drawdown_pct, help=f"Percent max-drawdown halt threshold (default: {default_risk.max_drawdown_pct}).")
+    size_parser.add_argument("--max-exposure", type=float, default=default_risk.max_exposure_pct, help=f"Percent max position-notional/equity exposure (default: {default_risk.max_exposure_pct}).")
+    size_parser.add_argument("--max-consecutive-losses", type=int, default=default_risk.max_consecutive_losses, help=f"Losing-streak threshold that triggers reduced-risk sizing, not a reject (default: {default_risk.max_consecutive_losses}).")
+    size_parser.add_argument("--consecutive-loss-risk-multiplier", type=float, default=default_risk.consecutive_loss_risk_multiplier, help=f"Risk-per-trade multiplier while in a loss-streak recovery (default: {default_risk.consecutive_loss_risk_multiplier}).")
+    size_parser.add_argument("--consecutive-loss-hard-limit", type=int, default=default_risk.consecutive_loss_hard_limit, help=f"Losing-streak threshold that DOES reject outright (default: {default_risk.consecutive_loss_hard_limit}).")
+    size_parser.add_argument("--min-risk-reward", type=float, default=default_risk.min_risk_reward, help=f"Minimum acceptable signal risk/reward (default: {default_risk.min_risk_reward}).")
+
     return parser.parse_args(argv)
 
 
@@ -1112,6 +1201,8 @@ def main() -> None:
             run_research_command(args)
         elif args.command == "decide":
             run_decide_command(args)
+        elif args.command == "size":
+            run_size_command(args)
         else:
             run_analyze_command(args)
     except _CONTROLLED_ERRORS as exc:

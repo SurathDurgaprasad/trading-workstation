@@ -1,0 +1,185 @@
+<title>Phase 22 Risk Position Sizing</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+  :root {
+    --bg: #0b0f14; --surface: #121922; --surface-2: #17202b; --border: #253140; --border-soft: #1c2530;
+    --text: #dbe4ec; --text-muted: #8ca0b3; --text-dim: #5f7284;
+    --accent: #4fd1c5; --accent-soft: #1b3a38;
+    --warn: #e8b84b; --warn-soft: #3a3016;
+    --good: #34d399; --good-soft: #123326;
+    --bad: #f87171; --bad-soft: #3a1a1a;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15.5px; line-height: 1.65; margin: 0; padding: 0 0 80px 0; }
+  ::selection { background: var(--accent-soft); color: var(--accent); }
+  a { color: var(--accent); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 28px; }
+  header.hero { border-bottom: 1px solid var(--border); padding: 56px 0 36px 0; background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%); }
+  .eyebrow { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px 0; }
+  h1 { font-family: var(--mono); font-weight: 600; font-size: clamp(26px, 4vw, 38px); line-height: 1.18; margin: 0 0 14px 0; text-wrap: balance; letter-spacing: -0.01em; }
+  .hero-sub { color: var(--text-muted); font-size: 16.5px; max-width: 66ch; margin: 0 0 28px 0; }
+  .status-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill { font-family: var(--mono); font-size: 12.5px; font-weight: 500; letter-spacing: 0.02em; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
+  .pill-good { color: var(--good); background: var(--good-soft); border-color: #16472f; }
+  .pill-neutral { color: var(--text-muted); background: var(--surface-2); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  nav.toc { max-width: 960px; margin: 0 auto; padding: 22px 28px; display: flex; flex-wrap: wrap; gap: 4px 18px; font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--border-soft); }
+  nav.toc a { color: var(--text-dim); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
+  main { padding-top: 8px; }
+  section { padding: 44px 0; border-bottom: 1px solid var(--border-soft); }
+  section:last-of-type { border-bottom: none; }
+  .section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  .section-num { font-family: var(--mono); color: var(--text-dim); font-size: 14px; min-width: 26px; }
+  h2 { font-family: var(--mono); font-size: 19px; font-weight: 600; margin: 0; color: var(--text); letter-spacing: -0.01em; }
+  h3 { font-family: var(--sans); font-size: 15.5px; font-weight: 600; color: var(--accent); margin: 26px 0 10px 0; }
+  p { margin: 0 0 14px 0; color: var(--text); max-width: 74ch; }
+  p.muted { color: var(--text-muted); }
+  ul, ol { margin: 0 0 14px 0; padding-left: 22px; max-width: 72ch; }
+  li { margin-bottom: 6px; }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; background: var(--surface-2); border: 1px solid var(--border-soft); padding: 1px 6px; border-radius: 3px; color: #a8d8f0; }
+  .flow { font-family: var(--mono); font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; overflow-x: auto; color: var(--text-muted); line-height: 1.9; white-space: pre; margin: 16px 0; }
+  .flow .node { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 14px 0; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.mono, td code { font-family: var(--mono); }
+  td strong { color: var(--text); font-weight: 500; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin: 18px 0; }
+  .stat { background: var(--surface); padding: 16px 18px; }
+  .stat .n { font-family: var(--mono); font-size: 24px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; margin: 14px 0; }
+  .card h4 { font-family: var(--mono); font-size: 13.5px; color: var(--text); margin: 0 0 8px 0; }
+  .badge { font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.03em; white-space: nowrap; }
+  .badge-verified { background: var(--good-soft); color: var(--good); }
+  .badge-na { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+  .callout { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 14px 18px; border-radius: 0 6px 6px 0; margin: 18px 0; color: #f0dca3; font-size: 14px; }
+  .callout p { margin: 0; color: inherit; }
+  .kv-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; font-size: 14px; margin: 14px 0; }
+  .kv-list dt { color: var(--text-dim); font-family: var(--mono); font-size: 12.5px; padding-top: 2px; }
+  .kv-list dd { margin: 0; color: var(--text); }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="light"]) {
+      --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+      --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+      --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+    }
+    :root:not([data-theme="light"]) code, :root:not([data-theme="light"]) .mono { color: #0f5c66; }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+    --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+    --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+  }
+  :root[data-theme="light"] code, :root[data-theme="light"] .mono { color: #0f5c66; }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Phase 22 &mdash; Dynamic Risk &amp; Position Sizing</p>
+    <h1>A Bridge, Not a Second Risk Engine</h1>
+    <p class="hero-sub">Reconciliation before code: <code>risk/config.py</code>, <code>risk/engine.py</code>, and <code>risk/account.py</code> already implement everything the roadmap's Phase 22 feature list asks for &mdash; dynamic, never-hardcoded capital, risk-per-trade, a daily-loss limit, exposure limits, and position sizing computed fresh from current equity on every call. None of that was rebuilt. The actual gap: <code>RiskEngine.evaluate</code> needs a fully-formed <code>Signal</code> with concrete stop/target prices, and Phase 21's <code>Decision</code> deliberately carries only a label. This phase is exactly that bridge, and nothing more.</p>
+    <div class="status-row">
+      <span class="pill pill-good"><span class="dot"></span>ZERO CHANGES TO risk/engine.py, risk/config.py, risk/account.py</span>
+      <span class="pill pill-good"><span class="dot"></span>PREVIEW ONLY -- NO ORDER, NO paper/ IMPORT</span>
+      <span class="pill pill-neutral">17 NEW TESTS, 703 TOTAL</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#git">Git</a>
+  <a href="#reconciliation">Reconciliation: what already existed</a>
+  <a href="#scope">Scope</a>
+  <a href="#design">What was built</a>
+  <a href="#safety">Safety framing</a>
+  <a href="#audit">Self-audit: adversarial edge cases checked</a>
+  <a href="#tests">Tests</a>
+  <a href="#limitations">Known limitations, stated honestly</a>
+</nav>
+
+<main class="wrap">
+
+<section id="git">
+  <div class="section-head"><span class="section-num">01</span><h2>Git state</h2></div>
+  <div class="kv-list">
+    <dt>Base</dt><dd class="mono">main (Phase 16-21 + roadmap, merged)</dd>
+    <dt>Branch</dt><dd class="mono">phase-22-risk-position-sizing</dd>
+    <dt>New file</dt><dd class="mono">risk/sizing.py (1 file, purely additive) + 1 new test file, main.py `size` subcommand</dd>
+    <dt>Modified</dt><dd class="mono">strategy/signal.py (one new, additive ReasonCode member)</dd>
+  </div>
+</section>
+
+<section id="reconciliation">
+  <div class="section-head"><span class="section-num">02</span><h2>Reconciliation: what already existed</h2></div>
+  <p>Before writing anything, <code>risk/config.py</code>, <code>risk/engine.py</code>, and <code>risk/account.py</code> were read in full. Every item on the roadmap's own Phase 22 feature list was already there, from Phase 3/4:</p>
+  <div class="table-wrap"><table>
+    <tr><th>Roadmap feature</th><th>Already implemented as</th></tr>
+    <tr><td>Dynamic Capital</td><td><code>Account.equity</code> / <code>initial_capital</code> &mdash; a caller-supplied parameter everywhere (CLI <code>--initial-capital</code>, no code path hardcodes a value)</td></tr>
+    <tr><td>Risk Per Trade</td><td><code>RiskConfig.risk_per_trade_pct</code></td></tr>
+    <tr><td>Daily Risk Limit</td><td><code>RiskConfig.max_daily_loss_pct</code> / <code>RiskEngine._daily_loss_breached</code></td></tr>
+    <tr><td>Position Size</td><td><code>RiskEngine.evaluate</code>'s <code>quantity = floor(risk_budget / risk_per_unit)</code>, computed fresh from CURRENT <code>account.equity</code> every call</td></tr>
+    <tr><td>Maximum Exposure</td><td><code>RiskConfig.max_exposure_pct</code> / the <code>MAX_EXPOSURE</code> veto</td></tr>
+  </table></div>
+  <p>"Capital changes must not require code changes" is already true today: <code>python main.py backtest --initial-capital 5000</code> vs. <code>--initial-capital 500000</code> changes position sizing with zero code edits. This phase does not touch any of the three files above.</p>
+</section>
+
+<section id="scope">
+  <div class="section-head"><span class="section-num">03</span><h2>Scope</h2></div>
+  <p><strong>In scope:</strong> <code>risk/sizing.py</code> &mdash; a small, purely additive module that constructs the <code>Signal</code> a BUY <code>Decision</code> implies (using the exact, already-established ATR-based stop/target convention), then hands it to the unmodified <code>RiskEngine.evaluate</code>; a <code>size</code> CLI subcommand that previews the result against caller-specified capital.</p>
+  <p><strong>Explicitly out of scope:</strong> any new risk/sizing methodology, any change to <code>risk/engine.py</code>/<code>risk/config.py</code>/<code>risk/account.py</code>, any order placement (real or paper), any new persisted history (this is a stateless preview, not a new audit record &mdash; the roadmap does not ask for one here, unlike Phase 21's decisions).</p>
+</section>
+
+<section id="design">
+  <div class="section-head"><span class="section-num">04</span><h2>What was built</h2></div>
+  <div class="flow">risk/sizing.py
+  SizingUnavailableError    raised for a non-BUY label, missing/non-positive ATR, mismatched symbols, or a degenerate stop
+  build_signal_for_buy()    Decision + MarketContext -&gt; Signal, using strategy.baseline's OWN
+                            STOP_ATR_MULTIPLIER (1.5) / TARGET_RISK_REWARD (2.0) -- not new math
+  size_decision()           build_signal_for_buy() -&gt; RiskEngine(config).evaluate(signal, account)
+                            -- zero new risk logic, pure composition</div>
+  <p><code>main.py size --symbol X</code> reads the latest persisted <code>Decision</code> (Phase 21's <code>DecisionStore</code>), fetches a fresh <code>MarketContext</code> (<code>market.context.get_market_context</code>, unchanged since Phase 2), builds an <code>Account</code> from CLI-supplied capital, and prints the resulting <code>RiskDecision</code> &mdash; approved/quantity/risk amount/exposure/veto reasons &mdash; using the identical 8 risk-config flags (<code>--risk-per-trade</code>, <code>--max-daily-loss</code>, etc.) already defined on the <code>backtest</code> subcommand, for consistency.</p>
+</section>
+
+<section id="safety">
+  <div class="section-head"><span class="section-num">05</span><h2>Safety framing</h2></div>
+  <p><code>risk/sizing.py</code> imports nothing from <code>paper/</code> and calls no order-placing code path (none exists anywhere in this repository). The CLI prints <code>"POSITION SIZING PREVIEW -- NOT AN ORDER (no real or paper trade is placed)"</code> on every run. This command answers "what WOULD the existing, unchanged risk engine do with this decision, given this capital" &mdash; it does not act on that answer. Converting an approved preview into an actual paper trade remains the existing, entirely separate <code>paper</code>/<code>paper-live</code> path.</p>
+</section>
+
+<section id="audit">
+  <div class="section-head"><span class="section-num">06</span><h2>Self-audit: adversarial edge cases checked</h2></div>
+  <ul>
+    <li><strong>Extreme ATR producing a negative stop price.</strong> <code>Signal</code> has no <code>gt=0</code> constraint on <code>stop_price</code>, and <code>RiskEngine.evaluate</code> would not crash on one (the arithmetic stays well-defined) &mdash; but a negative stop is nonsensical for a real instrument and would silently pass <code>structurally_valid</code>. Checked directly rather than assumed safe: <code>build_signal_for_buy</code> now explicitly refuses to build a <code>Signal</code> when the computed <code>stop_price</code> is not positive, with a regression test (<code>test_build_signal_for_buy_refuses_a_degenerate_negative_stop</code>) reproducing the exact ATR/price combination that triggers it.</li>
+    <li><strong>A BUY <code>Decision</code> with <code>scanner_evidence=None</code>.</strong> Verified rather than trusted: Phase 21's own <code>Decision</code> model_validator makes this impossible to construct in the first place (checked by re-reading that validator, not by re-implementing the check here). <code>build_signal_for_buy</code> does not read <code>scanner_evidence</code> at all &mdash; every price input comes from <code>MarketContext</code> &mdash; so this scenario was moot even before confirming it's unreachable.</li>
+    <li><strong>Zero/negative capital.</strong> <code>Account</code>'s own <code>initial_capital: float = Field(gt=0)</code> constraint (Phase 3, unchanged) already rejects this at construction with a Pydantic <code>ValidationError</code> (a <code>ValueError</code> subclass, already in <code>main.py</code>'s <code>_CONTROLLED_ERRORS</code>) &mdash; no new handling needed or added.</li>
+    <li><strong>Mismatched symbols</strong> (a <code>Decision</code> for one symbol paired with a <code>MarketContext</code> for another). Explicitly checked and refused with a clear <code>SizingUnavailableError</code>, with a regression test.</li>
+    <li><strong>A non-BUY label reaching <code>size_decision</code>.</strong> Every one of WATCH/AVOID/EXIT/NO_ACTION is tested individually (parametrized) to confirm <code>SizingUnavailableError</code>, not a silent no-op or a crash.</li>
+  </ul>
+
+  <div class="card">
+    <h4>A pre-existing test file was overwritten, caught by a test-count mismatch <span class="badge badge-verified">FIXED</span></h4>
+    <p class="muted">The very first draft of this phase's tests used <code>Write</code> to create <code>tests/test_risk_sizing.py</code> without reading it first &mdash; a file of that exact name already existed from the original Phase 0-13 commit, containing 12 real, unrelated tests of <code>RiskEngine</code>'s own position-sizing formula (fractional-risk flooring, capital-bounded quantity caps, exposure-driven rejection with sizing still reported, etc.). The overwrite was caught not by inspection but by a test-count discrepancy: a full regression run showed 691 passed where 703 was expected from the new tests added. Rather than accept the lower number, the gap was traced directly (<code>pytest --collect-only</code> on the suspect file matched the missing count exactly) back to the overwritten file. Fixed by restoring the original <code>tests/test_risk_sizing.py</code> from <code>main</code> unchanged, and moving this phase's own new tests to a distinctly-named <code>tests/test_risk_sizing_bridge.py</code>. Full regression re-confirmed at 703 passed after the fix. Recorded here as a reminder that an unexpected test-count delta is itself a signal worth chasing down, not rounding away.</p>
+  </div>
+</section>
+
+<section id="tests">
+  <div class="section-head"><span class="section-num">07</span><h2>Tests</h2></div>
+  <p>17 new tests: 13 in <code>test_risk_sizing_bridge.py</code> (exact stop/target formula verification against <code>strategy.baseline</code>'s own constants, every non-BUY label rejected, missing/zero/degenerate ATR rejected, mismatched symbols rejected, an ample-capital approval, an insufficient-capital rejection, and a direct equality check proving <code>size_decision</code>'s output is byte-for-byte identical to calling the unmodified <code>RiskEngine</code> directly with the same <code>Signal</code> -- proof no parallel sizing methodology was introduced), and 4 CLI tests (arg parsing mirroring the <code>backtest</code> risk-flag set, missing-decision handling, one end-to-end run through a real <code>DecisionStore</code> BUY decision to a real, unmodified-<code>RiskEngine</code>-produced approval). No real network or Ollama call anywhere in the unit suite. Full regression: 703 passed, 0 failed (<code>pytest --collect-only</code>'s count matches the run's pass count exactly).</p>
+</section>
+
+<section id="limitations">
+  <div class="section-head"><span class="section-num">08</span><h2>Known limitations, stated honestly</h2></div>
+  <ul>
+    <li><strong>BUY only.</strong> WATCH/AVOID/NO_ACTION correctly have nothing to size. EXIT (closing an existing position) is deliberately out of scope here &mdash; that is an instruction to close, a <code>paper/engine.py</code> concern entirely separate from <code>RiskEngine.evaluate</code>'s new-entry sizing question, not a Phase 22 gap.</li>
+    <li><strong>No new persistence.</strong> A sizing preview is not saved anywhere; re-running <code>size</code> against fresh market data can produce a different <code>Signal</code>/<code>RiskDecision</code> for the same underlying <code>Decision</code>, since ATR/price move with the market. This is intentional (a preview reflects "right now"), not a reproducibility gap in <code>Decision</code> itself (which remains immutable and unchanged).</li>
+    <li><strong>The ATR-based stop/target convention is Phase 3's, unvalidated for this purpose.</strong> Reusing it here (rather than inventing a second convention) was the correct call per this project's own anti-duplication discipline, but it inherits whatever uncertainty already exists about that convention's own effectiveness (Phase 8's validation study found no evidence of a durable edge for the strategy that originated it).</li>
+  </ul>
+</section>
+
+</main>

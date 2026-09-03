@@ -1,6 +1,6 @@
 import pytest
 
-from main import parse_args, run_decide_command, run_paper_live_command, run_research_command, run_scan_command
+from main import parse_args, run_decide_command, run_paper_live_command, run_research_command, run_scan_command, run_size_command
 from tests.conftest import AAPL_CACHE_PATH
 
 
@@ -336,6 +336,79 @@ def test_run_decide_command_reports_missing_evidence_honestly(tmp_path, capsys):
     assert "LABEL:          NO_ACTION" in output
     assert "Scanner evidence: none found for ZZZZ" in output
     assert "Research evidence: none found for ZZZZ" in output
+
+
+def test_size_subcommand_defaults():
+    args = parse_args(["size", "--symbol", "AAPL"])
+    assert args.command == "size"
+    assert args.symbol == "AAPL"
+    assert args.decision_db is None
+    assert args.period == "6mo"
+    assert args.interval == "1d"
+    assert args.initial_capital == 100_000.0
+    assert args.risk_per_trade == pytest.approx(0.5)
+    assert args.max_daily_loss == pytest.approx(3.0)
+    assert args.max_drawdown == pytest.approx(10.0)
+    assert args.max_exposure == pytest.approx(25.0)
+    assert args.max_consecutive_losses == 3
+    assert args.min_risk_reward == pytest.approx(1.5)
+
+
+def test_size_subcommand_overrides():
+    args = parse_args([
+        "size", "--symbol", "RELIANCE.NS", "--decision-db", "/tmp/decisions.db", "--period", "1y",
+        "--interval", "1wk", "--initial-capital", "50000", "--risk-per-trade", "1.0", "--max-exposure", "40",
+    ])
+    assert args.symbol == "RELIANCE.NS"
+    assert args.decision_db == "/tmp/decisions.db"
+    assert args.period == "1y"
+    assert args.interval == "1wk"
+    assert args.initial_capital == 50_000.0
+    assert args.risk_per_trade == pytest.approx(1.0)
+    assert args.max_exposure == pytest.approx(40.0)
+
+
+def test_run_size_command_reports_missing_decision_honestly(tmp_path):
+    args = parse_args(["size", "--symbol", "ZZZZ", "--decision-db", str(tmp_path / "no-such-decisions.db")])
+    with pytest.raises(SystemExit):
+        run_size_command(args)
+
+
+def test_run_size_command_end_to_end_with_a_real_decision_store(tmp_path, capsys, monkeypatch):
+    from datetime import datetime
+
+    import market.context as market_context_module
+    from decision_engine.models import Decision, DecisionLabel, RiskContext
+    from decision_engine.store import DecisionStore
+    from market.context import MarketContext
+    from market_intelligence.models import CandidateScore
+
+    decision_db = tmp_path / "decisions.db"
+    store = DecisionStore(decision_db)
+    candidate = CandidateScore(
+        symbol="AAPL", as_of=datetime(2024, 6, 1), last_close=190.0, avg_daily_value=1_000_000.0,
+        volume_ratio=1.1, trend_score=1.0, momentum_score=0.5, breakout_score=0.01,
+        relative_strength_score=0.02, sector_strength_score=None, composite_score=1.5,
+        explanation=["fake"],
+    )
+    store.save_decision(Decision(
+        decision_id="dec-1", symbol="AAPL", as_of=datetime(2024, 6, 1, 12, 0, 0), label=DecisionLabel.BUY,
+        rationale=["all factors agree"], config_version="cfg1", scanner_evidence=candidate, research_evidence=None,
+        market_context=None, risk_context=RiskContext.unknown(), narrative=None, narrative_unavailable_reason=None,
+    ))
+    store.close()
+
+    fake_market_context = MarketContext(symbol="AAPL", as_of=datetime(2024, 6, 1), price=200.0, atr_14=5.0)
+    monkeypatch.setattr(market_context_module, "get_market_context", lambda symbol, **kw: fake_market_context)
+
+    args = parse_args(["size", "--symbol", "AAPL", "--decision-db", str(decision_db), "--initial-capital", "100000"])
+    run_size_command(args)
+
+    output = capsys.readouterr().out
+    assert "POSITION SIZING PREVIEW -- NOT AN ORDER (no real or paper trade is placed)" in output
+    assert "Decision:       BUY" in output
+    assert "Approved:       True" in output
+    assert "Quantity:" in output
 
 
 def test_paper_live_kill_switch_flags_parse_without_a_symbol():
