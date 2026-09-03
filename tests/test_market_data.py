@@ -66,6 +66,42 @@ def test_ohlcv_from_dataframe_empty_is_empty_not_an_error():
     assert ohlcv.bars == []
 
 
+def test_ohlcv_from_dataframe_strips_tzinfo_from_a_tz_aware_index():
+    """Regression (Phase 33): `pd.Timestamp` IS a `datetime` subclass, so
+    `_to_timestamp`'s `isinstance(value, datetime)` branch previously
+    matched every real DataFrame index value and returned it AS-IS,
+    silently skipping the tzinfo-stripping logic a few lines below --
+    dead code for the one call site that matters. Found via a real scan
+    against a live ^NSEI benchmark whose Yahoo data carries an
+    Asia/Kolkata-aware index: market_intelligence.scanner's benchmark
+    reindex raised `TypeError: Cannot compare dtypes datetime64[us,
+    UTC+05:30] and datetime64[us]` because only ^NSEI's bars kept their
+    real tzinfo. Every OHLCVBar.timestamp must be naive, per this
+    project's own "Yahoo/mock bars are naive by convention" invariant."""
+    frame = _synthetic_frame(5)
+    frame.index = frame.index.tz_localize("Asia/Kolkata")
+    assert frame.index.tz is not None  # sanity: the input really is tz-aware
+
+    ohlcv = OHLCV.from_dataframe(symbol="TEST", interval="1d", frame=frame)
+
+    assert len(ohlcv.bars) == 5
+    for bar in ohlcv.bars:
+        assert bar.timestamp.tzinfo is None
+
+
+def test_ohlcv_from_dataframe_naive_index_still_works_unchanged():
+    """Non-regression: the already-working naive-index path (the vast
+    majority of real Yahoo data) must be completely unaffected."""
+    frame = _synthetic_frame(5)
+    assert frame.index.tz is None
+
+    ohlcv = OHLCV.from_dataframe(symbol="TEST", interval="1d", frame=frame)
+
+    assert len(ohlcv.bars) == 5
+    for bar in ohlcv.bars:
+        assert bar.timestamp.tzinfo is None
+
+
 def test_ohlcv_bar_rejects_non_positive_price():
     with pytest.raises(ValidationError):
         OHLCV(

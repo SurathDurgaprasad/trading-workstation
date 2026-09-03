@@ -44,7 +44,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe")
+_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -732,6 +732,91 @@ def run_scan_command(args: argparse.Namespace) -> None:
         print(f"\nExcluded ({len(report.excluded)}):")
         for item in report.excluded:
             print(f"  {item.symbol:12s} {item.reason}")
+
+    from market_intelligence.regime import compute_breadth
+
+    breadth = compute_breadth(report)
+    ratio_text = f"{breadth.advance_decline_ratio:.2f}" if breadth.advance_decline_ratio is not None else "n/a"
+    print(f"\nMarket breadth (this scan): {breadth.advancing} advancing, {breadth.declining} declining, {breadth.flat} flat (advance/decline ratio: {ratio_text})")
+
+    _print_provider_metrics(resilient)
+
+
+# --------------------------------------------------------------------------
+# `regime` -- Phase 33 market regime & breadth intelligence: reads the
+# latest persisted scan (breadth + sector strength are pure aggregations
+# over it, zero extra network calls) and fetches ONE fresh benchmark
+# series for trend/volatility classification. Every number here is a
+# direct reuse of an existing indicator or classifier -- no AI, no
+# opaque scoring. No recommendation, no buy/sell, no order.
+# --------------------------------------------------------------------------
+
+
+def run_regime_command(args: argparse.Namespace) -> None:
+    from market_intelligence.regime import build_market_regime_report
+    from market_intelligence.store import ScanHistoryStore
+
+    scanner_db = args.scanner_db or DEFAULT_SCANNER_DB_PATH
+    store = ScanHistoryStore(scanner_db)
+    scan_report = store.latest_report()
+    store.close()
+
+    if scan_report is None:
+        print(f"regime: no scan found in {scanner_db} -- run `scan` first.", file=sys.stderr)
+        sys.exit(1)
+
+    # --benchmark not passed at all (None) -> inherit whatever the scan itself
+    # used. Passed as "" -> explicitly disable. Passed as a symbol -> override.
+    # (matches `scan --benchmark ""`'s own existing disable convention.)
+    from market_intelligence.regime import USE_SCAN_REPORTS_OWN_BENCHMARK
+
+    benchmark_symbol = USE_SCAN_REPORTS_OWN_BENCHMARK if args.benchmark is None else (args.benchmark or None)
+
+    sector_map = None
+    if args.with_sectors:
+        from research.sector import YahooSectorInfoProvider, build_sector_map
+
+        logger.info("Building a sector map for %d scanned symbols (--with-sectors)", len(scan_report.candidates))
+        sector_map = build_sector_map((c.symbol for c in scan_report.candidates), YahooSectorInfoProvider())
+
+    provider, resilient = _build_provider(args)
+    report = build_market_regime_report(
+        scan_report, provider=provider, benchmark_symbol=benchmark_symbol, sector_map=sector_map,
+        period=args.period, interval=args.interval,
+    )
+
+    print("=" * 70)
+    print("MARKET REGIME & BREADTH -- EXPLAINABLE AGGREGATES (no recommendation, no buy/sell)")
+    print("=" * 70)
+    print(f"Based on scan:  {report.scan_id} (as of {scan_report.as_of.isoformat()})")
+    print(f"Generated at:   {report.as_of.isoformat()}")
+
+    print("\nBREADTH (this scan's universe):")
+    ratio_text = f"{report.breadth.advance_decline_ratio:.2f}" if report.breadth.advance_decline_ratio is not None else "n/a"
+    pct_text = f"{report.breadth.advancing_pct:.1%}" if report.breadth.advancing_pct is not None else "n/a"
+    print(f"  Advancing:  {report.breadth.advancing}")
+    print(f"  Declining:  {report.breadth.declining}")
+    print(f"  Flat:       {report.breadth.flat}")
+    print(f"  A/D ratio:  {ratio_text}")
+    print(f"  Advancing%: {pct_text}")
+
+    print(f"\nBENCHMARK ({report.benchmark.symbol or 'none configured'}):")
+    if report.benchmark.symbol is not None:
+        print(f"  Trend regime:      {report.benchmark.trend_regime}")
+        print(f"  Volatility regime: {report.benchmark.volatility_regime}")
+        if report.benchmark.atr_pct_vs_trailing_average is not None:
+            print(f"  ATR% vs trailing avg: {report.benchmark.atr_pct_vs_trailing_average:.2f}x")
+        if report.benchmark.last_close is not None:
+            print(f"  Last close:        {report.benchmark.last_close:.2f}")
+
+    if sector_map is not None:
+        print(f"\nSECTOR STRENGTH ({len(report.sector_strength)} sector(s), strongest first):")
+        if not report.sector_strength:
+            print("  (no symbol in this scan had a recognized sector)")
+        for sector in report.sector_strength:
+            print(f"  {sector.sector:24s} n={sector.symbol_count:3d}  avg composite={sector.average_composite_score:+.2f}")
+    else:
+        print("\nSECTOR STRENGTH: not computed (pass --with-sectors to build one -- costs one extra fetch per symbol).")
 
     _print_provider_metrics(resilient)
 
@@ -1772,6 +1857,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     scan_parser.add_argument("--top", type=int, default=10, help="Print only the top N ranked candidates (default: 10).")
     scan_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker/rate-limit protection for a large watchlist (default: off, matches prior behavior exactly). Prints a provider-metrics summary at the end.")
 
+    regime_parser = subparsers.add_parser(
+        "regime",
+        help=(
+            "Phase 33: market breadth (from the latest scan) + benchmark trend/volatility regime "
+            "(one fresh fetch) + optional sector strength. Explainable aggregates only -- no AI, no recommendation."
+        ),
+    )
+    regime_parser.add_argument("--scanner-db", type=str, default=None, help=f"Read the latest scan from this path (default: {DEFAULT_SCANNER_DB_PATH}).")
+    regime_parser.add_argument("--benchmark", type=str, default=None, help="Benchmark symbol to classify (default: whatever the latest scan itself used).")
+    regime_parser.add_argument("--period", default="2y", help="Historical window for the benchmark's own trend/volatility classification (default: 2y -- SMA200 needs enough warm-up history).")
+    regime_parser.add_argument("--interval", default="1d", help="Bar interval (default: 1d).")
+    regime_parser.add_argument("--with-sectors", action="store_true", help="Also build a sector-strength ranking (one extra Yahoo fetch per scanned symbol -- default off).")
+    regime_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker protection (default: off).")
+
     research_parser = subparsers.add_parser(
         "research",
         help=(
@@ -1977,6 +2076,8 @@ def main() -> None:
             run_schedule_command(args)
         elif args.command == "universe":
             run_universe_command(args)
+        elif args.command == "regime":
+            run_regime_command(args)
         else:
             run_analyze_command(args)
     except _CONTROLLED_ERRORS as exc:

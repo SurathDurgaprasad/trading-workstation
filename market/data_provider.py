@@ -189,9 +189,24 @@ def get_market_data_provider(
 
 
 def _to_timestamp(value: object) -> datetime:
-    if isinstance(value, datetime):
-        return value
-    parsed = pd.Timestamp(value).to_pydatetime()
+    # Phase 33 bug fix: `pd.Timestamp` IS a `datetime` subclass, so the
+    # `isinstance(value, datetime)` branch below previously matched EVERY
+    # real DataFrame index value from `.iterrows()` (always a pd.Timestamp)
+    # and returned it completely as-is -- the tzinfo-stripping logic three
+    # lines down was DEAD CODE for the one call site that actually matters
+    # (OHLCV.from_dataframe), only ever running for a raw, non-Timestamp,
+    # non-datetime input (e.g. a plain string) that needed `pd.Timestamp(value)`
+    # to parse it in the first place. Found via a real scan against a live
+    # benchmark (^NSEI) whose Yahoo data carries an Asia/Kolkata-aware
+    # index: market_intelligence.scanner._screen_symbol's benchmark
+    # reindex raised `TypeError: Cannot compare dtypes datetime64[us,
+    # UTC+05:30] and datetime64[us]` because ^NSEI's bars kept their real
+    # tzinfo while other symbols' bars (whatever Yahoo happened to hand
+    # back for them) did not -- a direct violation of this project's own
+    # "Yahoo/mock bars are naive by convention" invariant, documented and
+    # relied on in live/freshness.py, market_data/quality.py, and
+    # learning/regime.py alike.
+    parsed = value if isinstance(value, datetime) else pd.Timestamp(value).to_pydatetime()
     if parsed.tzinfo is not None:
         return parsed.replace(tzinfo=None)
     return parsed

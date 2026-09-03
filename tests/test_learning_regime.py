@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from learning.regime import MarketRegime, classify_regime_at
 from market.data_provider import OHLCV, MarketDataError, OHLCVBar
@@ -71,3 +71,36 @@ def test_classify_regime_only_uses_history_at_or_before_as_of():
     regime = classify_regime_at("AAPL", as_of, provider=provider)
 
     assert regime == MarketRegime.UNKNOWN
+
+
+def test_classify_regime_accepts_a_utc_aware_as_of_against_naive_bars():
+    """Regression (Phase 33): a real, UTC-aware `as_of` (e.g.
+    `datetime.now(timezone.utc)`, what market_intelligence.regime passes
+    for a live "regime right now" check) against naive Yahoo/mock bars
+    previously raised `pandas.errors.InvalidComparison` -- Phase 24's own
+    original call site always passed an already-naive as_of, so this
+    never surfaced until a new caller exercised it."""
+    closes = [100.0 + i * 0.5 for i in range(250)]
+    provider = _FakeProvider(_ohlcv("AAPL", closes))
+    aware_as_of = (_START + timedelta(days=249)).replace(tzinfo=timezone.utc)
+
+    regime = classify_regime_at("AAPL", aware_as_of, provider=provider)
+
+    assert regime == MarketRegime.UPTREND
+
+
+def test_classify_regime_accepts_a_naive_as_of_against_aware_bars():
+    """The reverse mix: real Dhan bars are UTC-aware since the Phase 16
+    fix; a naive as_of against them must not raise either."""
+    aware_start = _START.replace(tzinfo=timezone.utc)
+    closes = [100.0 + i * 0.5 for i in range(250)]
+    bars = [
+        OHLCVBar(timestamp=aware_start + timedelta(days=i), open=c, high=c * 1.01, low=c * 0.99, close=c, volume=1000.0)
+        for i, c in enumerate(closes)
+    ]
+    provider = _FakeProvider(OHLCV(symbol="AAPL", interval="1d", bars=bars))
+    naive_as_of = _START + timedelta(days=249)
+
+    regime = classify_regime_at("AAPL", naive_as_of, provider=provider)
+
+    assert regime == MarketRegime.UPTREND

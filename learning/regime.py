@@ -6,7 +6,7 @@ new regime methodology invented for this phase. Fails closed (UNKNOWN)
 on insufficient history or a fetch failure, never guessing.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 import pandas as pd
@@ -36,7 +36,22 @@ def classify_regime_at(
         return MarketRegime.UNKNOWN
 
     frame = ohlcv.to_dataframe()
-    history = frame[frame.index <= as_of]
+    # Phase 33 bug fix -- found via a new caller (market_intelligence.regime,
+    # which passes a real, UTC-aware `datetime.now(timezone.utc)`) that
+    # Phase 24's own original call site never exercised (it always passed an
+    # already-naive `as_of` derived from a Yahoo/mock bar timestamp). This
+    # project's bars are a genuine mix -- Yahoo/mock naive, real Dhan bars
+    # UTC-aware since the Phase 16 fix -- so `frame.index` can be either;
+    # pandas raises TypeError comparing a naive DatetimeIndex against an
+    # aware scalar (or vice versa). Normalize `as_of` to match the index's
+    # own awareness, never the reverse (never invent a timezone for the bar
+    # data itself).
+    as_of_for_comparison = as_of
+    if frame.index.tz is not None and as_of.tzinfo is None:
+        as_of_for_comparison = as_of.replace(tzinfo=timezone.utc)
+    elif frame.index.tz is None and as_of.tzinfo is not None:
+        as_of_for_comparison = as_of.replace(tzinfo=None)
+    history = frame[frame.index <= as_of_for_comparison]
     if len(history) < BROAD_TREND_SMA_PERIOD:
         return MarketRegime.UNKNOWN
 
