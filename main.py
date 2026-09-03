@@ -629,9 +629,36 @@ def run_dashboard_command(args: argparse.Namespace) -> None:
 DEFAULT_SCANNER_DB_PATH = PROJECT_ROOT / "data" / "scanner.db"
 
 
-def run_scan_command(args: argparse.Namespace) -> None:
+def _build_provider(args: argparse.Namespace):
+    """Phase 30 -- returns (provider_for_use, resilient_provider_or_None).
+
+    If `args.resilient` (opt-in, default off on every command that
+    offers it), wraps the real network-calling provider with
+    market_data.resilience.ResilientMarketDataProvider (timeout/retry
+    with backoff+jitter/circuit-breaker/metrics) INSIDE the existing
+    cache layer -- a cache hit still skips resilience entirely, since
+    no network call happens on a hit. Deliberately opt-in rather than
+    the new default everywhere: it changes call latency/threading
+    behavior on failure, and every existing test's fixture-patching of
+    get_market_data_provider/CachedMarketDataProvider must keep working
+    completely unchanged for a caller that never passes --resilient."""
     from backtesting.cache import CachedMarketDataProvider
     from market.data_provider import get_market_data_provider
+
+    if getattr(args, "resilient", False):
+        from market_data.resilience import build_resilient_provider
+
+        resilient = build_resilient_provider(get_market_data_provider())
+        return CachedMarketDataProvider(resilient), resilient
+    return CachedMarketDataProvider(get_market_data_provider()), None
+
+
+def _print_provider_metrics(resilient) -> None:
+    if resilient is not None:
+        print(f"\nProvider metrics (--resilient): {resilient.metrics.summary_line()}")
+
+
+def run_scan_command(args: argparse.Namespace) -> None:
     from market_data.universe import MarketUniverse
     from market_intelligence.scanner import run_scan
     from market_intelligence.store import ScanHistoryStore
@@ -645,7 +672,7 @@ def run_scan_command(args: argparse.Namespace) -> None:
         print("scan: one of --symbols or --watchlist-file is required.", file=sys.stderr)
         sys.exit(2)
 
-    provider = CachedMarketDataProvider(get_market_data_provider())
+    provider, resilient = _build_provider(args)
     benchmark_symbol = args.benchmark or None
 
     logger.info("Running market scan over %d symbols (universe=%s)", len(universe), universe.mode)
@@ -682,6 +709,8 @@ def run_scan_command(args: argparse.Namespace) -> None:
         print(f"\nExcluded ({len(report.excluded)}):")
         for item in report.excluded:
             print(f"  {item.symbol:12s} {item.reason}")
+
+    _print_provider_metrics(resilient)
 
 
 # --------------------------------------------------------------------------
@@ -967,15 +996,13 @@ def run_predict_command(args: argparse.Namespace) -> None:
 
 
 def run_evaluate_command(args: argparse.Namespace) -> None:
-    from backtesting.cache import CachedMarketDataProvider
-    from market.data_provider import get_market_data_provider
     from predictions.store import PredictionStore
     from predictions.tracker import evaluate_prediction, summarize_predictions
 
     db_path = args.db or DEFAULT_PREDICTIONS_DB_PATH
     store = PredictionStore(db_path)
     pending = store.list_predictions_needing_evaluation()
-    provider = CachedMarketDataProvider(get_market_data_provider())
+    provider, resilient = _build_provider(args)
 
     print("=" * 70)
     print("SHADOW PREDICTION EVALUATION -- NOT AN ORDER (outcome monitoring only)")
@@ -1002,6 +1029,7 @@ def run_evaluate_command(args: argparse.Namespace) -> None:
     print(f"  Win rate:          {f'{summary.win_rate:.1%}' if summary.win_rate is not None else 'n/a (nothing resolved yet)'}")
     print(f"  Average return:    {f'{summary.average_return:+.2%}' if summary.average_return is not None else 'n/a'}")
     print(f"  Profit factor:     {f'{summary.profit_factor:.2f}' if summary.profit_factor is not None else 'n/a'}")
+    _print_provider_metrics(resilient)
 
 
 # --------------------------------------------------------------------------
@@ -1026,10 +1054,8 @@ def _fmt_ratio(value: float | None) -> str:
 def run_learn_command(args: argparse.Namespace) -> None:
     from pathlib import Path
 
-    from backtesting.cache import CachedMarketDataProvider
     from decision_engine.store import DecisionStore
     from learning.analysis import EvaluatedPrediction, build_learning_report
-    from market.data_provider import get_market_data_provider
     from predictions.store import PredictionStore
 
     predictions_db = args.predictions_db or DEFAULT_PREDICTIONS_DB_PATH
@@ -1052,7 +1078,7 @@ def run_learn_command(args: argparse.Namespace) -> None:
             decision_store.close()
 
     logger.info("Building performance learning report over %d evaluated predictions", len(items))
-    provider = CachedMarketDataProvider(get_market_data_provider())
+    provider, resilient = _build_provider(args)
     report = build_learning_report(items, provider=provider)
 
     print("=" * 70)
@@ -1090,6 +1116,7 @@ def run_learn_command(args: argparse.Namespace) -> None:
     print("\nNotes:")
     for note in report.notes:
         print(f"  - {note}")
+    _print_provider_metrics(resilient)
 
 
 # --------------------------------------------------------------------------
@@ -1124,12 +1151,10 @@ def run_learn_command(args: argparse.Namespace) -> None:
 def run_shadow_run_command(args: argparse.Namespace) -> None:
     from pathlib import Path
 
-    from backtesting.cache import CachedMarketDataProvider
     from decision_engine.engine import make_decision
     from decision_engine.models import RiskContext
     from decision_engine.store import DecisionStore
     from market.context import get_market_context
-    from market.data_provider import get_market_data_provider
     from market_data.universe import MarketUniverse
     from market_intelligence.scanner import run_scan
     from market_intelligence.store import ScanHistoryStore
@@ -1151,7 +1176,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
         print("shadow-run: one of --symbols or --watchlist-file is required.", file=sys.stderr)
         sys.exit(2)
 
-    provider = CachedMarketDataProvider(get_market_data_provider())
+    provider, resilient = _build_provider(args)
     benchmark_symbol = args.benchmark or None
 
     print("=" * 70)
@@ -1237,6 +1262,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
         print("\n[3/4] Evaluation skipped (--skip-evaluate).")
         print("[4/4] Learning summary skipped (--skip-evaluate).")
         _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded)
+        _print_provider_metrics(resilient)
         return
 
     print("\n[3/4] Evaluating all outstanding predictions:")
@@ -1261,6 +1287,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     print(f"  Average return:    {_fmt_pct(summary.average_return)}")
 
     _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded)
+    _print_provider_metrics(resilient)
 
 
 def _print_shadow_run_footer(scan_report, decisions_by_label: dict[str, int], predictions_recorded: int) -> None:
@@ -1409,7 +1436,7 @@ def _run_tick_from_args(args: argparse.Namespace, schedule_config, store, *, now
     return run_tick(
         schedule_config=schedule_config, run_store=store, symbols=args.symbols, watchlist_file=args.watchlist_file,
         period=args.period, interval=args.interval, benchmark=args.benchmark, news_limit=args.news_limit,
-        horizon_bars=args.horizon_bars, paper_db=args.paper_db, with_ai=args.with_ai,
+        horizon_bars=args.horizon_bars, paper_db=args.paper_db, with_ai=args.with_ai, resilient=args.resilient,
         scanner_db=args.scanner_db, research_db=args.research_db, decision_db=args.decision_db,
         predictions_db=args.predictions_db, staleness_seconds=args.staleness_seconds, now=now,
     )
@@ -1707,6 +1734,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     scan_parser.add_argument("--benchmark", default="^NSEI", help="Benchmark symbol for relative strength (default: ^NSEI). Pass an empty string to disable.")
     scan_parser.add_argument("--db", type=str, default=None, help=f"SQLite scan-history path (default: {DEFAULT_SCANNER_DB_PATH}).")
     scan_parser.add_argument("--top", type=int, default=10, help="Print only the top N ranked candidates (default: 10).")
+    scan_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker/rate-limit protection for a large watchlist (default: off, matches prior behavior exactly). Prints a provider-metrics summary at the end.")
 
     research_parser = subparsers.add_parser(
         "research",
@@ -1779,6 +1807,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     evaluate_parser.add_argument("--db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
     evaluate_parser.add_argument("--period", default="1y", help="Historical window to fetch per symbol when checking for a resolution (default: 1y).")
+    evaluate_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker protection when evaluating many predictions (default: off).")
 
     learn_parser = subparsers.add_parser(
         "learn",
@@ -1789,6 +1818,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     learn_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
     learn_parser.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path, for strategy/calibration grouping (default: {DEFAULT_DECISION_DB_PATH}).")
+    learn_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker protection for regime-performance lookups (default: off).")
 
     review_parser = subparsers.add_parser(
         "review",
@@ -1821,6 +1851,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     shadow_run_parser.add_argument("--research-db", type=str, default=None, help=f"SQLite research-history path (default: {DEFAULT_RESEARCH_DB_PATH}).")
     shadow_run_parser.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")
     shadow_run_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
+    shadow_run_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker/rate-limit protection across the whole run (default: off, matches prior behavior exactly). Prints a provider-metrics summary at the end.")
 
     schedule_parser = subparsers.add_parser(
         "schedule",
@@ -1842,6 +1873,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         p.add_argument("--horizon-bars", type=int, default=20, help="Bars after entry before an unresolved prediction is marked EXPIRED (default: 20).")
         p.add_argument("--paper-db", type=str, default=None, help="Optional: check this paper-trading database for an existing open position per symbol, to distinguish BUY/WATCH from EXIT.")
         p.add_argument("--with-ai", action="store_true", help="Include the optional AI research summary and decision narrative for every symbol (default: off).")
+        p.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker/rate-limit protection for every tick (default: off, recommended for unattended `schedule loop` operation).")
         p.add_argument("--scanner-db", type=str, default=None, help=f"SQLite scan-history path (default: {DEFAULT_SCANNER_DB_PATH}).")
         p.add_argument("--research-db", type=str, default=None, help=f"SQLite research-history path (default: {DEFAULT_RESEARCH_DB_PATH}).")
         p.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")

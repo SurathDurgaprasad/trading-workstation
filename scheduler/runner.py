@@ -59,7 +59,7 @@ def _execute_slot(
     slot: ScheduleSlot, *,
     symbols: str | None, watchlist_file: str | None,
     period: str, interval: str, benchmark: str, news_limit: int, horizon_bars: int,
-    paper_db: str | None, with_ai: bool,
+    paper_db: str | None, with_ai: bool, resilient: bool,
     scanner_db: str | None, research_db: str | None, decision_db: str | None, predictions_db: str | None,
 ) -> str:
     from main import parse_args, run_evaluate_command, run_learn_command, run_shadow_run_command
@@ -77,6 +77,8 @@ def _execute_slot(
             argv += ["--paper-db", paper_db]
         if with_ai:
             argv += ["--with-ai"]
+        if resilient:
+            argv += ["--resilient"]
         if scanner_db:
             argv += ["--scanner-db", scanner_db]
         if research_db:
@@ -91,9 +93,13 @@ def _execute_slot(
         eval_argv = ["evaluate", "--period", period]
         if predictions_db:
             eval_argv += ["--db", predictions_db]
+        if resilient:
+            eval_argv += ["--resilient"]
         eval_detail = _run_and_capture(run_evaluate_command, parse_args(eval_argv))
 
         learn_argv = ["learn"]
+        if resilient:
+            learn_argv += ["--resilient"]
         if predictions_db:
             learn_argv += ["--predictions-db", predictions_db]
         if decision_db:
@@ -117,6 +123,7 @@ def run_tick(
     horizon_bars: int = 20,
     paper_db: str | None = None,
     with_ai: bool = False,
+    resilient: bool = False,
     scanner_db: str | None = None,
     research_db: str | None = None,
     decision_db: str | None = None,
@@ -170,8 +177,8 @@ def run_tick(
         detail = _execute_slot(
             due, symbols=symbols, watchlist_file=watchlist_file, period=period, interval=interval,
             benchmark=benchmark, news_limit=news_limit, horizon_bars=horizon_bars, paper_db=paper_db,
-            with_ai=with_ai, scanner_db=scanner_db, research_db=research_db, decision_db=decision_db,
-            predictions_db=predictions_db,
+            with_ai=with_ai, resilient=resilient, scanner_db=scanner_db, research_db=research_db,
+            decision_db=decision_db, predictions_db=predictions_db,
         )
     except Exception as exc:  # noqa: BLE001 -- a failed tick must never crash a long-lived scheduler process
         # `finished_at=now_utc`, not the default real wall-clock: this tick's

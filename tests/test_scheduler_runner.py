@@ -254,6 +254,29 @@ def test_finished_at_is_anchored_to_the_injected_now_not_real_wall_clock(tmp_pat
     assert record.finished_at == _TRADING_TIME.astimezone(timezone.utc)
 
 
+def test_resilient_flag_is_threaded_through_to_shadow_run(tmp_path, run_store, monkeypatch):
+    """Phase 30: `run_tick(resilient=True)` must result in the SAME
+    `--resilient` flag main.py's own `shadow-run` CLI accepts -- proves
+    the scheduler doesn't silently drop it rather than actually asserting
+    on printed metrics text (which test_cli_resilient.py already covers
+    at the CLI layer)."""
+    import main as main_module
+
+    captured_args = {}
+    real_run_shadow_run_command = main_module.run_shadow_run_command
+
+    def _capture(args):
+        captured_args["resilient"] = args.resilient
+        return real_run_shadow_run_command(args)
+
+    monkeypatch.setattr(main_module, "run_shadow_run_command", _capture)
+
+    result = run_tick(schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", benchmark="", resilient=True, now=_TRADING_TIME, **_db_paths(tmp_path))
+
+    assert result.ran is True
+    assert captured_args.get("resilient") is True
+
+
 def test_custom_schedule_config_is_honored(tmp_path, run_store):
     """A YAML-configurable schedule must actually change what runs --
     not just parse without effect."""
