@@ -658,6 +658,29 @@ def _print_provider_metrics(resilient) -> None:
         print(f"\nProvider metrics (--resilient): {resilient.metrics.summary_line()}")
 
 
+def _build_live_snapshot_provider(args: argparse.Namespace):
+    """Phase 31 -- returns a market_data.contracts.SnapshotAdapter, or
+    None if `--live-source` was not passed. Dhan is currently the only
+    real, credential-backed live source this project has; this reuses
+    the EXACT same credential-loading (`load_dhan_credentials`) and
+    instrument-map download (`DhanInstrumentMap.download` -- public,
+    unauthenticated) `paper-live --source dhan` already established in
+    Phase 15/16, and the EXACT same, unmodified Phase 18
+    `market_data.adapters.dhan.build_dhan_adapter` -- no new connection
+    mechanism is introduced anywhere in this phase."""
+    if getattr(args, "live_source", None) != "dhan":
+        return None
+
+    from live.dhan.config import load_dhan_credentials
+    from live.dhan.instruments import DhanInstrumentMap
+    from market_data.adapters.dhan import build_dhan_adapter
+
+    logger.info("Connecting a live Dhan snapshot source (--live-source dhan)")
+    credentials = load_dhan_credentials()
+    instrument_map = DhanInstrumentMap.download()
+    return build_dhan_adapter(credentials=credentials, instrument_map=instrument_map, interval="1m")
+
+
 def run_scan_command(args: argparse.Namespace) -> None:
     from market_data.universe import MarketUniverse
     from market_intelligence.scanner import run_scan
@@ -914,7 +937,8 @@ def run_size_command(args: argparse.Namespace) -> None:
     account = new_account(args.initial_capital)
 
     logger.info("Sizing %s decision for %s against %.2f capital", decision.label.value, normalized, args.initial_capital)
-    market_context = get_market_context(normalized, period=args.period, interval=args.interval)
+    live_snapshot_provider = _build_live_snapshot_provider(args)
+    market_context = get_market_context(normalized, period=args.period, interval=args.interval, live_snapshot_provider=live_snapshot_provider)
     risk_decision = size_decision(decision, market_context=market_context, account=account, risk_config=risk_config)
 
     print("=" * 70)
@@ -923,6 +947,7 @@ def run_size_command(args: argparse.Namespace) -> None:
     print(f"Symbol:         {normalized}")
     print(f"Decision:       {decision.label.value} (as of {decision.as_of.isoformat()}, decision_id={decision.decision_id})")
     print(f"Capital:        {args.initial_capital:,.2f}")
+    print(f"Data source:    {market_context.data_source or 'UNKNOWN'} ({market_context.data_status or 'UNKNOWN'})")
     print(f"\n{risk_decision.explanation}")
     print(f"Approved:       {risk_decision.approved}")
     if risk_decision.position_size is not None:
@@ -971,7 +996,8 @@ def run_predict_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     logger.info("Recording a shadow prediction for %s from decision %s", normalized, decision.decision_id)
-    market_context = get_market_context(normalized, period=args.period, interval=args.interval)
+    live_snapshot_provider = _build_live_snapshot_provider(args)
+    market_context = get_market_context(normalized, period=args.period, interval=args.interval, live_snapshot_provider=live_snapshot_provider)
     signal = build_signal_for_buy(decision, market_context)
     prediction = create_prediction(decision, signal, horizon_bars=args.horizon_bars, interval=args.interval)
 
@@ -991,6 +1017,7 @@ def run_predict_command(args: argparse.Namespace) -> None:
     print(f"Target:         {prediction.target_price:.2f}")
     print(f"Horizon:        {prediction.horizon_bars} bars ({prediction.interval})")
     print(f"Database:       {db_path}")
+    print(f"Data source:    {market_context.data_source or 'UNKNOWN'} ({market_context.data_status or 'UNKNOWN'})")
     print("\nThis is a hypothetical shadow prediction, tracked whether or not you trade it.")
     print("Run `python main.py evaluate` later to check its outcome against real subsequent market data.")
 
@@ -1783,6 +1810,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     size_parser.add_argument("--consecutive-loss-risk-multiplier", type=float, default=default_risk.consecutive_loss_risk_multiplier, help=f"Risk-per-trade multiplier while in a loss-streak recovery (default: {default_risk.consecutive_loss_risk_multiplier}).")
     size_parser.add_argument("--consecutive-loss-hard-limit", type=int, default=default_risk.consecutive_loss_hard_limit, help=f"Losing-streak threshold that DOES reject outright (default: {default_risk.consecutive_loss_hard_limit}).")
     size_parser.add_argument("--min-risk-reward", type=float, default=default_risk.min_risk_reward, help=f"Minimum acceptable signal risk/reward (default: {default_risk.min_risk_reward}).")
+    size_parser.add_argument("--live-source", choices=["dhan"], default=None, help="Phase 31: overlay the current price with a real Dhan live quote (requires DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN) instead of the Yahoo historical close. Indicators are still computed from Yahoo history either way. A failed/unhealthy live source silently falls back to the Yahoo historical price.")
 
     predict_parser = subparsers.add_parser(
         "predict",
@@ -1797,6 +1825,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     predict_parser.add_argument("--interval", default="1d", help="Bar interval, also used for later evaluation (default: 1d).")
     predict_parser.add_argument("--horizon-bars", type=int, default=20, help="Bars after entry before an unresolved prediction is marked EXPIRED (default: 20).")
     predict_parser.add_argument("--db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
+    predict_parser.add_argument("--live-source", choices=["dhan"], default=None, help="Phase 31: overlay the entry price with a real Dhan live quote (requires DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN) instead of the Yahoo historical close. A failed/unhealthy live source silently falls back to the Yahoo historical price.")
 
     evaluate_parser = subparsers.add_parser(
         "evaluate",
