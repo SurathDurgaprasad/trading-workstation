@@ -1,6 +1,15 @@
 import pytest
 
-from main import parse_args, run_decide_command, run_paper_live_command, run_research_command, run_scan_command, run_size_command
+from main import (
+    parse_args,
+    run_decide_command,
+    run_evaluate_command,
+    run_paper_live_command,
+    run_predict_command,
+    run_research_command,
+    run_scan_command,
+    run_size_command,
+)
 from tests.conftest import AAPL_CACHE_PATH
 
 
@@ -409,6 +418,103 @@ def test_run_size_command_end_to_end_with_a_real_decision_store(tmp_path, capsys
     assert "Decision:       BUY" in output
     assert "Approved:       True" in output
     assert "Quantity:" in output
+
+
+def test_predict_subcommand_defaults():
+    args = parse_args(["predict", "--symbol", "AAPL"])
+    assert args.command == "predict"
+    assert args.symbol == "AAPL"
+    assert args.decision_db is None
+    assert args.period == "6mo"
+    assert args.interval == "1d"
+    assert args.horizon_bars == 20
+    assert args.db is None
+
+
+def test_predict_subcommand_overrides():
+    args = parse_args([
+        "predict", "--symbol", "RELIANCE.NS", "--decision-db", "/tmp/decisions.db", "--period", "1y",
+        "--interval", "1wk", "--horizon-bars", "10", "--db", "/tmp/predictions.db",
+    ])
+    assert args.symbol == "RELIANCE.NS"
+    assert args.decision_db == "/tmp/decisions.db"
+    assert args.period == "1y"
+    assert args.interval == "1wk"
+    assert args.horizon_bars == 10
+    assert args.db == "/tmp/predictions.db"
+
+
+def test_run_predict_command_reports_missing_decision_honestly(tmp_path):
+    args = parse_args(["predict", "--symbol", "ZZZZ", "--decision-db", str(tmp_path / "no-such-decisions.db")])
+    with pytest.raises(SystemExit):
+        run_predict_command(args)
+
+
+def test_run_predict_command_end_to_end_with_a_real_decision_store(tmp_path, capsys, monkeypatch):
+    from datetime import datetime
+
+    import market.context as market_context_module
+    from decision_engine.models import Decision, DecisionLabel, RiskContext
+    from decision_engine.store import DecisionStore
+    from market.context import MarketContext
+    from market_intelligence.models import CandidateScore
+
+    decision_db = tmp_path / "decisions.db"
+    store = DecisionStore(decision_db)
+    candidate = CandidateScore(
+        symbol="AAPL", as_of=datetime(2024, 6, 1), last_close=190.0, avg_daily_value=1_000_000.0,
+        volume_ratio=1.1, trend_score=1.0, momentum_score=0.5, breakout_score=0.01,
+        relative_strength_score=0.02, sector_strength_score=None, composite_score=1.5,
+        explanation=["fake"],
+    )
+    store.save_decision(Decision(
+        decision_id="dec-1", symbol="AAPL", as_of=datetime(2024, 6, 1, 12, 0, 0), label=DecisionLabel.BUY,
+        rationale=["all factors agree"], config_version="cfg1", scanner_evidence=candidate, research_evidence=None,
+        market_context=None, risk_context=RiskContext.unknown(), narrative=None, narrative_unavailable_reason=None,
+    ))
+    store.close()
+
+    fake_market_context = MarketContext(symbol="AAPL", as_of=datetime(2024, 6, 1), price=200.0, atr_14=5.0)
+    monkeypatch.setattr(market_context_module, "get_market_context", lambda symbol, **kw: fake_market_context)
+
+    args = parse_args(["predict", "--symbol", "AAPL", "--decision-db", str(decision_db), "--db", str(tmp_path / "predictions.db")])
+    run_predict_command(args)
+
+    output = capsys.readouterr().out
+    assert "SHADOW PREDICTION RECORDED -- NOT AN ORDER (tracked for later evaluation only)" in output
+    assert "Symbol:         AAPL" in output
+
+    from predictions.store import PredictionStore
+
+    prediction_store = PredictionStore(tmp_path / "predictions.db")
+    predictions = prediction_store.list_predictions()
+    assert len(predictions) == 1
+    assert predictions[0].symbol == "AAPL"
+    prediction_store.close()
+
+
+def test_evaluate_subcommand_defaults():
+    args = parse_args(["evaluate"])
+    assert args.command == "evaluate"
+    assert args.db is None
+    assert args.period == "1y"
+
+
+def test_evaluate_subcommand_overrides():
+    args = parse_args(["evaluate", "--db", "/tmp/predictions.db", "--period", "2y"])
+    assert args.db == "/tmp/predictions.db"
+    assert args.period == "2y"
+
+
+def test_run_evaluate_command_with_no_predictions_reports_zero_cleanly(tmp_path, capsys):
+    args = parse_args(["evaluate", "--db", str(tmp_path / "predictions.db")])
+    run_evaluate_command(args)
+
+    output = capsys.readouterr().out
+    assert "SHADOW PREDICTION EVALUATION -- NOT AN ORDER (outcome monitoring only)" in output
+    assert "Predictions needing evaluation: 0" in output
+    assert "Total:             0" in output
+    assert "n/a" in output
 
 
 def test_paper_live_kill_switch_flags_parse_without_a_symbol():

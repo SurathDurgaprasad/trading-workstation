@@ -25,6 +25,7 @@ from live.dhan.instruments import InstrumentNotFoundError
 from live.dhan.rest_client import DhanRestError
 from llm.errors import ModelNotAvailableError, OllamaUnavailableError
 from market.data_provider import MarketDataError
+from predictions.errors import PredictionUnavailableError
 from rag.errors import RagStoreNotFoundError
 from risk.config import RiskConfig
 from risk.sizing import SizingUnavailableError
@@ -42,7 +43,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size")
+_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -58,6 +59,7 @@ _CONTROLLED_ERRORS = (
     DhanRestError,
     InstrumentNotFoundError,
     SizingUnavailableError,
+    PredictionUnavailableError,
 )
 
 
@@ -906,6 +908,102 @@ def run_size_command(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+# `predict` / `evaluate` -- Phase 23 shadow prediction & continuous
+# evaluation. The system keeps a record of what it would have done and
+# monitors real subsequent market data against it, whether or not the
+# user actually traded it. NOT an order, real or paper -- predictions/
+# never imports paper/ or any broker adapter.
+# --------------------------------------------------------------------------
+
+DEFAULT_PREDICTIONS_DB_PATH = PROJECT_ROOT / "data" / "predictions.db"
+
+
+def run_predict_command(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
+    from decision_engine.store import DecisionStore
+    from market.context import get_market_context
+    from predictions.store import PredictionStore
+    from predictions.tracker import create_prediction
+    from risk.sizing import build_signal_for_buy
+
+    normalized = args.symbol.strip().upper()
+
+    decision_db = args.decision_db or DEFAULT_DECISION_DB_PATH
+    decision = None
+    if Path(decision_db).exists():
+        decision_store = DecisionStore(decision_db)
+        decision = decision_store.latest_decision_for_symbol(normalized)
+        decision_store.close()
+
+    if decision is None:
+        print(f"predict: no decision found for {normalized} in {decision_db} -- run `decide --symbol {normalized}` first.", file=sys.stderr)
+        sys.exit(1)
+
+    logger.info("Recording a shadow prediction for %s from decision %s", normalized, decision.decision_id)
+    market_context = get_market_context(normalized, period=args.period, interval=args.interval)
+    signal = build_signal_for_buy(decision, market_context)
+    prediction = create_prediction(decision, signal, horizon_bars=args.horizon_bars, interval=args.interval)
+
+    db_path = args.db or DEFAULT_PREDICTIONS_DB_PATH
+    store = PredictionStore(db_path)
+    store.save_prediction(prediction)
+    store.close()
+
+    print("=" * 70)
+    print("SHADOW PREDICTION RECORDED -- NOT AN ORDER (tracked for later evaluation only)")
+    print("=" * 70)
+    print(f"Prediction ID:  {prediction.prediction_id}")
+    print(f"Decision ID:    {prediction.decision_id}")
+    print(f"Symbol:         {prediction.symbol}")
+    print(f"Entry:          {prediction.entry_price:.2f} (at {prediction.entry_time.isoformat()})")
+    print(f"Stop:           {prediction.stop_price:.2f}")
+    print(f"Target:         {prediction.target_price:.2f}")
+    print(f"Horizon:        {prediction.horizon_bars} bars ({prediction.interval})")
+    print(f"Database:       {db_path}")
+    print("\nThis is a hypothetical shadow prediction, tracked whether or not you trade it.")
+    print("Run `python main.py evaluate` later to check its outcome against real subsequent market data.")
+
+
+def run_evaluate_command(args: argparse.Namespace) -> None:
+    from backtesting.cache import CachedMarketDataProvider
+    from market.data_provider import get_market_data_provider
+    from predictions.store import PredictionStore
+    from predictions.tracker import evaluate_prediction, summarize_predictions
+
+    db_path = args.db or DEFAULT_PREDICTIONS_DB_PATH
+    store = PredictionStore(db_path)
+    pending = store.list_predictions_needing_evaluation()
+    provider = CachedMarketDataProvider(get_market_data_provider())
+
+    print("=" * 70)
+    print("SHADOW PREDICTION EVALUATION -- NOT AN ORDER (outcome monitoring only)")
+    print("=" * 70)
+    print(f"Database:                       {db_path}")
+    print(f"Predictions needing evaluation: {len(pending)}\n")
+
+    for prediction in pending:
+        logger.info("Evaluating prediction %s (%s)", prediction.prediction_id, prediction.symbol)
+        evaluation = evaluate_prediction(prediction, provider=provider, period=args.period)
+        store.save_evaluation(evaluation)
+        print(f"{prediction.symbol:10s} {prediction.prediction_id[:12]}  {evaluation.outcome.value:18s} {evaluation.detail}")
+
+    summary = summarize_predictions(store.list_all_evaluations())
+    store.close()
+
+    print("\nSummary (latest evaluation per prediction):")
+    print(f"  Total:             {summary.total_predictions}")
+    print(f"  Active:            {summary.active}")
+    print(f"  Target hit:        {summary.target_hit}")
+    print(f"  Stop hit:          {summary.stop_hit}")
+    print(f"  Expired:           {summary.expired}")
+    print(f"  Insufficient data: {summary.insufficient_data}")
+    print(f"  Win rate:          {f'{summary.win_rate:.1%}' if summary.win_rate is not None else 'n/a (nothing resolved yet)'}")
+    print(f"  Average return:    {f'{summary.average_return:+.2%}' if summary.average_return is not None else 'n/a'}")
+    print(f"  Profit factor:     {f'{summary.profit_factor:.2f}' if summary.profit_factor is not None else 'n/a'}")
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -1174,6 +1272,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     size_parser.add_argument("--consecutive-loss-hard-limit", type=int, default=default_risk.consecutive_loss_hard_limit, help=f"Losing-streak threshold that DOES reject outright (default: {default_risk.consecutive_loss_hard_limit}).")
     size_parser.add_argument("--min-risk-reward", type=float, default=default_risk.min_risk_reward, help=f"Minimum acceptable signal risk/reward (default: {default_risk.min_risk_reward}).")
 
+    predict_parser = subparsers.add_parser(
+        "predict",
+        help=(
+            "Phase 23: record a shadow prediction from the latest BUY decision for a symbol -- tracked "
+            "for later outcome evaluation whether or not you trade it. NOT an order."
+        ),
+    )
+    predict_parser.add_argument("--symbol", required=True, help="Ticker to predict on (e.g. AAPL, RELIANCE.NS).")
+    predict_parser.add_argument("--decision-db", type=str, default=None, help=f"Read the latest decision from this path (default: {DEFAULT_DECISION_DB_PATH}).")
+    predict_parser.add_argument("--period", default="6mo", help="Historical window to fetch for the current market context (default: 6mo).")
+    predict_parser.add_argument("--interval", default="1d", help="Bar interval, also used for later evaluation (default: 1d).")
+    predict_parser.add_argument("--horizon-bars", type=int, default=20, help="Bars after entry before an unresolved prediction is marked EXPIRED (default: 20).")
+    predict_parser.add_argument("--db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
+
+    evaluate_parser = subparsers.add_parser(
+        "evaluate",
+        help=(
+            "Phase 23: check real subsequent market data against every open shadow prediction "
+            "(TARGET_HIT/STOP_HIT/EXPIRED/ACTIVE), and print a win-rate/return/profit-factor summary."
+        ),
+    )
+    evaluate_parser.add_argument("--db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
+    evaluate_parser.add_argument("--period", default="1y", help="Historical window to fetch per symbol when checking for a resolution (default: 1y).")
+
     return parser.parse_args(argv)
 
 
@@ -1203,6 +1325,10 @@ def main() -> None:
             run_decide_command(args)
         elif args.command == "size":
             run_size_command(args)
+        elif args.command == "predict":
+            run_predict_command(args)
+        elif args.command == "evaluate":
+            run_evaluate_command(args)
         else:
             run_analyze_command(args)
     except _CONTROLLED_ERRORS as exc:

@@ -1,0 +1,197 @@
+<title>Phase 23 Shadow Prediction</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+  :root {
+    --bg: #0b0f14; --surface: #121922; --surface-2: #17202b; --border: #253140; --border-soft: #1c2530;
+    --text: #dbe4ec; --text-muted: #8ca0b3; --text-dim: #5f7284;
+    --accent: #4fd1c5; --accent-soft: #1b3a38;
+    --warn: #e8b84b; --warn-soft: #3a3016;
+    --good: #34d399; --good-soft: #123326;
+    --bad: #f87171; --bad-soft: #3a1a1a;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15.5px; line-height: 1.65; margin: 0; padding: 0 0 80px 0; }
+  ::selection { background: var(--accent-soft); color: var(--accent); }
+  a { color: var(--accent); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 28px; }
+  header.hero { border-bottom: 1px solid var(--border); padding: 56px 0 36px 0; background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%); }
+  .eyebrow { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px 0; }
+  h1 { font-family: var(--mono); font-weight: 600; font-size: clamp(26px, 4vw, 38px); line-height: 1.18; margin: 0 0 14px 0; text-wrap: balance; letter-spacing: -0.01em; }
+  .hero-sub { color: var(--text-muted); font-size: 16.5px; max-width: 66ch; margin: 0 0 28px 0; }
+  .status-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill { font-family: var(--mono); font-size: 12.5px; font-weight: 500; letter-spacing: 0.02em; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
+  .pill-good { color: var(--good); background: var(--good-soft); border-color: #16472f; }
+  .pill-neutral { color: var(--text-muted); background: var(--surface-2); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  nav.toc { max-width: 960px; margin: 0 auto; padding: 22px 28px; display: flex; flex-wrap: wrap; gap: 4px 18px; font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--border-soft); }
+  nav.toc a { color: var(--text-dim); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
+  main { padding-top: 8px; }
+  section { padding: 44px 0; border-bottom: 1px solid var(--border-soft); }
+  section:last-of-type { border-bottom: none; }
+  .section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  .section-num { font-family: var(--mono); color: var(--text-dim); font-size: 14px; min-width: 26px; }
+  h2 { font-family: var(--mono); font-size: 19px; font-weight: 600; margin: 0; color: var(--text); letter-spacing: -0.01em; }
+  h3 { font-family: var(--sans); font-size: 15.5px; font-weight: 600; color: var(--accent); margin: 26px 0 10px 0; }
+  p { margin: 0 0 14px 0; color: var(--text); max-width: 74ch; }
+  p.muted { color: var(--text-muted); }
+  ul, ol { margin: 0 0 14px 0; padding-left: 22px; max-width: 72ch; }
+  li { margin-bottom: 6px; }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; background: var(--surface-2); border: 1px solid var(--border-soft); padding: 1px 6px; border-radius: 3px; color: #a8d8f0; }
+  .flow { font-family: var(--mono); font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; overflow-x: auto; color: var(--text-muted); line-height: 1.9; white-space: pre; margin: 16px 0; }
+  .flow .node { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 14px 0; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.mono, td code { font-family: var(--mono); }
+  td strong { color: var(--text); font-weight: 500; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin: 18px 0; }
+  .stat { background: var(--surface); padding: 16px 18px; }
+  .stat .n { font-family: var(--mono); font-size: 24px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; margin: 14px 0; }
+  .card h4 { font-family: var(--mono); font-size: 13.5px; color: var(--text); margin: 0 0 8px 0; }
+  .badge { font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.03em; white-space: nowrap; }
+  .badge-verified { background: var(--good-soft); color: var(--good); }
+  .badge-na { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+  .callout { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 14px 18px; border-radius: 0 6px 6px 0; margin: 18px 0; color: #f0dca3; font-size: 14px; }
+  .callout p { margin: 0; color: inherit; }
+  .kv-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; font-size: 14px; margin: 14px 0; }
+  .kv-list dt { color: var(--text-dim); font-family: var(--mono); font-size: 12.5px; padding-top: 2px; }
+  .kv-list dd { margin: 0; color: var(--text); }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="light"]) {
+      --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+      --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+      --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+    }
+    :root:not([data-theme="light"]) code, :root:not([data-theme="light"]) .mono { color: #0f5c66; }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+    --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+    --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+  }
+  :root[data-theme="light"] code, :root[data-theme="light"] .mono { color: #0f5c66; }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Phase 23 &mdash; Shadow Prediction &amp; Continuous Evaluation</p>
+    <h1>The System Keeps Score, Whether You Trade or Not</h1>
+    <p class="hero-sub">A new <code>predictions/</code> package records what a BUY decision implied (entry/stop/target), then checks real subsequent market data against it &mdash; whether or not the user ever traded it. Every prediction is immutable; what later happens to it is a separate, appended row, never a rewrite. This is the roadmap's own "core requirement": the system keeps learning even at zero trades.</p>
+    <div class="status-row">
+      <span class="pill pill-good"><span class="dot"></span>PREDICTIONS ARE IMMUTABLE -- OUTCOMES ARE APPENDED, NEVER OVERWRITTEN</span>
+      <span class="pill pill-good"><span class="dot"></span>REUSES backtesting.execution.check_exit VERBATIM</span>
+      <span class="pill pill-neutral">44 NEW TESTS, 747 TOTAL</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#git">Git</a>
+  <a href="#scope">Scope</a>
+  <a href="#design">What was built</a>
+  <a href="#states">Outcome states: five produced, five recognized</a>
+  <a href="#reuse">What was reused, not rewritten</a>
+  <a href="#audit">Self-audit: adversarial edge cases checked</a>
+  <a href="#tests">Tests</a>
+  <a href="#safety">Safety</a>
+  <a href="#limitations">Known limitations, stated honestly</a>
+</nav>
+
+<main class="wrap">
+
+<section id="git">
+  <div class="section-head"><span class="section-num">01</span><h2>Git state</h2></div>
+  <div class="kv-list">
+    <dt>Base</dt><dd class="mono">main (Phase 16-22 + roadmap, merged)</dd>
+    <dt>Branch</dt><dd class="mono">phase-23-shadow-prediction</dd>
+    <dt>New package</dt><dd class="mono">predictions/ (5 files) + 3 new test files, main.py `predict`/`evaluate` subcommands</dd>
+  </div>
+</section>
+
+<section id="scope">
+  <div class="section-head"><span class="section-num">02</span><h2>Scope</h2></div>
+  <p><strong>In scope:</strong> recording a BUY decision's implied entry/stop/target as an immutable <code>PredictionRecord</code>; monitoring real subsequent market data to resolve it (<code>TARGET_HIT</code>/<code>STOP_HIT</code>/<code>EXPIRED</code>/<code>ACTIVE</code>/<code>INSUFFICIENT_DATA</code>), each check appended as a new <code>PredictionEvaluation</code>; a basic aggregate summary (win rate, average return, profit factor) &mdash; the roadmap's own target long-term architecture lists "evaluation" and "performance metrics" as <code>predictions/</code>'s own subcomponents, distinct from a separate future <code>learning/</code> package.</p>
+  <p><strong>Explicitly out of scope:</strong> cross-strategy comparison, confidence calibration, and anything claiming actual "learning" in a stronger sense &mdash; the roadmap's own section 8 ("What Learning Means") places that at Level 2/3, which is Phase 24's job ("Performance Learning System"), not this one. No order, real or paper, anywhere in this phase.</p>
+</section>
+
+<section id="design">
+  <div class="section-head"><span class="section-num">03</span><h2>What was built</h2></div>
+  <div class="flow">predictions/
+  errors.py    <span class="node">PredictionUnavailableError</span> -- mirrors risk.sizing.SizingUnavailableError's role
+  models.py    <span class="node">PredictionOutcomeState</span>, <span class="node">PredictionRecord</span>, <span class="node">PredictionEvaluation</span>, <span class="node">PredictionSummary</span>
+  tracker.py   <span class="node">create_prediction()</span>, <span class="node">evaluate_prediction()</span>, <span class="node">summarize_predictions()</span>
+  store.py     <span class="node">PredictionStore</span> -- TWO linked, append-only tables (predictions, prediction_evaluations)</div>
+  <p><code>main.py predict --symbol X</code> reads the latest BUY <code>Decision</code>, builds its <code>Signal</code> via the unchanged <code>risk.sizing.build_signal_for_buy</code> (Phase 22), records a <code>PredictionRecord</code>, and persists it. <code>main.py evaluate</code> loads every prediction still needing a check (never evaluated, or last seen <code>ACTIVE</code>), resolves each against real market data via the same <code>CachedMarketDataProvider</code> pattern <code>backtest</code>/<code>paper</code>/<code>scan</code> already use, appends a new <code>PredictionEvaluation</code> row for each, and prints a <code>summarize_predictions()</code> roll-up.</p>
+  <p><code>predictions/store.py</code> is the first genuinely two-table store among this session's new packages: <code>market_intelligence</code>/<code>research</code>/<code>decision_engine</code>'s stores have all been single append-only tables so far. Here, a <code>PredictionRecord</code> and its (possibly many, over time) <code>PredictionEvaluation</code> rows are linked by <code>prediction_id</code> &mdash; the closest existing precedent is <code>paper/store.py</code>'s own signals/risk_decisions/orders/fills/positions/trades split. No <code>update_prediction</code> or <code>update_evaluation</code> method exists anywhere in the class, asserted directly by a test.</p>
+</section>
+
+<section id="states">
+  <div class="section-head"><span class="section-num">04</span><h2>Outcome states: five produced, five recognized</h2></div>
+  <p>Roadmap section 7.3 suggests ten outcome states. This phase's evaluation logic can only honestly produce five of them from real subsequent market data:</p>
+  <div class="table-wrap"><table>
+    <tr><th>State</th><th>Status</th><th>Why</th></tr>
+    <tr><td><code>ACTIVE</code></td><td><span class="badge badge-verified">PRODUCED</span></td><td>Neither target nor stop hit yet, horizon not reached, and/or not enough bars fetched yet to know</td></tr>
+    <tr><td><code>TARGET_HIT</code> / <code>STOP_HIT</code></td><td><span class="badge badge-verified">PRODUCED</span></td><td>Resolved by walking forward through real subsequent bars</td></tr>
+    <tr><td><code>EXPIRED</code></td><td><span class="badge badge-verified">PRODUCED</span></td><td>Horizon reached with neither hit</td></tr>
+    <tr><td><code>INSUFFICIENT_DATA</code></td><td><span class="badge badge-verified">PRODUCED</span></td><td>The market data fetch itself failed</td></tr>
+    <tr><td><code>MISSED_ENTRY</code></td><td><span class="badge badge-na">RECOGNIZED, NOT PRODUCED</span></td><td>Assumes a limit-style order that might never fill; every prediction here enters immediately at the sizing bar's own close</td></tr>
+    <tr><td><code>INVALIDATED</code> / <code>PARTIAL_SUCCESS</code> / <code>CANCELLED</code> / <code>PENDING</code></td><td><span class="badge badge-na">RECOGNIZED, NOT PRODUCED</span></td><td>Each needs a judgment call this project has no evidence-based rule for yet</td></tr>
+  </table></div>
+  <p class="muted">All ten remain real enum members (a typo or an unhandled future state fails clearly) &mdash; the same "recognized future extension, never silently faked" posture <code>market_data.universe.py</code> already applies to unimplemented NIFTY-index modes.</p>
+</section>
+
+<section id="reuse">
+  <div class="section-head"><span class="section-num">05</span><h2>What was reused, not rewritten</h2></div>
+  <ul>
+    <li><code>backtesting.execution.check_exit</code> / <code>OpenPosition</code> &mdash; called <strong>directly</strong> for the same-bar-ambiguity stop/target check ("if a single bar's range could have hit both, the stop wins"). Not reimplemented; a dedicated test (<code>test_evaluate_prediction_same_bar_ambiguity_reuses_check_exits_stop_wins_rule</code>) constructs exactly that ambiguous bar and asserts the shared function's own answer comes through unchanged.</li>
+    <li><code>risk.sizing.build_signal_for_buy</code> (Phase 22) &mdash; the sole source of a prediction's entry/stop/target; <code>predictions/</code> never re-derives price-level math.</li>
+    <li><code>market.data_provider.MarketDataProvider</code> Protocol / <code>backtesting.cache.CachedMarketDataProvider</code> &mdash; the existing historical-data path, wired at the CLI layer exactly as <code>backtest</code>/<code>paper run</code>/<code>scan</code> already do; no new data source.</li>
+    <li><code>decision_engine.store.DecisionStore</code> (Phase 21) &mdash; <code>predict</code> reads the latest decision from it unchanged, the same composition pattern <code>decide</code> and <code>size</code> already use for their own upstream stores.</li>
+    <li><code>risk.sizing.SizingUnavailableError</code>'s posture &mdash; <code>PredictionUnavailableError</code> mirrors it exactly (a non-BUY label or a symbol mismatch fails closed with a clear error, never a fabricated prediction).</li>
+  </ul>
+</section>
+
+<section id="audit">
+  <div class="section-head"><span class="section-num">06</span><h2>Self-audit: adversarial edge cases checked</h2></div>
+  <ul>
+    <li><strong>Division by zero in win rate / average return / profit factor.</strong> All three are explicitly <code>None</code>-guarded for zero resolved predictions and (for profit factor) zero losing predictions &mdash; covered by three dedicated tests, including the fully-empty-input case.</li>
+    <li><strong>A hit on the exact horizon bar.</strong> The loop checks <code>check_exit</code> BEFORE the horizon-reached check on every iteration, so a target/stop hit on the last allowed bar reports <code>TARGET_HIT</code>/<code>STOP_HIT</code>, never <code>EXPIRED</code> &mdash; verified directly (<code>test_evaluate_prediction_hit_on_the_exact_horizon_bar_takes_priority_over_expiration</code>), not just assumed from reading the code.</li>
+    <li><strong>No bars exist yet after entry_time.</strong> Explicitly handled before the walk-forward loop even starts: <code>ACTIVE</code>, <code>bars_observed=0</code>, zero excursions &mdash; not a crash, not a false <code>EXPIRED</code>.</li>
+    <li><strong>Double-counting or skipping a boundary bar.</strong> Filtering uses strict <code>&gt;</code> on <code>entry_time</code> (never <code>&gt;=</code>), so the entry bar itself is excluded exactly once and every later bar is visited exactly once &mdash; both <code>entry_time</code> and the fetched frame's index are naive-normalized the same way <code>market/indicators.py</code> already does, so no timezone-mismatch could silently duplicate or drop a bar.</li>
+    <li><strong>A re-evaluated, since-resolved prediction being double-counted in the summary.</strong> <code>summarize_predictions</code> deduplicates to each prediction's LATEST evaluation by <code>evaluated_at</code> before tallying anything &mdash; verified with a dedicated test using an older <code>ACTIVE</code> row and a newer <code>TARGET_HIT</code> row for the same prediction.</li>
+  </ul>
+</section>
+
+<section id="tests">
+  <div class="section-head"><span class="section-num">07</span><h2>Tests</h2></div>
+  <p>44 new tests (pytest-collected count, verified directly via <code>pytest --collect-only</code> per file rather than assumed, after this session was burned twice already by trusting an assumed number): 20 in <code>test_predictions_tracker.py</code> (creation validation, every outcome state including the same-bar-ambiguity and exact-horizon-boundary cases, excursion tracking, and the full <code>summarize_predictions</code> math), 7 in <code>test_predictions_models.py</code> (enum completeness for both the produced and recognized-but-unproduced state sets, immutability, ID uniqueness), 10 in <code>test_predictions_store.py</code> (the two-table linked design, <code>list_predictions_needing_evaluation</code>'s real behavior against this venv's actual bundled sqlite3, no update methods, reconnect persistence), and 7 CLI tests (arg parsing for both subcommands, missing-decision handling, one end-to-end <code>predict</code> run through real stores, and a zero-predictions <code>evaluate</code> run). No real network or Ollama call anywhere in the unit suite, and no <code>data/market/</code> cache files are written by any test (verified via <code>git status</code> immediately after the run). Full regression: 747 passed, 0 failed.</p>
+</section>
+
+<section id="safety">
+  <div class="section-head"><span class="section-num">08</span><h2>Safety</h2></div>
+  <ul>
+    <li>Zero imports of <code>paper/</code> or any broker adapter anywhere in <code>predictions/</code>.</li>
+    <li>Both CLI commands print explicitly that no trade, real or paper, is placed. A prediction is a hypothetical record tracked for its own sake &mdash; converting a BUY decision into an actual paper trade remains the entirely separate, unchanged <code>paper</code>/<code>paper-live</code> path.</li>
+    <li>No credentials used or referenced &mdash; this phase only reads historical OHLCV through the already-audited Yahoo provider path.</li>
+  </ul>
+</section>
+
+<section id="limitations">
+  <div class="section-head"><span class="section-num">09</span><h2>Known limitations, stated honestly</h2></div>
+  <ul>
+    <li><strong>BUY only, same as Phase 22.</strong> WATCH/AVOID/NO_ACTION correctly have no price levels to track; EXIT is a "close what you hold" instruction, not a fresh prediction to monitor.</li>
+    <li><strong>No automatic scheduling.</strong> <code>evaluate</code> must be run by the user (or an external scheduler) periodically; this phase does not add a background loop or daemon.</li>
+    <li><strong><code>list_predictions_needing_evaluation</code> is O(n) in Python, not a single SQL window-function query.</strong> A window-function approach was considered but the simpler, directly-verified Python-side approach (list predictions, check each one's latest evaluation) was chosen deliberately for this phase's scale (a local, single-user tool) rather than trusting an unverified SQL feature.</li>
+    <li><strong>The aggregate summary is Level-1 only</strong> (win rate, average return, profit factor) &mdash; no market-condition-aware comparison, no confidence calibration. That is explicitly Phase 24's job.</li>
+  </ul>
+</section>
+
+</main>
