@@ -1,0 +1,35 @@
+# Phase 29 -- a small, illustrative starter watchlist of well-known,
+# long-established, liquid NSE large-caps.
+#
+# THIS IS NOT AN OFFICIAL NIFTY 50/100/500 CONSTITUENT LIST. Index
+# membership changes over time (periodic rebalancing), and this project
+# integrates no live, verifiable index-membership source -- shipping a
+# list under that name would claim an accuracy this project cannot back
+# up. See market_data/universe.py's module docstring for the full
+# reasoning. This file exists only so a new operator has a real,
+# ready-to-use `--watchlist-file` to start from instead of typing
+# symbols by hand -- replace it with your own broker/exchange-sourced
+# list before relying on it for anything beyond initial exploration.
+#
+# Usage:
+#   python main.py scan --watchlist-file market_data/watchlists/starter_nse.yaml
+#   python main.py shadow-run --watchlist-file market_data/watchlists/starter_nse.yaml
+
+market_universe:
+  mode: watchlist
+  symbols:
+    - RELIANCE.NS
+    - TCS.NS
+    - HDFCBANK.NS
+    - ICICIBANK.NS
+    - INFY.NS
+    - HINDUNILVR.NS
+    - ITC.NS
+    - SBIN.NS
+    - BHARTIARTL.NS
+    - KOTAKBANK.NS
+    - LT.NS
+    - AXISBANK.NS
+    - ASIANPAINT.NS
+    - MARUTI.NS
+    - SUNPHARMA.NS

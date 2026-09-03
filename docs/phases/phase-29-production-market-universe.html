@@ -1,0 +1,186 @@
+<title>Phase 29 Production Market Universe</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+  :root {
+    --bg: #0b0f14; --surface: #121922; --surface-2: #17202b; --border: #253140; --border-soft: #1c2530;
+    --text: #dbe4ec; --text-muted: #8ca0b3; --text-dim: #5f7284;
+    --accent: #4fd1c5; --accent-soft: #1b3a38;
+    --warn: #e8b84b; --warn-soft: #3a3016;
+    --good: #34d399; --good-soft: #123326;
+    --bad: #f87171; --bad-soft: #3a1a1a;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15.5px; line-height: 1.65; margin: 0; padding: 0 0 80px 0; }
+  ::selection { background: var(--accent-soft); color: var(--accent); }
+  a { color: var(--accent); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 28px; }
+  header.hero { border-bottom: 1px solid var(--border); padding: 56px 0 36px 0; background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%); }
+  .eyebrow { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px 0; }
+  h1 { font-family: var(--mono); font-weight: 600; font-size: clamp(26px, 4vw, 38px); line-height: 1.18; margin: 0 0 14px 0; text-wrap: balance; letter-spacing: -0.01em; }
+  .hero-sub { color: var(--text-muted); font-size: 16.5px; max-width: 66ch; margin: 0 0 28px 0; }
+  .status-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill { font-family: var(--mono); font-size: 12.5px; font-weight: 500; letter-spacing: 0.02em; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
+  .pill-good { color: var(--good); background: var(--good-soft); border-color: #16472f; }
+  .pill-neutral { color: var(--text-muted); background: var(--surface-2); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  nav.toc { max-width: 960px; margin: 0 auto; padding: 22px 28px; display: flex; flex-wrap: wrap; gap: 4px 18px; font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--border-soft); }
+  nav.toc a { color: var(--text-dim); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
+  main { padding-top: 8px; }
+  section { padding: 44px 0; border-bottom: 1px solid var(--border-soft); }
+  section:last-of-type { border-bottom: none; }
+  .section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  .section-num { font-family: var(--mono); color: var(--text-dim); font-size: 14px; min-width: 26px; }
+  h2 { font-family: var(--mono); font-size: 19px; font-weight: 600; margin: 0; color: var(--text); letter-spacing: -0.01em; }
+  h3 { font-family: var(--sans); font-size: 15.5px; font-weight: 600; color: var(--accent); margin: 26px 0 10px 0; }
+  p { margin: 0 0 14px 0; color: var(--text); max-width: 74ch; }
+  p.muted { color: var(--text-muted); }
+  ul, ol { margin: 0 0 14px 0; padding-left: 22px; max-width: 72ch; }
+  li { margin-bottom: 6px; }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; background: var(--surface-2); border: 1px solid var(--border-soft); padding: 1px 6px; border-radius: 3px; color: #a8d8f0; }
+  .flow { font-family: var(--mono); font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; overflow-x: auto; color: var(--text-muted); line-height: 1.9; white-space: pre; margin: 16px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 14px 0; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.mono, td code { font-family: var(--mono); }
+  td strong { color: var(--text); font-weight: 500; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; margin: 14px 0; }
+  .card h4 { font-family: var(--mono); font-size: 13.5px; color: var(--text); margin: 0 0 8px 0; }
+  .badge { font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.03em; white-space: nowrap; }
+  .badge-verified { background: var(--good-soft); color: var(--good); }
+  .badge-na { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+  .callout { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 14px 18px; border-radius: 0 6px 6px 0; margin: 18px 0; color: #f0dca3; font-size: 14px; }
+  .callout p { margin: 0; color: inherit; }
+  .kv-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; font-size: 14px; margin: 14px 0; }
+  .kv-list dt { color: var(--text-dim); font-family: var(--mono); font-size: 12.5px; padding-top: 2px; }
+  .kv-list dd { margin: 0; color: var(--text); }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="light"]) {
+      --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+      --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+      --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+    }
+    :root:not([data-theme="light"]) code, :root:not([data-theme="light"]) .mono { color: #0f5c66; }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+    --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+    --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+  }
+  :root[data-theme="light"] code, :root[data-theme="light"] .mono { color: #0f5c66; }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Phase 29 &mdash; Production Market Universe</p>
+    <h1>Symbols Now Know What Exchange They're On</h1>
+    <p class="hero-sub">Extends the existing Phase 18 <code>MarketUniverse</code> (unchanged watchlist mode) with symbol validation, NSE/BSE exchange derivation, best-effort Dhan broker-instrument-ID enrichment (via the already-existing, credential-free <code>DhanInstrumentMap</code>), a new <code>universe</code> CLI command to inspect it, and a small, honestly-labeled starter watchlist. Deliberately does NOT implement <code>mode: nifty50</code> &mdash; see &sect;02 for why.</p>
+    <div class="status-row">
+      <span class="pill pill-good"><span class="dot"></span>REAL SERVICE VERIFIED (Dhan instrument IDs)</span>
+      <span class="pill pill-good"><span class="dot"></span>ONE REAL BUG FOUND &amp; FIXED (unvalidated comma/whitespace symbols)</span>
+      <span class="pill pill-neutral">23 NEW TESTS, 871 TOTAL</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#git">Git</a>
+  <a href="#reconciliation">Reconciliation: why not NIFTY 50</a>
+  <a href="#scope">Scope</a>
+  <a href="#design">What was built</a>
+  <a href="#bugs">Bug found and fixed</a>
+  <a href="#evidence">Evidence</a>
+  <a href="#tests">Tests</a>
+  <a href="#safety">Safety</a>
+  <a href="#limitations">Known limitations</a>
+</nav>
+
+<main class="wrap">
+
+<section id="git">
+  <div class="section-head"><span class="section-num">01</span><h2>Git state</h2></div>
+  <div class="kv-list">
+    <dt>Base</dt><dd class="mono">main @ 14874a0 (Phase 28 merged)</dd>
+    <dt>Branch</dt><dd class="mono">phase-29-production-market-universe</dd>
+    <dt>Modified</dt><dd class="mono">market_data/universe.py, main.py</dd>
+    <dt>New file</dt><dd class="mono">market_data/watchlists/starter_nse.yaml</dd>
+    <dt>New tests</dt><dd class="mono">tests/test_cli_universe.py; additions to tests/test_market_data_universe.py</dd>
+  </div>
+</section>
+
+<section id="reconciliation">
+  <div class="section-head"><span class="section-num">02</span><h2>Reconciliation: why not NIFTY 50</h2></div>
+  <p>The operator's Phase 29 spec asks for "index-based universe architecture" and a "liquid-stock starter universe." Phase 18 already left <code>nifty50</code>/<code>nifty100</code>/<code>nifty200</code>/<code>nifty500</code> as recognized-but-unimplemented modes, explicitly reasoned: index membership changes over time via periodic rebalancing, and this project integrates no live, verifiable index-membership source. Implementing <code>mode: nifty50</code> backed by a bundled static list would mean shipping a list under an official-sounding name this project cannot verify is current or accurate &mdash; a direct violation of the project's own "never claim real-service verification from something that isn't" discipline (roadmap &sect;25/&sect;26).</p>
+  <p>This phase instead delivers everything else the spec asked for &mdash; validation, exchange metadata, instrument identifiers, a bounded starter list &mdash; without that specific overclaim. The starter list ships as <code>market_data/watchlists/starter_nse.yaml</code>, explicitly labeled in its own header as "NOT an official NIFTY 50/100/500 constituent list," loadable via the EXISTING <code>--watchlist-file</code> flag every scan/research/decide/shadow-run/schedule command already has &mdash; no new CLI surface needed for that part.</p>
+</section>
+
+<section id="scope">
+  <div class="section-head"><span class="section-num">03</span><h2>Scope</h2></div>
+  <p><strong>In scope:</strong> symbol validation (reject a comma-joined or internally-whitespace-containing entry with a clear message), <code>exchange_for_symbol</code> (NSE/BSE/OTHER from the Yahoo suffix convention), <code>InstrumentMetadata</code> + <code>MarketUniverse.describe()</code> (best-effort Dhan security ID enrichment, never blocking), a new read-only <code>universe</code> CLI command, and a committed 15-symbol starter watchlist.</p>
+  <p><strong>Explicitly out of scope:</strong> <code>mode: nifty50</code>/100/200/500 (see &sect;02), any new market-data source, any change to scan/research/decide/shadow-run/schedule's own logic.</p>
+</section>
+
+<section id="design">
+  <div class="section-head"><span class="section-num">04</span><h2>What was built</h2></div>
+  <div class="flow">python main.py universe --symbols RELIANCE.NS,AAPL --with-dhan-ids
+
+SYMBOL         EXCHANGE DHAN SECURITY ID   DHAN DISPLAY NAME
+RELIANCE.NS    NSE      2885               Reliance Industries
+AAPL           OTHER    not found</div>
+  <p><code>market_data.universe.MarketUniverse.describe(instrument_map=None)</code> is the library function behind it &mdash; every symbol always gets an exchange (a pure, offline derivation), and a Dhan security ID/display name ONLY if a <code>DhanInstrumentMap</code> is supplied and recognizes the symbol. <code>--with-dhan-ids</code> triggers exactly one call to the ALREADY-EXISTING, credential-free <code>DhanInstrumentMap.download()</code> (Phase 15) &mdash; no new download mechanism, no new dependency.</p>
+</section>
+
+<section id="bugs">
+  <div class="section-head"><span class="section-num">05</span><h2>Bug found and fixed</h2></div>
+  <div class="card">
+    <h4>`from_watchlist` accepted a comma-joined or whitespace-containing single symbol silently</h4>
+    <p class="muted">Found by re-reading the existing Phase 18 validation adversarially: passing <code>"AAPL,MSFT"</code> as ONE list element (a realistic paste/typo error &mdash; e.g. forgetting to <code>.split(',')</code> a comma-joined string before wrapping it in a list) previously produced a single bogus symbol that only failed much later, opaquely, at the Yahoo fetch stage inside <code>scan</code>/<code>shadow-run</code>'s own per-symbol try/except (silently logged as one more "excluded" or "FAILED" entry, easy to miss in a large watchlist run). Fixed by rejecting any symbol containing a comma or internal whitespace at <code>from_watchlist</code> construction time, with a message naming the actual mistake. Regression tests added; confirmed the existing leading/trailing-whitespace normalization (already handled by <code>.strip()</code>) still passes.</p>
+  </div>
+</section>
+
+<section id="evidence">
+  <div class="section-head"><span class="section-num">06</span><h2>Evidence</h2></div>
+  <p>One real, bounded run against Dhan's real public instrument master (no credentials):</p>
+  <div class="flow">$ python main.py universe --symbols RELIANCE.NS,TCS.NS,AAPL --with-dhan-ids
+RELIANCE.NS    NSE      2885               Reliance Industries
+TCS.NS         NSE      11536              Tata Consultancy Services
+AAPL           OTHER    not found</div>
+  <p>RELIANCE.NS resolving to security_id 2885 independently corroborates the exact value <code>live/dhan/instruments.py</code>'s own module docstring already documented as verified on 2026-09-01 &mdash; a real, consistent cross-check, not a coincidence of a fixture.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Claim</th><th>Classification</th><th>Basis</th></tr>
+    <tr><td>Exchange derivation (NSE/BSE/OTHER)</td><td><span class="badge badge-verified">LOCAL/DETERMINISTIC TEST VERIFIED</span></td><td>Pure function, no I/O &mdash; parametrized test suite</td></tr>
+    <tr><td>Dhan instrument-ID enrichment against the real public instrument master</td><td><span class="badge badge-verified">REAL SERVICE VERIFIED</span></td><td>The run above &mdash; real HTTP download, real CSV, real matches</td></tr>
+    <tr><td>Starter watchlist symbols are all valid, loadable, NSE-suffixed</td><td><span class="badge badge-verified">LOCAL/DETERMINISTIC TEST VERIFIED</span></td><td><code>test_starter_nse_watchlist_file_loads_and_is_all_nse</code></td></tr>
+    <tr><td>Starter watchlist symbols are official NIFTY 50 constituents</td><td><span class="badge badge-na">NOT CLAIMED</span></td><td>Deliberately not claimed &mdash; see &sect;02</td></tr>
+  </table></div>
+</section>
+
+<section id="tests">
+  <div class="section-head"><span class="section-num">08</span><h2>Tests</h2></div>
+  <p>23 new tests: symbol validation (comma/whitespace rejection, leading/trailing-whitespace non-regression), exchange derivation (parametrized across NSE/BSE/OTHER/no-suffix), instrument metadata enrichment (resolved, unresolved, non-Indian symbol, no-map-supplied), <code>describe()</code> ordering, the starter watchlist file itself, and full CLI wiring (argparse defaults, missing-input rejection, printed output, <code>--with-dhan-ids</code> with a faked instrument map, <code>--refresh-instrument-map</code> flag pass-through). No real network in the unit suite. Full regression: <strong>871 passed, 0 failed</strong> (848 baseline + 23 new).</p>
+</section>
+
+<section id="safety">
+  <div class="section-head"><span class="section-num">09</span><h2>Safety</h2></div>
+  <ul>
+    <li><code>universe</code> is entirely read-only metadata description &mdash; no order, no recommendation, no persistence, no risk/decision logic anywhere in this phase.</li>
+    <li><code>--with-dhan-ids</code> reuses the EXISTING, already-tested, credential-free <code>DhanInstrumentMap.download()</code> &mdash; no new network mechanism, no credentials read or required.</li>
+    <li><code>tests/test_dhan_no_real_orders.py</code> / <code>tests/test_broker.py</code> / <code>tests/test_dhan_instruments.py</code>: all passed before and after this phase's changes.</li>
+  </ul>
+</section>
+
+<section id="limitations">
+  <div class="section-head"><span class="section-num">10</span><h2>Known limitations, stated honestly</h2></div>
+  <ul>
+    <li><strong>No index-membership mode implemented.</strong> Deliberate &mdash; see &sect;02. <code>nifty50</code>/100/200/500 remain recognized-but-unimplemented, exactly as Phase 18 left them.</li>
+    <li><strong>The starter watchlist is illustrative, not authoritative.</strong> 15 well-known, long-established NSE large-caps chosen for stability of their ticker symbols, not sourced from any live index feed &mdash; stated explicitly in the file's own header.</li>
+    <li><strong>Company "name" metadata is Dhan's own <code>SEM_CUSTOM_SYMBOL</code> field</strong> (e.g. "Reliance Industries"), not a separately verified corporate name source &mdash; adequate for display, not for any legal/compliance use.</li>
+  </ul>
+</section>
+
+</main>

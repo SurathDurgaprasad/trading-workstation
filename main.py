@@ -44,7 +44,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule")
+_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -1329,6 +1329,52 @@ def run_review_command(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+# `universe` -- Phase 29 production market universe: prints each symbol's
+# derived exchange (NSE/BSE/OTHER, from the Yahoo suffix convention) and,
+# optionally, its Dhan broker instrument identifier (via the existing,
+# credential-free DhanInstrumentMap.download() -- read-only metadata,
+# not a live feed). No trading logic, no recommendation, no order.
+# --------------------------------------------------------------------------
+
+
+def run_universe_command(args: argparse.Namespace) -> None:
+    from market_data.universe import MarketUniverse
+
+    if args.watchlist_file:
+        universe = MarketUniverse.from_yaml_file(args.watchlist_file)
+    elif args.symbols:
+        symbols = [s for s in args.symbols.split(",") if s.strip()]
+        universe = MarketUniverse.from_watchlist(symbols)
+    else:
+        print("universe: one of --symbols or --watchlist-file is required.", file=sys.stderr)
+        sys.exit(2)
+
+    instrument_map = None
+    if args.with_dhan_ids:
+        from live.dhan.instruments import DhanInstrumentMap
+
+        logger.info("Downloading Dhan's public instrument master (no credentials required)")
+        instrument_map = DhanInstrumentMap.download(force=args.refresh_instrument_map)
+
+    metadata = universe.describe(instrument_map=instrument_map)
+
+    print("=" * 70)
+    print("MARKET UNIVERSE -- SYMBOL / EXCHANGE / INSTRUMENT METADATA (no trading logic)")
+    print("=" * 70)
+    print(f"Universe:  {universe.mode} ({len(universe)} symbols)")
+    if args.with_dhan_ids:
+        print("Dhan IDs:  resolved via Dhan's public instrument master (no credentials used).")
+    print()
+    print(f"{'SYMBOL':14s} {'EXCHANGE':8s} {'DHAN SECURITY ID':18s} DHAN DISPLAY NAME")
+    for item in metadata:
+        if item.dhan_security_id is not None:
+            security_id = item.dhan_security_id
+        else:
+            security_id = "n/a" if not args.with_dhan_ids else "not found"
+        print(f"{item.symbol:14s} {item.exchange:8s} {security_id:18s} {item.dhan_display_name or ''}")
+
+
+# --------------------------------------------------------------------------
 # `schedule` -- Phase 28 operational scheduling: makes `shadow-run` (and
 # post-market evaluate/learn) capable of running unattended, without
 # reimplementing any of that orchestration -- see scheduler/runner.py's
@@ -1635,6 +1681,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     dashboard_parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1, local-only).")
     dashboard_parser.add_argument("--port", type=int, default=8765, help="Bind port (default: 8765).")
 
+    universe_parser = subparsers.add_parser(
+        "universe",
+        help=(
+            "Phase 29: describe a watchlist's symbol/exchange/instrument metadata "
+            "(NSE/BSE/OTHER, optional Dhan security ID). No trading logic, no recommendation."
+        ),
+    )
+    universe_parser.add_argument("--symbols", type=str, default=None, help="Comma-separated watchlist (e.g. AAPL,MSFT,RELIANCE.NS). Required unless --watchlist-file is given.")
+    universe_parser.add_argument("--watchlist-file", type=str, default=None, help="Path to a YAML file with a top-level `market_universe: {mode: watchlist, symbols: [...]}` key (e.g. market_data/watchlists/starter_nse.yaml).")
+    universe_parser.add_argument("--with-dhan-ids", action="store_true", help="Also resolve each symbol's Dhan security ID via Dhan's public instrument master (one network download, no credentials required; default off).")
+    universe_parser.add_argument("--refresh-instrument-map", action="store_true", help="Force a fresh download of Dhan's instrument master instead of reusing the local cache. Only used with --with-dhan-ids.")
+
     scan_parser = subparsers.add_parser(
         "scan",
         help=(
@@ -1845,6 +1903,8 @@ def main() -> None:
             run_shadow_run_command(args)
         elif args.command == "schedule":
             run_schedule_command(args)
+        elif args.command == "universe":
+            run_universe_command(args)
         else:
             run_analyze_command(args)
     except _CONTROLLED_ERRORS as exc:
