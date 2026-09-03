@@ -2,6 +2,8 @@
 
 A single-user, local-first paper-trading research workstation: deterministic strategy and risk logic, a simulated (and, as of Phase 15, real-market-data-capable) intraday pipeline, a human-approval workflow, a local CLI and dashboard, and an optional local-LLM (Ollama) explanation layer that can narrate a decision but never make one.
 
+As of Phase 18–27, the project also has a second, complementary pipeline for market intelligence and evidence-backed recommendations, entirely separate from — and never touching — the paper-trading execution path above: scan a watchlist, gather real news/sector evidence, produce a deterministic BUY/WATCH/AVOID/EXIT/NO_ACTION label with recorded evidence, preview position sizing against your own (never-hardcoded) capital, record shadow predictions, evaluate them against real subsequent market data, and get a read-only performance report — all chainable in one pass via `shadow-run`. No command in this pipeline can place an order, real or paper.
+
 **Execution is paper-only.** There is no real broker connection, no real credentials configured, and no code path anywhere in this repository capable of placing a real order — order-mutating methods raise unconditionally rather than being merely unimplemented (see `live/dhan/broker_adapter.py`).
 
 **Real market data: verified live, as of Phase 16.** `live/dhan/` implements a real DhanHQ v2 WebSocket market-data feed. As of Phase 16, this has actually been connected to the live service with a real account: real REST calls (`/fundlimit`, `/positions`, `/holdings`), a real WebSocket handshake, real market packets, and real OHLCV bars have all been observed flowing through the unmodified pipeline into strategy invocation. Four real bugs were found and fixed in the process — including a reconnect storm that got the account temporarily rate-limited by Dhan, and a timezone decoding bug in Dhan's own data. **What has not been observed:** a natural trading signal from real market data — the risk engine, human-approval gate, and paper execution have not yet been exercised end-to-end by a real signal (only by the deterministic test suite). See [`docs/phases/phase-16-dhan-real-connectivity.html`](docs/phases/phase-16-dhan-real-connectivity.html) for the full, evidence-labeled breakdown of what is real-service-verified versus deterministic-test-only.
@@ -63,6 +65,24 @@ pip install -r requirements.txt
 python main.py backtest --symbol AAPL
 python main.py paper-live --symbol AAPL --interval 1d --period 1y
 python main.py dashboard
+```
+
+The market-intelligence/recommendation pipeline (Phase 18–27, no order ever placed) in one pass:
+
+```bash
+python main.py shadow-run --symbols AAPL,MSFT,RELIANCE.NS
+```
+
+...or one stage at a time, each persisting its own SQLite history the next stage reads:
+
+```bash
+python main.py scan --symbols AAPL,MSFT,RELIANCE.NS
+python main.py research --symbol AAPL
+python main.py decide --symbol AAPL
+python main.py size --symbol AAPL --initial-capital 100000
+python main.py predict --symbol AAPL
+python main.py evaluate
+python main.py learn
 ```
 
 To try the real Dhan market-data feed instead of the mock replay (still paper execution — see the two caveats above), copy `.env.example` to `.env`, fill in `DHAN_CLIENT_ID`/`DHAN_ACCESS_TOKEN` (never commit that file — it's already gitignored), and:
