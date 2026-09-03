@@ -152,6 +152,39 @@ def test_list_predictions_for_symbol_respects_limit(tmp_path):
     assert len(result) == 2
 
 
+def test_has_prediction_for_entry_true_after_saving_one(tmp_path):
+    store = PredictionStore(tmp_path / "predictions.db")
+    entry_time = datetime(2024, 6, 1)
+    store.save_prediction(_prediction("p1", symbol="AAPL", created_at=entry_time).model_copy(update={"entry_time": entry_time}))
+    result = store.has_prediction_for_entry("AAPL", entry_time)
+    store.close()
+    assert result is True
+
+
+def test_has_prediction_for_entry_false_for_a_different_bar(tmp_path):
+    store = PredictionStore(tmp_path / "predictions.db")
+    store.save_prediction(_prediction("p1", symbol="AAPL").model_copy(update={"entry_time": datetime(2024, 6, 1)}))
+    result = store.has_prediction_for_entry("AAPL", datetime(2024, 6, 2))
+    store.close()
+    assert result is False
+
+
+def test_has_prediction_for_entry_false_for_a_different_symbol(tmp_path):
+    store = PredictionStore(tmp_path / "predictions.db")
+    entry_time = datetime(2024, 6, 1)
+    store.save_prediction(_prediction("p1", symbol="AAPL").model_copy(update={"entry_time": entry_time}))
+    result = store.has_prediction_for_entry("MSFT", entry_time)
+    store.close()
+    assert result is False
+
+
+def test_has_prediction_for_entry_false_when_nothing_recorded(tmp_path):
+    store = PredictionStore(tmp_path / "predictions.db")
+    result = store.has_prediction_for_entry("AAPL", datetime(2024, 6, 1))
+    store.close()
+    assert result is False
+
+
 def test_store_persists_across_reconnect(tmp_path):
     db_path = tmp_path / "predictions.db"
     store = PredictionStore(db_path)

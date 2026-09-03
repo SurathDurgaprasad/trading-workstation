@@ -61,6 +61,20 @@ def create_prediction(
     )
 
 
+ANOMALOUS_BAR_GAP_THRESHOLD = 0.5
+"""Phase 36 -- this project integrates no stock-split/dividend
+adjustment source (YahooFinanceProvider fetches with auto_adjust=False).
+A split between a prediction's entry and its evaluation would make the
+raw, un-adjusted post-split price look like a catastrophic (and entirely
+fabricated) move relative to the pre-split price the prior bar actually
+closed at -- resolving that as a genuine STOP_HIT would be silently
+wrong. 50% is a deliberately conservative threshold: even extreme
+single-day news-driven equity moves rarely approach it, so this is
+unlikely to misclassify genuine (if severe) price action as an anomaly,
+while reliably catching the 2:1-or-larger splits/reverse-splits that
+would otherwise corrupt an evaluation."""
+
+
 def evaluate_prediction(
     prediction: PredictionRecord,
     *,
@@ -93,9 +107,27 @@ def evaluate_prediction(
     mfe = 0.0
     mae = 0.0
     bars_observed = 0
+    previous_close = prediction.entry_price
     for timestamp, row in subsequent.iterrows():
         bars_observed += 1
-        high, low = float(row["High"]), float(row["Low"])
+        high, low, close = float(row["High"]), float(row["Low"]), float(row["Close"])
+
+        # Corporate-action / data-anomaly guard -- see ANOMALOUS_BAR_GAP_THRESHOLD's
+        # own docstring. Checked against the PREVIOUS bar's close (not the
+        # original entry_price), so a genuine gradual decline over many bars
+        # is never mistaken for a sudden anomaly -- only an implausible
+        # bar-to-bar jump is.
+        if low < previous_close * (1 - ANOMALOUS_BAR_GAP_THRESHOLD) or high > previous_close * (1 + ANOMALOUS_BAR_GAP_THRESHOLD):
+            return _evaluation(
+                prediction, eval_time, outcome=PredictionOutcomeState.INSUFFICIENT_DATA, bars_observed=bars_observed,
+                max_favorable_excursion=mfe, max_adverse_excursion=mae,
+                detail=(
+                    f"Bar {bars_observed} shows an implausible >={ANOMALOUS_BAR_GAP_THRESHOLD:.0%} move from the "
+                    f"previous close ({previous_close:.2f}) to this bar's range (low={low:.2f}, high={high:.2f}) -- "
+                    "likely an unadjusted stock split/reverse-split or a data error, not resolved as a genuine target/stop hit."
+                ),
+            )
+
         mfe = max(mfe, (high - prediction.entry_price) / prediction.entry_price)
         mae = max(mae, (prediction.entry_price - low) / prediction.entry_price)
 
@@ -117,6 +149,8 @@ def evaluate_prediction(
                 max_favorable_excursion=mfe, max_adverse_excursion=mae,
                 detail=f"Neither target nor stop hit within the {prediction.horizon_bars}-bar horizon.",
             )
+
+        previous_close = close
 
     return _evaluation(
         prediction, eval_time, outcome=PredictionOutcomeState.ACTIVE, bars_observed=bars_observed,

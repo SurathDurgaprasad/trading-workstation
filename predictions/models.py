@@ -28,7 +28,7 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from decision_engine.models import DecisionLabel
 
@@ -77,6 +77,27 @@ class PredictionRecord(BaseModel):
 
     horizon_bars: int
     interval: str
+
+    @model_validator(mode="after")
+    def _prices_must_be_sanely_ordered(self) -> "PredictionRecord":
+        """Phase 36 audit finding: nothing previously stopped a
+        PredictionRecord from being constructed with a degenerate price
+        ordering (e.g. stop_price >= entry_price) -- the invariant held
+        only because risk.sizing.build_signal_for_buy's own upstream
+        guards happened to always produce a sane Signal. Enforced here
+        too, structurally, so a future caller that builds a
+        PredictionRecord any other way cannot silently produce a
+        nonsensical shadow prediction (a "stop" above entry, or a
+        "target" below entry) -- fail closed at construction time, the
+        same "type system forecloses it" posture Decision's own
+        model_validator already applies to evidence-backed labels."""
+        if not (self.stop_price < self.entry_price < self.target_price):
+            raise ValueError(
+                f"Degenerate price ordering for a BUY prediction: stop_price={self.stop_price:.4f}, "
+                f"entry_price={self.entry_price:.4f}, target_price={self.target_price:.4f} -- "
+                "a long prediction requires stop_price < entry_price < target_price."
+            )
+        return self
 
     @classmethod
     def new_id(cls) -> str:

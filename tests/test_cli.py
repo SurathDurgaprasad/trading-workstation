@@ -496,6 +496,52 @@ def test_run_predict_command_end_to_end_with_a_real_decision_store(tmp_path, cap
     prediction_store.close()
 
 
+def test_run_predict_command_skips_a_duplicate_for_the_same_entry_bar(tmp_path, capsys, monkeypatch):
+    """Phase 36: running `predict` twice against an unchanged entry bar
+    must not silently create a second, redundant PredictionRecord."""
+    from datetime import datetime
+
+    import market.context as market_context_module
+    from decision_engine.models import Decision, DecisionLabel, RiskContext
+    from decision_engine.store import DecisionStore
+    from market.context import MarketContext
+    from market_intelligence.models import CandidateScore
+
+    decision_db = tmp_path / "decisions.db"
+    store = DecisionStore(decision_db)
+    candidate = CandidateScore(
+        symbol="AAPL", as_of=datetime(2024, 6, 1), last_close=190.0, avg_daily_value=1_000_000.0,
+        volume_ratio=1.1, trend_score=1.0, momentum_score=0.5, breakout_score=0.01,
+        relative_strength_score=0.02, sector_strength_score=None, composite_score=1.5,
+        explanation=["fake"],
+    )
+    store.save_decision(Decision(
+        decision_id="dec-1", symbol="AAPL", as_of=datetime(2024, 6, 1, 12, 0, 0), label=DecisionLabel.BUY,
+        rationale=["all factors agree"], config_version="cfg1", scanner_evidence=candidate, research_evidence=None,
+        market_context=None, risk_context=RiskContext.unknown(), narrative=None, narrative_unavailable_reason=None,
+    ))
+    store.close()
+
+    fake_market_context = MarketContext(symbol="AAPL", as_of=datetime(2024, 6, 1), price=200.0, atr_14=5.0)
+    monkeypatch.setattr(market_context_module, "get_market_context", lambda symbol, **kw: fake_market_context)
+
+    args = parse_args(["predict", "--symbol", "AAPL", "--decision-db", str(decision_db), "--db", str(tmp_path / "predictions.db")])
+    run_predict_command(args)
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit):
+        run_predict_command(args)
+
+    err = capsys.readouterr().err
+    assert "already recorded -- skipping duplicate" in err
+
+    from predictions.store import PredictionStore
+
+    prediction_store = PredictionStore(tmp_path / "predictions.db")
+    assert len(prediction_store.list_predictions()) == 1  # still just one, not two
+    prediction_store.close()
+
+
 def test_evaluate_subcommand_defaults():
     args = parse_args(["evaluate"])
     assert args.command == "evaluate"

@@ -1085,11 +1085,20 @@ def run_predict_command(args: argparse.Namespace) -> None:
     logger.info("Recording a shadow prediction for %s from decision %s", normalized, decision.decision_id)
     live_snapshot_provider = _build_live_snapshot_provider(args)
     market_context = get_market_context(normalized, period=args.period, interval=args.interval, live_snapshot_provider=live_snapshot_provider)
-    signal = build_signal_for_buy(decision, market_context)
-    prediction = create_prediction(decision, signal, horizon_bars=args.horizon_bars, interval=args.interval)
 
     db_path = args.db or DEFAULT_PREDICTIONS_DB_PATH
     store = PredictionStore(db_path)
+    # Phase 36: duplicate prevention -- a prediction already recorded for
+    # this exact entry bar (e.g. `predict` run twice against an unchanged
+    # daily close) must not silently inflate prediction counts / skew
+    # win-rate statistics with a second, redundant row.
+    if store.has_prediction_for_entry(normalized, market_context.as_of):
+        store.close()
+        print(f"predict: a prediction for {normalized} at entry bar {market_context.as_of.isoformat()} is already recorded -- skipping duplicate.", file=sys.stderr)
+        sys.exit(1)
+
+    signal = build_signal_for_buy(decision, market_context)
+    prediction = create_prediction(decision, signal, horizon_bars=args.horizon_bars, interval=args.interval)
     store.save_prediction(prediction)
     store.close()
 
@@ -1367,11 +1376,15 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
             prediction_note = ""
             if decision.label.value == "BUY":
                 try:
-                    signal = build_signal_for_buy(decision, market_context)
-                    prediction = create_prediction(decision, signal, horizon_bars=args.horizon_bars, interval=args.interval)
-                    prediction_store.save_prediction(prediction)
-                    predictions_recorded += 1
-                    prediction_note = f" -> prediction recorded ({prediction.prediction_id[:12]})"
+                    # Phase 36: duplicate prevention -- see run_predict_command's identical check.
+                    if prediction_store.has_prediction_for_entry(symbol, market_context.as_of):
+                        prediction_note = f" -> no prediction recorded (already have one for entry bar {market_context.as_of.isoformat()})"
+                    else:
+                        signal = build_signal_for_buy(decision, market_context)
+                        prediction = create_prediction(decision, signal, horizon_bars=args.horizon_bars, interval=args.interval)
+                        prediction_store.save_prediction(prediction)
+                        predictions_recorded += 1
+                        prediction_note = f" -> prediction recorded ({prediction.prediction_id[:12]})"
                 except (SizingUnavailableError, PredictionUnavailableError) as exc:
                     prediction_note = f" -> no prediction recorded ({exc})"
 

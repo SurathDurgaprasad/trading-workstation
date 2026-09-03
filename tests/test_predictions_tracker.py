@@ -199,6 +199,57 @@ def test_evaluate_prediction_tracks_max_favorable_and_adverse_excursion():
     assert evaluation.max_favorable_excursion == pytest.approx(0.12)  # from bar2's high=112
 
 
+# --- Phase 36: corporate-action / data-anomaly guard --------------------------
+
+
+def test_evaluate_prediction_flags_an_implausible_single_bar_gap_as_insufficient_data():
+    """A ~55% overnight drop with no preceding gradual decline is far
+    beyond ordinary equity volatility -- consistent with an unadjusted
+    stock split, not a genuine stop-hit. Must not be silently resolved
+    as STOP_HIT."""
+    provider = _FakeProvider(_ohlcv("AAPL", [(101.0, 99.0), (46.0, 44.0)]))  # bar1 normal, bar2 collapses relative to bar1's ~100 close
+    prediction = _prediction(horizon_bars=20)
+
+    evaluation = evaluate_prediction(prediction, provider=provider)
+
+    assert evaluation.outcome == PredictionOutcomeState.INSUFFICIENT_DATA
+    assert "implausible" in evaluation.detail
+    assert "split" in evaluation.detail
+
+
+def test_evaluate_prediction_does_not_flag_a_gradual_decline_over_many_bars():
+    """A genuine, if severe, multi-bar decline (each individual bar-to-bar
+    step well under the anomaly threshold) must resolve normally -- only
+    a SUDDEN single-bar jump is an anomaly, not a large cumulative move."""
+    # 100 -> ~60 over 10 bars, each bar roughly -4.5% from the prior close -- ordinary bad price action, not a split.
+    bars = [(100.0 - i * 4.0, 100.0 - i * 4.0 - 2.0) for i in range(1, 11)]
+    provider = _FakeProvider(_ohlcv("AAPL", bars))
+    prediction = _prediction(stop_price=65.0, target_price=200.0, horizon_bars=20)  # within reach of the decline (lowest low ~58), so STOP_HIT resolves it, not the guard
+
+    evaluation = evaluate_prediction(prediction, provider=provider)
+
+    assert evaluation.outcome == PredictionOutcomeState.STOP_HIT  # resolved normally, never flagged as an anomaly
+
+
+def test_evaluate_prediction_flags_an_implausible_single_bar_spike_upward():
+    provider = _FakeProvider(_ohlcv("AAPL", [(101.0, 99.0), (170.0, 165.0)]))  # bar2 spikes ~65% above bar1's ~100 close
+    prediction = _prediction(horizon_bars=20)
+
+    evaluation = evaluate_prediction(prediction, provider=provider)
+
+    assert evaluation.outcome == PredictionOutcomeState.INSUFFICIENT_DATA
+
+
+def test_evaluate_prediction_anomaly_guard_never_fabricates_a_return():
+    provider = _FakeProvider(_ohlcv("AAPL", [(101.0, 99.0), (46.0, 44.0)]))
+    prediction = _prediction(horizon_bars=20)
+
+    evaluation = evaluate_prediction(prediction, provider=provider)
+
+    assert evaluation.actual_return is None
+    assert evaluation.exit_price is None
+
+
 # --- summarize_predictions ---------------------------------------------------
 
 

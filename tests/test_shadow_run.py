@@ -203,6 +203,30 @@ def test_shadow_run_continues_when_one_symbols_decide_stage_fails(tmp_path, caps
     store.close()
 
 
+def test_shadow_run_second_run_against_the_same_entry_bar_skips_the_duplicate(tmp_path, capsys):
+    """Phase 36: running shadow-run twice against unchanged (fake, fixed)
+    market data must not double-record the same prediction."""
+    common_args = [
+        "shadow-run", "--symbols", "AAPL", "--benchmark", "", "--skip-evaluate",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--research-db", str(tmp_path / "research.db"),
+        "--decision-db", str(tmp_path / "decisions.db"), "--predictions-db", str(tmp_path / "predictions.db"),
+    ]
+    run_shadow_run_command(parse_args(common_args))
+    first_output = capsys.readouterr().out
+    assert "prediction recorded" in first_output
+
+    run_shadow_run_command(parse_args(common_args))
+    second_output = capsys.readouterr().out
+    assert "no prediction recorded (already have one for entry bar" in second_output
+
+    from predictions.store import PredictionStore
+
+    store = PredictionStore(tmp_path / "predictions.db")
+    predictions = store.list_predictions()
+    store.close()
+    assert len(predictions) == 1  # still just one, not two
+
+
 def test_shadow_run_prints_market_session_and_live_overlay_status(tmp_path, capsys):
     args = parse_args([
         "shadow-run", "--symbols", "AAPL", "--benchmark", "", "--skip-evaluate",

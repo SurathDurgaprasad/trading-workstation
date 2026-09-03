@@ -81,6 +81,20 @@ class PredictionStore:
         rows = self._conn.execute("SELECT data_json FROM predictions ORDER BY created_at LIMIT ?", (limit,)).fetchall()
         return [PredictionRecord.model_validate_json(r[0]) for r in rows]
 
+    def has_prediction_for_entry(self, symbol: str, entry_time: datetime) -> bool:
+        """Phase 36 -- duplicate-prevention check: has a prediction
+        already been recorded for this exact symbol + entry bar?
+        `entry_time` is bar-granularity (the market_context.as_of the
+        signal was priced against), so this naturally catches "the same
+        day's data was recorded twice" (e.g. shadow-run run twice against
+        an unchanged daily bar) while still allowing a genuinely NEW
+        prediction on the next bar/day. Filters in Python over the
+        existing symbol-scoped listing rather than adding an indexed
+        column -- personal-scale data volumes don't need one, and this
+        avoids a schema migration for an existing table."""
+        existing = self.list_predictions_for_symbol(symbol, limit=200)
+        return any(p.entry_time == entry_time for p in existing)
+
     def list_predictions_for_symbol(self, symbol: str, limit: int = 50) -> list[PredictionRecord]:
         """Phase 35 -- same convention as decision_engine.store.DecisionStore.
         list_decisions_for_symbol / research.store.ResearchStore.

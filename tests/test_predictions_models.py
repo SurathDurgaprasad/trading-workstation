@@ -1,5 +1,8 @@
 from datetime import datetime, timezone
 
+import pytest
+from pydantic import ValidationError
+
 from decision_engine.models import DecisionLabel
 from predictions.models import (
     RESOLVED_STATES,
@@ -8,6 +11,16 @@ from predictions.models import (
     PredictionRecord,
     PredictionSummary,
 )
+
+
+def _prediction(**overrides) -> PredictionRecord:
+    defaults = dict(
+        prediction_id="p1", decision_id="d1", symbol="AAPL", created_at=datetime.now(timezone.utc),
+        label=DecisionLabel.BUY, entry_price=100.0, stop_price=95.0, target_price=110.0,
+        entry_time=datetime(2024, 1, 2), horizon_bars=20, interval="1d",
+    )
+    defaults.update(overrides)
+    return PredictionRecord(**defaults)
 
 
 def test_produced_states_are_all_recognized_enum_members():
@@ -44,6 +57,31 @@ def test_prediction_record_is_frozen():
         assert False, "PredictionRecord should be immutable"
     except Exception:
         pass
+
+
+def test_prediction_record_accepts_a_sanely_ordered_price_set():
+    record = _prediction(stop_price=95.0, entry_price=100.0, target_price=110.0)
+    assert record.stop_price < record.entry_price < record.target_price
+
+
+def test_prediction_record_rejects_stop_above_entry():
+    with pytest.raises(ValidationError, match="Degenerate price ordering"):
+        _prediction(stop_price=105.0, entry_price=100.0, target_price=110.0)
+
+
+def test_prediction_record_rejects_target_below_entry():
+    with pytest.raises(ValidationError, match="Degenerate price ordering"):
+        _prediction(stop_price=95.0, entry_price=100.0, target_price=90.0)
+
+
+def test_prediction_record_rejects_stop_equal_to_entry():
+    with pytest.raises(ValidationError, match="Degenerate price ordering"):
+        _prediction(stop_price=100.0, entry_price=100.0, target_price=110.0)
+
+
+def test_prediction_record_rejects_target_equal_to_entry():
+    with pytest.raises(ValidationError, match="Degenerate price ordering"):
+        _prediction(stop_price=95.0, entry_price=100.0, target_price=100.0)
 
 
 def test_prediction_evaluation_is_frozen():
