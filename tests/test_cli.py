@@ -1,6 +1,6 @@
 import pytest
 
-from main import parse_args, run_paper_live_command
+from main import parse_args, run_paper_live_command, run_scan_command
 from tests.conftest import AAPL_CACHE_PATH
 
 
@@ -163,6 +163,38 @@ def test_dashboard_subcommand_overrides():
     assert args.port == 9000
 
 
+def test_scan_subcommand_defaults():
+    args = parse_args(["scan", "--symbols", "AAPL,MSFT"])
+    assert args.command == "scan"
+    assert args.symbols == "AAPL,MSFT"
+    assert args.watchlist_file is None
+    assert args.period == "1y"
+    assert args.interval == "1d"
+    assert args.benchmark == "^NSEI"
+    assert args.db is None
+    assert args.top == 10
+
+
+def test_scan_subcommand_overrides():
+    args = parse_args([
+        "scan", "--watchlist-file", "watchlist.yaml", "--period", "2y", "--interval", "1wk",
+        "--benchmark", "", "--db", "/tmp/scanner.db", "--top", "5",
+    ])
+    assert args.watchlist_file == "watchlist.yaml"
+    assert args.symbols is None
+    assert args.period == "2y"
+    assert args.interval == "1wk"
+    assert args.benchmark == ""
+    assert args.db == "/tmp/scanner.db"
+    assert args.top == 5
+
+
+def test_scan_command_requires_symbols_or_watchlist_file():
+    args = parse_args(["scan"])
+    with pytest.raises(SystemExit):
+        run_scan_command(args)
+
+
 def test_paper_live_kill_switch_flags_parse_without_a_symbol():
     args = parse_args(["paper-live", "--kill-switch", "--kill-switch-reason", "halting for the day"])
     assert args.kill_switch is True
@@ -176,6 +208,24 @@ def test_paper_live_kill_switch_flags_parse_without_a_symbol():
 # --- functional (executes run_paper_live_command against real cached data) ---
 
 pytestmark_paper_live = pytest.mark.skipif(not AAPL_CACHE_PATH.exists(), reason=f"No cached AAPL data at {AAPL_CACHE_PATH}")
+
+
+@pytestmark_paper_live
+def test_run_scan_command_end_to_end_against_cached_data(tmp_path, capsys):
+    args = parse_args([
+        "scan", "--symbols", "AAPL", "--period", "1y", "--interval", "1d",
+        "--benchmark", "", "--db", str(tmp_path / "scanner.db"), "--top", "5",
+    ])
+    run_scan_command(args)
+    output = capsys.readouterr().out
+    assert "MARKET SCANNER -- CANDIDATE DISCOVERY (no recommendation, no buy/sell)" in output
+    assert "AAPL" in output
+
+    from market_intelligence.store import ScanHistoryStore
+
+    store = ScanHistoryStore(tmp_path / "scanner.db")
+    assert store.latest_report() is not None
+    store.close()
 
 
 @pytestmark_paper_live

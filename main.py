@@ -41,7 +41,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard")
+_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -615,6 +615,71 @@ def run_dashboard_command(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+# `scan` -- Phase 19 market scanner: MarketUniverse -> ranked, explainable
+# candidates. No AI, no recommendation, no buy/sell/quantity/price level --
+# see market_intelligence/models.py's module docstring. Same
+# import-deferral discipline as `backtest`/`paper`.
+# --------------------------------------------------------------------------
+
+DEFAULT_SCANNER_DB_PATH = PROJECT_ROOT / "data" / "scanner.db"
+
+
+def run_scan_command(args: argparse.Namespace) -> None:
+    from backtesting.cache import CachedMarketDataProvider
+    from market.data_provider import get_market_data_provider
+    from market_data.universe import MarketUniverse
+    from market_intelligence.scanner import run_scan
+    from market_intelligence.store import ScanHistoryStore
+
+    if args.watchlist_file:
+        universe = MarketUniverse.from_yaml_file(args.watchlist_file)
+    elif args.symbols:
+        symbols = [s for s in args.symbols.split(",") if s.strip()]
+        universe = MarketUniverse.from_watchlist(symbols)
+    else:
+        print("scan: one of --symbols or --watchlist-file is required.", file=sys.stderr)
+        sys.exit(2)
+
+    provider = CachedMarketDataProvider(get_market_data_provider())
+    benchmark_symbol = args.benchmark or None
+
+    logger.info("Running market scan over %d symbols (universe=%s)", len(universe), universe.mode)
+    report = run_scan(
+        universe, provider=provider, benchmark_symbol=benchmark_symbol,
+        period=args.period, interval=args.interval,
+    )
+
+    db_path = args.db or DEFAULT_SCANNER_DB_PATH
+    store = ScanHistoryStore(db_path)
+    store.save_report(report)
+    store.close()
+
+    print("=" * 70)
+    print("MARKET SCANNER -- CANDIDATE DISCOVERY (no recommendation, no buy/sell)")
+    print("=" * 70)
+    print(f"Scan ID:        {report.scan_id}")
+    print(f"As of:          {report.as_of.isoformat()}")
+    print(f"Universe:       {report.universe_mode} ({report.universe_size} symbols)")
+    benchmark_line = report.benchmark_symbol or "none"
+    if report.benchmark_unavailable_reason:
+        benchmark_line += f"  (unavailable: {report.benchmark_unavailable_reason})"
+    print(f"Benchmark:      {benchmark_line}")
+    print(f"Config version: {report.config_version}")
+    print(f"Database:       {db_path}")
+    print(f"\nCandidates: {len(report.candidates)}   Excluded: {len(report.excluded)}\n")
+
+    for candidate in report.candidates[: args.top]:
+        print(f"{candidate.symbol:12s} score={candidate.composite_score:+.3f}  close={candidate.last_close:.2f}  as_of={candidate.as_of}")
+        for line in candidate.explanation:
+            print(f"    - {line}")
+
+    if report.excluded:
+        print(f"\nExcluded ({len(report.excluded)}):")
+        for item in report.excluded:
+            print(f"  {item.symbol:12s} {item.reason}")
+
+
+# --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------
 
@@ -820,6 +885,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     dashboard_parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1, local-only).")
     dashboard_parser.add_argument("--port", type=int, default=8765, help="Bind port (default: 8765).")
 
+    scan_parser = subparsers.add_parser(
+        "scan",
+        help=(
+            "Phase 19: market scanner -- rank a configured watchlist by trend/momentum/"
+            "breakout/relative strength. No AI, no recommendation, no buy/sell/quantity/price level."
+        ),
+    )
+    scan_parser.add_argument("--symbols", type=str, default=None, help="Comma-separated watchlist (e.g. AAPL,MSFT,RELIANCE.NS). Required unless --watchlist-file is given.")
+    scan_parser.add_argument("--watchlist-file", type=str, default=None, help="Path to a YAML file with a top-level `market_universe: {mode: watchlist, symbols: [...]}` key.")
+    scan_parser.add_argument("--period", default="1y", help="Historical window to fetch per symbol (default: 1y).")
+    scan_parser.add_argument("--interval", default="1d", help="Bar interval (default: 1d).")
+    scan_parser.add_argument("--benchmark", default="^NSEI", help="Benchmark symbol for relative strength (default: ^NSEI). Pass an empty string to disable.")
+    scan_parser.add_argument("--db", type=str, default=None, help=f"SQLite scan-history path (default: {DEFAULT_SCANNER_DB_PATH}).")
+    scan_parser.add_argument("--top", type=int, default=10, help="Print only the top N ranked candidates (default: 10).")
+
     return parser.parse_args(argv)
 
 
@@ -841,6 +921,8 @@ def main() -> None:
             run_paper_live_command(args)
         elif args.command == "dashboard":
             run_dashboard_command(args)
+        elif args.command == "scan":
+            run_scan_command(args)
         else:
             run_analyze_command(args)
     except _CONTROLLED_ERRORS as exc:
