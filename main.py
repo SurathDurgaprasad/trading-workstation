@@ -1794,12 +1794,20 @@ def run_schedule_command(args: argparse.Namespace) -> None:
     if args.schedule_command == "status":
         store = SchedulerRunStore(run_db_path)
         runs = store.list_runs(limit=args.limit)
+        integrity_result = None
+        db_size = None
+        if args.check_integrity:
+            integrity_result = store.integrity_check()
+            db_size = store.db_size_bytes()
         store.close()
 
         print("=" * 70)
         print("SCHEDULER RUN HISTORY -- READ-ONLY AUDIT")
         print("=" * 70)
         print(f"Database: {run_db_path}\n")
+        if args.check_integrity:
+            size_kb = db_size / 1024.0
+            print(f"Integrity check: {integrity_result}   (file size: {size_kb:.1f} KB)\n")
         if not runs:
             print("No scheduler runs recorded yet -- run `schedule tick` or `schedule loop` first.")
         for run in runs:
@@ -1808,6 +1816,12 @@ def run_schedule_command(args: argparse.Namespace) -> None:
         return
 
     schedule_config = _load_schedule_config(args)
+
+    if getattr(args, "log_file", None):
+        from core.logging import add_rotating_file_handler
+
+        add_rotating_file_handler(args.log_file)
+        logger.info("schedule: file logging enabled at %s (rotating, 10MB x 5 backups)", args.log_file)
 
     if args.schedule_command == "tick":
         now = datetime.fromisoformat(args.now) if args.now else None
@@ -1831,10 +1845,18 @@ def run_schedule_command(args: argparse.Namespace) -> None:
         print("No real or paper order is ever placed by this command.")
 
         ticks = 0
+        tick_failures = 0
         try:
             while args.max_ticks is None or ticks < args.max_ticks:
-                result = _run_tick_from_args(args, schedule_config, store)
-                _print_tick_result(result)
+                try:
+                    result = _run_tick_from_args(args, schedule_config, store)
+                    _print_tick_result(result)
+                except KeyboardInterrupt:
+                    raise
+                except Exception as exc:  # noqa: BLE001 -- an unexpected TICK-LEVEL failure (e.g. a transient SQLite lock error from another process, or a bug in schedule_config.due_slot) must never kill a long-lived, unattended loop. run_tick already isolates ordinary operational failures (a bad symbol, a provider outage) into a FAILED RunRecord; this is the outer safety net for everything run_tick itself cannot catch.
+                    tick_failures += 1
+                    logger.exception("schedule loop: tick failed unexpectedly (tick_failures=%d) -- continuing to the next tick.", tick_failures)
+                    print(f"\n[SCHEDULER] Tick failed unexpectedly: {type(exc).__name__}: {exc}. Continuing (tick_failures={tick_failures}).")
                 ticks += 1
                 if args.max_ticks is None or ticks < args.max_ticks:
                     time.sleep(args.interval_seconds)
@@ -1842,7 +1864,7 @@ def run_schedule_command(args: argparse.Namespace) -> None:
             print("\n[SCHEDULER] Interrupted by user (Ctrl+C) -- shutting down cleanly. No new tick will start.")
         finally:
             store.close()
-        print(f"\n[SCHEDULER] Loop stopped after {ticks} tick(s).")
+        print(f"\n[SCHEDULER] Loop stopped after {ticks} tick(s){f', {tick_failures} unexpected tick failure(s)' if tick_failures else ''}.")
         return
 
 
@@ -2285,6 +2307,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         p.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
         p.add_argument("--run-db", type=str, default=None, help=f"SQLite scheduler-run-history path (default: {DEFAULT_SCHEDULER_DB_PATH}).")
         p.add_argument("--staleness-seconds", type=float, default=1800.0, help="A RUNNING lock older than this with no completion is treated as an orphaned/crashed run and reclaimed (default: 1800 = 30 minutes).")
+        p.add_argument("--log-file", type=str, default=None, help="Phase 39: also write logs to this path via a size-bounded, rotating file handler (default: 10MB x 5 backups) -- console output is unchanged either way. Recommended for `schedule loop` run unattended for days.")
 
     tick_parser = schedule_subparsers.add_parser("tick", help="Check whether a configured slot is due right now; if so, run it exactly once, then exit. Never loops.")
     _add_schedule_common_args(tick_parser)
@@ -2298,6 +2321,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     status_parser = schedule_subparsers.add_parser("status", help="Read-only: print recent scheduler run history (audit trail).")
     status_parser.add_argument("--run-db", type=str, default=None, help=f"SQLite scheduler-run-history path (default: {DEFAULT_SCHEDULER_DB_PATH}).")
     status_parser.add_argument("--limit", type=int, default=20, help="Max runs to print, most recent first (default: 20).")
+    status_parser.add_argument("--check-integrity", action="store_true", help="Phase 39: also run a read-only `PRAGMA integrity_check` and print the database file size -- useful after long unattended `schedule loop` operation.")
 
     return parser.parse_args(argv)
 

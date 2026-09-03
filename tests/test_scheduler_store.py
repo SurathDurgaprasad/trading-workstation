@@ -194,3 +194,36 @@ def test_reopening_the_same_db_path_preserves_history(tmp_path):
     store2 = SchedulerRunStore(db_path)
     assert store2.has_completed_today(slot_name="pre_market", run_date="2026-09-03") is True
     store2.close()
+
+
+# --- Phase 39: integrity_check / db_size_bytes -------------------------------
+
+
+def test_integrity_check_reports_ok_for_a_healthy_database(store):
+    store.start_run(run_id="r1", slot_name="pre_market", run_date="2026-09-03", started_at=datetime.now(timezone.utc))
+    assert store.integrity_check() == "ok"
+
+
+def test_db_size_bytes_reflects_a_real_file_that_grows(tmp_path):
+    db_path = tmp_path / "runs.db"
+    store = SchedulerRunStore(db_path)
+    empty_size = store.db_size_bytes()
+    assert empty_size > 0  # sqlite always writes at least a header page
+
+    for i in range(50):
+        store.start_run(run_id=f"r{i}", slot_name="intraday", run_date="2026-09-03", started_at=datetime.now(timezone.utc))
+        store.finish_run(run_id=f"r{i}", status=RunStatus.COMPLETED, detail="x" * 500)
+    store.close()
+
+    store2 = SchedulerRunStore(db_path)
+    assert store2.db_size_bytes() >= empty_size
+    store2.close()
+
+
+def test_db_size_bytes_is_zero_for_a_path_that_does_not_exist(tmp_path):
+    store = SchedulerRunStore(tmp_path / "runs.db")
+    store.close()
+    import os
+
+    os.remove(tmp_path / "runs.db")
+    assert store.db_size_bytes() == 0

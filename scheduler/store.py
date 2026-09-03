@@ -170,3 +170,16 @@ class SchedulerRunStore:
             "SELECT data_json FROM scheduler_runs ORDER BY started_at DESC LIMIT ?", (limit,)
         ).fetchall()
         return [RunRecord.model_validate_json(r[0]) for r in rows]
+
+    def integrity_check(self) -> str:
+        """Phase 39 -- long-run operations: a read-only `PRAGMA
+        integrity_check` an operator can run after days/weeks of
+        unattended `schedule loop` operation, without writing raw SQL.
+        Returns "ok" for a healthy database; anything else is SQLite's
+        own list of corruption findings, joined by "; "."""
+        rows = self._conn.execute("PRAGMA integrity_check").fetchall()
+        results = [row[0] for row in rows]
+        return "; ".join(results) if results else "ok"
+
+    def db_size_bytes(self) -> int:
+        return Path(self.db_path).stat().st_size if Path(self.db_path).exists() else 0

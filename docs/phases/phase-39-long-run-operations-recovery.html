@@ -1,0 +1,196 @@
+<title>Phase 39 Long-Run Operations</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+  :root {
+    --bg: #0b0f14; --surface: #121922; --surface-2: #17202b; --border: #253140; --border-soft: #1c2530;
+    --text: #dbe4ec; --text-muted: #8ca0b3; --text-dim: #5f7284;
+    --accent: #4fd1c5; --accent-soft: #1b3a38;
+    --warn: #e8b84b; --warn-soft: #3a3016;
+    --good: #34d399; --good-soft: #123326;
+    --bad: #f87171; --bad-soft: #3a1a1a;
+    --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 15.5px; line-height: 1.65; margin: 0; padding: 0 0 80px 0; }
+  ::selection { background: var(--accent-soft); color: var(--accent); }
+  a { color: var(--accent); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 28px; }
+  header.hero { border-bottom: 1px solid var(--border); padding: 56px 0 36px 0; background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%); }
+  .eyebrow { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px 0; }
+  h1 { font-family: var(--mono); font-weight: 600; font-size: clamp(26px, 4vw, 38px); line-height: 1.18; margin: 0 0 14px 0; text-wrap: balance; letter-spacing: -0.01em; }
+  .hero-sub { color: var(--text-muted); font-size: 16.5px; max-width: 66ch; margin: 0 0 28px 0; }
+  .status-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill { font-family: var(--mono); font-size: 12.5px; font-weight: 500; letter-spacing: 0.02em; padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
+  .pill-good { color: var(--good); background: var(--good-soft); border-color: #16472f; }
+  .pill-neutral { color: var(--text-muted); background: var(--surface-2); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  nav.toc { max-width: 960px; margin: 0 auto; padding: 22px 28px; display: flex; flex-wrap: wrap; gap: 4px 18px; font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--border-soft); }
+  nav.toc a { color: var(--text-dim); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
+  main { padding-top: 8px; }
+  section { padding: 44px 0; border-bottom: 1px solid var(--border-soft); }
+  section:last-of-type { border-bottom: none; }
+  .section-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  .section-num { font-family: var(--mono); color: var(--text-dim); font-size: 14px; min-width: 26px; }
+  h2 { font-family: var(--mono); font-size: 19px; font-weight: 600; margin: 0; color: var(--text); letter-spacing: -0.01em; }
+  p { margin: 0 0 14px 0; color: var(--text); max-width: 74ch; }
+  p.muted { color: var(--text-muted); }
+  ul, ol { margin: 0 0 14px 0; padding-left: 22px; max-width: 72ch; }
+  li { margin-bottom: 6px; }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; background: var(--surface-2); border: 1px solid var(--border-soft); padding: 1px 6px; border-radius: 3px; color: #a8d8f0; }
+  .flow { font-family: var(--mono); font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; overflow-x: auto; color: var(--text-muted); line-height: 1.9; white-space: pre; margin: 16px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 14px 0; }
+  .table-wrap { overflow-x: auto; }
+  th { text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border-soft); color: var(--text-muted); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.mono, td code { font-family: var(--mono); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; margin: 14px 0; }
+  .card h4 { font-family: var(--mono); font-size: 13.5px; color: var(--text); margin: 0 0 8px 0; }
+  .badge { font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.03em; white-space: nowrap; }
+  .badge-verified { background: var(--good-soft); color: var(--good); }
+  .badge-na { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
+  .kv-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; font-size: 14px; margin: 14px 0; }
+  .kv-list dt { color: var(--text-dim); font-family: var(--mono); font-size: 12.5px; padding-top: 2px; }
+  .kv-list dd { margin: 0; color: var(--text); }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="light"]) {
+      --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+      --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+      --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+    }
+    :root:not([data-theme="light"]) code, :root:not([data-theme="light"]) .mono { color: #0f5c66; }
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f0ece3; --border: #ddd6c7; --border-soft: #e6e0d3;
+    --text: #241f16; --text-muted: #6b6252; --text-dim: #9a917d; --accent: #0f766e; --accent-soft: #d7ede9;
+    --warn: #92660a; --warn-soft: #f4e6c1; --good: #157347; --good-soft: #d9f0e3; --bad: #b91c1c; --bad-soft: #f7dcdc;
+  }
+  :root[data-theme="light"] code, :root[data-theme="light"] .mono { color: #0f5c66; }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Phase 39 &mdash; Long-Run Operations &amp; Recovery</p>
+    <h1>One Bad Tick Should Never Kill a Week-Long Loop</h1>
+    <p class="hero-sub">An audit-first phase: before adding anything, this pass re-read Phase 28's scheduler (restart recovery, overlap prevention, duplicate-scheduling protection via <code>BEGIN IMMEDIATE</code>) and Phase 30's resilience module (circuit breaker, retry-with-backoff, provider timeouts) and found them already solid -- no changes needed there. What WAS genuinely missing: an exception outside <code>run_tick</code>'s own per-slot error handling could kill the entire <code>schedule loop</code> process, there was no persistent log for a multi-day unattended run, and no quick way to check database health after one. All three are fixed here, narrowly.</p>
+    <div class="status-row">
+      <span class="pill pill-good"><span class="dot"></span>DETERMINISTIC 10-DAY / 60-TICK SIMULATION + REAL CLI SMOKE-TESTED</span>
+      <span class="pill pill-neutral">16 NEW TESTS, 1072 TOTAL</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#git">Git</a>
+  <a href="#scope">Scope</a>
+  <a href="#design">What was built</a>
+  <a href="#evidence">Evidence</a>
+  <a href="#tests">Tests</a>
+  <a href="#safety">Safety</a>
+  <a href="#limitations">Known limitations</a>
+</nav>
+
+<main class="wrap">
+
+<section id="git">
+  <div class="section-head"><span class="section-num">01</span><h2>Git state</h2></div>
+  <div class="kv-list">
+    <dt>Base</dt><dd class="mono">main @ 2d8b669 (Phase 38 merged)</dd>
+    <dt>Branch</dt><dd class="mono">phase-39-long-run-operations-recovery</dd>
+    <dt>Modified</dt><dd class="mono">main.py, core/logging.py, scheduler/store.py</dd>
+    <dt>New tests</dt><dd class="mono">tests/test_core_logging.py, tests/test_scheduler_long_run.py</dd>
+  </div>
+</section>
+
+<section id="scope">
+  <div class="section-head"><span class="section-num">02</span><h2>Scope</h2></div>
+  <p><strong>In scope:</strong> (1) isolating an unexpected tick-level exception inside <code>schedule loop</code> so it cannot kill the whole process; (2) an optional, size-bounded rotating log file (<code>--log-file</code>) for persistent unattended logging; (3) a read-only <code>schedule status --check-integrity</code> DB health check; (4) a deterministic multi-day simulation proving the scheduler's existing correctness holds across many ticks, not just one.</p>
+  <p><strong>Explicitly out of scope, and why:</strong> active database pruning/retention -- this project's own established convention everywhere else (predictions, experiments, decisions) is an append-only audit trail that is <em>never</em> overwritten or deleted; adding a retention policy here would contradict that invariant, and at this project's realistic scale (a handful of scheduler slots firing a few times a day) SQLite with its existing indices handles years of history without difficulty. A process-level (multi-OS-process) duplicate-scheduling test -- Phase 28's existing thread-based concurrency test already exercises the exact mechanism (SQLite's own OS-level file locking via <code>BEGIN IMMEDIATE</code>) that makes cross-process safety hold; SQLite's locking model does not distinguish threads from processes, so a slower, flakier subprocess-based test would prove nothing new.</p>
+</section>
+
+<section id="design">
+  <div class="section-head"><span class="section-num">03</span><h2>What was built</h2></div>
+  <div class="flow">schedule loop's while-loop, before:
+  while ...:
+      result = _run_tick_from_args(...)   # an exception HERE killed the whole process
+      ...
+
+schedule loop's while-loop, after:
+  while ...:
+      try:
+          result = _run_tick_from_args(...)
+      except KeyboardInterrupt:
+          raise                            # Ctrl+C still stops the loop
+      except Exception as exc:
+          tick_failures += 1
+          logger.exception(...); print(...)  # logged and visible, then continues
+      ...
+
+python main.py schedule loop --log-file scheduler.log ...
+  -> attaches a RotatingFileHandler (10MB x 5 backups) to the SAME root logger
+     setup_logging() already configures -- stdout output is unchanged either way
+
+python main.py schedule status --check-integrity
+  -> PRAGMA integrity_check + file size, read-only, no data touched</div>
+  <p>The tick-level exception this closes is real, not hypothetical: <code>run_tick</code> already wraps <code>_execute_slot</code> (an ordinary operational failure -- bad symbol, provider outage -- becomes a FAILED <code>RunRecord</code>), but nothing wrapped <code>reclaim_stale_locks</code>, <code>active_lock</code>, <code>due_slot</code>, or <code>try_start_run</code> themselves -- a transient SQLite lock-contention error from those (plausible if an operator runs both <code>schedule loop</code> and a cron-triggered <code>schedule tick</code> against the same database, a scenario Phase 28's own docstring already names) would have propagated all the way out and ended the unattended process.</p>
+</section>
+
+<section id="evidence">
+  <div class="section-head"><span class="section-num">04</span><h2>Evidence</h2></div>
+  <div class="flow">$ python main.py schedule status --run-db runs.db --check-integrity
+Integrity check: ok   (file size: 20.0 KB)
+
+$ python main.py schedule tick ... --log-file scheduler.log
+[RAN] Slot 'intraday' completed: Run summary: 1 candidate(s) scanned; ...
+
+$ cat scheduler.log
+2026-09-04 03:24:46 | INFO | __main__ | schedule: file logging enabled at .../scheduler.log (rotating, 10MB x 5 backups)
+2026-09-04 03:24:46 | INFO | main     | shadow-run: scanning 1 symbols
+
+10-simulated-trading-day test (60 ticks, no real elapsed time):
+  ran_count == 60, skipped_count == 0
+  every day: pre_market=1, market_open=1, intraday=2, pre_close=1, post_market=1 COMPLETED runs
+  all 60 runs remain queryable via list_runs() after the full simulated run
+
+Crash-and-recovery test:
+  a RUNNING lock is seeded (simulating a killed process), left unfinished
+  the NEXT day's first tick reclaims it (status -> RECLAIMED) and runs normally
+  the database remains fully consistent afterward (31 runs, exactly 1 RECLAIMED)</div>
+  <div class="table-wrap"><table>
+    <tr><th>Claim</th><th>Classification</th><th>Basis</th></tr>
+    <tr><td>An unexpected tick-level exception no longer kills <code>schedule loop</code>, and Ctrl+C still works</td><td><span class="badge badge-verified">LOCAL/DETERMINISTIC TEST VERIFIED</span></td><td>2 CLI tests injecting a raised exception then a raised KeyboardInterrupt via a faked <code>run_tick</code></td></tr>
+    <tr><td>Rotating file handler creates the file, writes to it, never duplicates the stdout handler, is idempotent per path</td><td><span class="badge badge-verified">LOCAL/DETERMINISTIC TEST VERIFIED + REAL CLI SMOKE</span></td><td>6 unit tests + the transcript above (an actual <code>main.py</code> subprocess)</td></tr>
+    <tr><td>Scheduler stays correct (no duplicate completions, correct frequency gating, all history queryable) across 10 simulated trading days / 60 ticks</td><td><span class="badge badge-verified">LOCAL/DETERMINISTIC TEST VERIFIED</span></td><td>1 dedicated multi-day simulation test</td></tr>
+    <tr><td>A mid-run crash's stale lock is reclaimed and normal operation resumes the next day</td><td><span class="badge badge-verified">LOCAL/DETERMINISTIC TEST VERIFIED</span></td><td>1 dedicated crash-and-recovery simulation test</td></tr>
+    <tr><td>Real multi-day, real wall-clock unattended operation (the roadmap's own "test days of repeated runs")</td><td><span class="badge badge-na">NOT VERIFIED -- TIME-DEPENDENT</span></td><td>Cannot be fabricated; see Known Limitations</td></tr>
+  </table></div>
+</section>
+
+<section id="tests">
+  <div class="section-head"><span class="section-num">05</span><h2>Tests</h2></div>
+  <p>16 new tests: 6 in <code>tests/test_core_logging.py</code> (file creation, correct rotation bounds, never replaces the stdout handler, idempotent per resolved path, separate paths get separate handlers, parent-directory creation), 5 in <code>tests/test_cli_schedule.py</code> (loop continues past an unexpected exception, Ctrl+C still stops the loop even after a prior tick failure, <code>--log-file</code> writes a real file, <code>--check-integrity</code> prints ok+size, and its absence omits the line), 3 in <code>tests/test_scheduler_store.py</code> (integrity_check reports ok, db_size_bytes reflects a growing file, db_size_bytes is 0 for a missing path), 2 in <code>tests/test_scheduler_long_run.py</code> (the 10-day/60-tick simulation, the crash-and-recovery simulation). Full regression: <strong>1072 passed, 0 failed</strong> (1056 baseline + 16 new).</p>
+</section>
+
+<section id="safety">
+  <div class="section-head"><span class="section-num">06</span><h2>Safety</h2></div>
+  <ul>
+    <li>The loop-level except-and-continue re-raises <code>KeyboardInterrupt</code> explicitly before the broad <code>except Exception</code> -- verified by a dedicated test that Ctrl+C still stops the loop even immediately after a prior tick failure.</li>
+    <li><code>integrity_check</code> and <code>db_size_bytes</code> are read-only (a <code>PRAGMA</code> query and a file stat) -- no code path here writes to, prunes, or otherwise mutates any database.</li>
+    <li><code>add_rotating_file_handler</code> only ever adds a handler, never removes or replaces the existing stdout handler <code>setup_logging()</code> installed -- console behavior is byte-for-byte unchanged whether or not <code>--log-file</code> is passed.</li>
+    <li><code>tests/test_dhan_no_real_orders.py</code> / <code>tests/test_broker.py</code>: 12/12 passed before and after this phase's changes.</li>
+  </ul>
+</section>
+
+<section id="limitations">
+  <div class="section-head"><span class="section-num">07</span><h2>Known limitations, stated honestly</h2></div>
+  <ul>
+    <li><strong>Real multi-day, real-wall-clock unattended operation has not happened yet.</strong> The roadmap's own acceptance criterion ("test days of repeated runs") is partially about real elapsed time this phase cannot fabricate -- the 10-simulated-day / 60-tick test proves the scheduling LOGIC is correct across many ticks, which is the right way to test logic without waiting, but it is not a substitute for actually running <code>schedule loop --log-file ...</code> unattended for real days and later checking <code>schedule status --check-integrity</code> and the log file. That remains an outstanding, honestly-named, time-dependent validation step.</li>
+    <li><strong>A loop-level tick failure (caught by the new except-and-continue) is not recorded as a structured RunRecord</strong> -- because it happens before <code>try_start_run</code> is ever reached, there is no run_id to attach it to. It is visible via the console/log-file line and a running <code>tick_failures</code> count printed at loop shutdown, but not queryable later via <code>schedule status</code> the way a FAILED slot execution is. A dedicated "loop-level incidents" table was considered and rejected as unjustified complexity for a failure mode that, so far, has only been reproduced synthetically in tests.</li>
+    <li><strong>No consecutive-failure circuit breaker.</strong> If every tick fails for a persistent reason (e.g. the run-db file becomes genuinely corrupted), the loop will keep retrying forever at the configured poll interval rather than giving up after N failures -- a deliberate choice (an arbitrary "give up after N" threshold would be an unjustified, untested policy), but worth an operator knowing: persistent failures are visible in the log, not self-terminating.</li>
+  </ul>
+</section>
+
+</main>

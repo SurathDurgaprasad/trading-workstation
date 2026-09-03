@@ -124,6 +124,24 @@ def test_schedule_tick_skip_prints_reason_not_a_traceback(tmp_path, capsys):
     assert "trading day" in output
 
 
+def test_schedule_status_check_integrity_prints_ok_and_size(tmp_path, capsys):
+    tick_args = parse_args(["schedule", "tick", "--symbols", "AAPL", "--benchmark", "", "--now", _TRADING_TIME, *_db_args(tmp_path)])
+    run_schedule_command(tick_args)
+    capsys.readouterr()
+
+    status_args = parse_args(["schedule", "status", "--check-integrity", "--run-db", str(tmp_path / "runs.db")])
+    run_schedule_command(status_args)
+    output = capsys.readouterr().out
+    assert "Integrity check: ok" in output
+    assert "file size:" in output
+
+
+def test_schedule_status_without_check_integrity_omits_the_line(tmp_path, capsys):
+    status_args = parse_args(["schedule", "status", "--run-db", str(tmp_path / "runs.db")])
+    run_schedule_command(status_args)
+    assert "Integrity check" not in capsys.readouterr().out
+
+
 def test_schedule_status_reports_no_runs_yet(tmp_path, capsys):
     args = parse_args(["schedule", "status", "--run-db", str(tmp_path / "runs.db")])
     run_schedule_command(args)
@@ -182,6 +200,86 @@ def test_schedule_loop_handles_ctrl_c_cleanly(tmp_path, capsys, monkeypatch):
     output = capsys.readouterr().out
     assert "Interrupted by user (Ctrl+C)" in output
     assert "Traceback" not in output
+
+
+def test_schedule_loop_continues_past_an_unexpected_tick_level_exception(tmp_path, capsys, monkeypatch):
+    """Phase 39: an exception run_tick itself does NOT catch (e.g. a
+    transient SQLite error from schedule_config.due_slot or the run
+    store, raised before any RunRecord even exists) must not kill a
+    long-lived, unattended `schedule loop` process -- only KeyboardInterrupt
+    should stop it."""
+    call_count = {"n": 0}
+
+    def _fake_run_tick(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("simulated transient scheduler-store error")
+        from scheduler.models import TickResult
+        return TickResult(ran=False, reason="no slot due")
+
+    monkeypatch.setattr("main.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("scheduler.runner.run_tick", _fake_run_tick)
+
+    args = parse_args(["schedule", "loop", "--symbols", "AAPL", "--max-ticks", "3", *_db_args(tmp_path)])
+    run_schedule_command(args)  # must return normally, not raise
+
+    output = capsys.readouterr().out
+    assert call_count["n"] == 3  # the failed first tick did not stop the loop
+    assert "Tick failed unexpectedly: RuntimeError: simulated transient scheduler-store error" in output
+    assert "Traceback" not in output
+    assert "Loop stopped after 3 tick(s), 1 unexpected tick failure(s)" in output
+
+
+def test_schedule_loop_ctrl_c_still_stops_the_loop_even_after_a_prior_tick_failure(tmp_path, capsys, monkeypatch):
+    """The new per-tick except-and-continue must not accidentally swallow
+    KeyboardInterrupt -- Ctrl+C must still stop the loop cleanly."""
+    call_count = {"n": 0}
+
+    def _fake_run_tick(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("simulated transient error")
+        if call_count["n"] == 2:
+            raise KeyboardInterrupt
+        from scheduler.models import TickResult
+        return TickResult(ran=False, reason="no slot due")
+
+    monkeypatch.setattr("main.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("scheduler.runner.run_tick", _fake_run_tick)
+
+    args = parse_args(["schedule", "loop", "--symbols", "AAPL", *_db_args(tmp_path)])
+    run_schedule_command(args)
+
+    output = capsys.readouterr().out
+    assert call_count["n"] == 2  # stopped at the KeyboardInterrupt, never reached a third tick
+    assert "Interrupted by user (Ctrl+C)" in output
+
+
+def test_schedule_loop_log_file_writes_a_persistent_log(tmp_path, capsys):
+    """Phase 39: --log-file attaches a rotating file handler so an
+    operator running `schedule loop` unattended for days has a
+    persistent record beyond stdout."""
+    import logging
+
+    log_path = tmp_path / "scheduler.log"
+    root = logging.getLogger()
+    added_before = list(root.handlers)
+    try:
+        args = parse_args([
+            "schedule", "tick", "--symbols", "AAPL", "--benchmark", "", "--now", _TRADING_TIME,
+            "--log-file", str(log_path), *_db_args(tmp_path),
+        ])
+        run_schedule_command(args)
+        for handler in root.handlers:
+            handler.flush()
+
+        assert log_path.exists()
+        assert "file logging enabled" in log_path.read_text()
+    finally:
+        for handler in list(root.handlers):
+            if handler not in added_before:
+                root.removeHandler(handler)
+                handler.close()
 
 
 def test_schedule_tick_dry_run_now_flag_does_not_persist_anything_for_a_skip(tmp_path):
