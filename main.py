@@ -43,7 +43,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review")
+_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -1092,6 +1092,184 @@ def run_learn_command(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+# `shadow-run` -- Phase 27 end-to-end shadow trading validation: ONE pass
+# through the full pipeline (scan -> research -> decide -> predict ->
+# evaluate -> learn) for a configured watchlist. This is orchestration
+# only -- every step calls the exact same library function its own
+# standalone CLI command already uses (market_intelligence.scanner.
+# run_scan, research.summarizer.build_research_report, decision_engine.
+# engine.make_decision, risk.sizing.build_signal_for_buy, predictions.
+# tracker.create_prediction/evaluate_prediction/summarize_predictions,
+# learning.analysis.build_learning_report) -- nothing here reimplements
+# any of that logic.
+#
+# HONEST LIMITATION, stated here and in the Phase 27 report: the
+# roadmap's own Phase 27 acceptance criterion is to run this "for
+# sufficient time before considering higher-risk functionality" --
+# that is real-world elapsed time this command cannot fabricate by
+# running once. This command is the INFRASTRUCTURE that makes that
+# validation possible (e.g. via a scheduler running it periodically);
+# it does not itself constitute "sufficient time" evidence.
+#
+# One symbol's failure never aborts the whole run -- matches
+# market_intelligence.scanner's own per-symbol fail-independently
+# posture. Still no order, real or paper: no code path here imports
+# paper/ or a broker adapter for anything other than an OPTIONAL,
+# read-only open-position lookup (--paper-db), identical to `decide`'s
+# own existing use of it.
+# --------------------------------------------------------------------------
+
+
+def run_shadow_run_command(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
+    from backtesting.cache import CachedMarketDataProvider
+    from decision_engine.engine import make_decision
+    from decision_engine.models import RiskContext
+    from decision_engine.store import DecisionStore
+    from market.context import get_market_context
+    from market.data_provider import get_market_data_provider
+    from market_data.universe import MarketUniverse
+    from market_intelligence.scanner import run_scan
+    from market_intelligence.store import ScanHistoryStore
+    from predictions.errors import PredictionUnavailableError
+    from predictions.store import PredictionStore
+    from predictions.tracker import create_prediction, evaluate_prediction, summarize_predictions
+    from research.news import YahooNewsProvider
+    from research.sector import YahooSectorInfoProvider
+    from research.store import ResearchStore
+    from research.summarizer import build_research_report
+    from risk.sizing import SizingUnavailableError, build_signal_for_buy
+
+    if args.watchlist_file:
+        universe = MarketUniverse.from_yaml_file(args.watchlist_file)
+    elif args.symbols:
+        symbols = [s for s in args.symbols.split(",") if s.strip()]
+        universe = MarketUniverse.from_watchlist(symbols)
+    else:
+        print("shadow-run: one of --symbols or --watchlist-file is required.", file=sys.stderr)
+        sys.exit(2)
+
+    provider = CachedMarketDataProvider(get_market_data_provider())
+    benchmark_symbol = args.benchmark or None
+
+    print("=" * 70)
+    print("SHADOW RUN -- FULL PIPELINE, ONE PASS -- NOT AN ORDER (no real or paper trade is placed)")
+    print("=" * 70)
+
+    logger.info("shadow-run: scanning %d symbols", len(universe))
+    scan_report = run_scan(
+        universe, provider=provider, benchmark_symbol=benchmark_symbol, period=args.period, interval=args.interval,
+    )
+    scanner_db = args.scanner_db or DEFAULT_SCANNER_DB_PATH
+    scan_store = ScanHistoryStore(scanner_db)
+    scan_store.save_report(scan_report)
+    scan_store.close()
+    print(f"\n[1/4] Scan complete: {len(scan_report.candidates)} candidates, {len(scan_report.excluded)} excluded (scan_id={scan_report.scan_id}).")
+
+    decision_db = args.decision_db or DEFAULT_DECISION_DB_PATH
+    research_db = args.research_db or DEFAULT_RESEARCH_DB_PATH
+    predictions_db = args.predictions_db or DEFAULT_PREDICTIONS_DB_PATH
+
+    decision_store = DecisionStore(decision_db)
+    research_store = ResearchStore(research_db)
+    prediction_store = PredictionStore(predictions_db)
+    news_provider = YahooNewsProvider()
+    sector_provider = YahooSectorInfoProvider()
+
+    predictions_recorded = 0
+    decisions_by_label: dict[str, int] = {}
+
+    print(f"\n[2/4] Research + decide + predict for {len(scan_report.candidates)} candidate(s):")
+    for candidate in scan_report.candidates:
+        symbol = candidate.symbol
+        try:
+            research_report = build_research_report(
+                symbol, news_provider=news_provider, sector_provider=sector_provider,
+                candidate_explanation=candidate.explanation, include_ai_summary=args.with_ai, news_limit=args.news_limit,
+            )
+            research_store.save_report(research_report)
+
+            risk_context = RiskContext.unknown()
+            if args.paper_db:
+                from paper.store import PaperStore
+
+                paper_store = PaperStore(args.paper_db)
+                open_position = paper_store.get_open_position(symbol)
+                account = paper_store.get_account()
+                risk_context = RiskContext(
+                    has_open_position=open_position is not None,
+                    consecutive_losses=account.consecutive_losses if account is not None else 0,
+                    note=f"Derived from paper account state at {args.paper_db}.",
+                )
+                paper_store.close()
+
+            market_context = get_market_context(symbol, period=args.period, interval=args.interval)
+            decision = make_decision(
+                symbol, candidate=candidate, research=research_report, market_context=market_context,
+                risk_context=risk_context, include_narrative=args.with_ai,
+            )
+            decision_store.save_decision(decision)
+            decisions_by_label[decision.label.value] = decisions_by_label.get(decision.label.value, 0) + 1
+
+            prediction_note = ""
+            if decision.label.value == "BUY":
+                try:
+                    signal = build_signal_for_buy(decision, market_context)
+                    prediction = create_prediction(decision, signal, horizon_bars=args.horizon_bars, interval=args.interval)
+                    prediction_store.save_prediction(prediction)
+                    predictions_recorded += 1
+                    prediction_note = f" -> prediction recorded ({prediction.prediction_id[:12]})"
+                except (SizingUnavailableError, PredictionUnavailableError) as exc:
+                    prediction_note = f" -> no prediction recorded ({exc})"
+
+            print(f"  {symbol:12s} composite={candidate.composite_score:+.2f}  decision={decision.label.value:10s}{prediction_note}")
+        except Exception as exc:  # noqa: BLE001 -- one symbol's failure must never abort the whole shadow run
+            logger.warning("shadow-run: %s failed, continuing with the rest of the universe: %s", symbol, exc)
+            print(f"  {symbol:12s} FAILED: {exc}")
+
+    research_store.close()
+    decision_store.close()
+
+    if args.skip_evaluate:
+        prediction_store.close()
+        print("\n[3/4] Evaluation skipped (--skip-evaluate).")
+        print("[4/4] Learning summary skipped (--skip-evaluate).")
+        _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded)
+        return
+
+    print("\n[3/4] Evaluating all outstanding predictions:")
+    pending = prediction_store.list_predictions_needing_evaluation()
+    print(f"  {len(pending)} prediction(s) needing evaluation.")
+    for prediction in pending:
+        evaluation = evaluate_prediction(prediction, provider=provider, period=args.period)
+        prediction_store.save_evaluation(evaluation)
+        print(f"  {prediction.symbol:10s} {prediction.prediction_id[:12]}  {evaluation.outcome.value:18s} {evaluation.detail}")
+
+    summary = summarize_predictions(prediction_store.list_all_evaluations())
+    prediction_store.close()
+
+    print("\n[4/4] Learning summary (latest evaluation per prediction):")
+    print(f"  Total:             {summary.total_predictions}")
+    print(f"  Active:            {summary.active}")
+    print(f"  Target hit:        {summary.target_hit}")
+    print(f"  Stop hit:          {summary.stop_hit}")
+    print(f"  Expired:           {summary.expired}")
+    print(f"  Insufficient data: {summary.insufficient_data}")
+    print(f"  Win rate:          {_fmt_pct(summary.win_rate)}")
+    print(f"  Average return:    {_fmt_pct(summary.average_return)}")
+
+    _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded)
+
+
+def _print_shadow_run_footer(scan_report, decisions_by_label: dict[str, int], predictions_recorded: int) -> None:
+    label_summary = ", ".join(f"{label}={count}" for label, count in sorted(decisions_by_label.items())) or "(none)"
+    print(f"\nRun summary: {len(scan_report.candidates)} candidate(s) scanned; decisions: {label_summary}; predictions recorded: {predictions_recorded}.")
+    print("No real or paper order was placed by this command.")
+    print("This is ONE pass, not 'sufficient time' -- run `shadow-run` again later (e.g. on a schedule) to accumulate real validation evidence over time.")
+
+
+# --------------------------------------------------------------------------
 # `review` -- Phase 25 AI Multi-Agent Market Research: an independent,
 # adversarial second opinion on the latest persisted Decision. Requires
 # Ollama (unlike `decide`'s optional narrative, there is no meaningful
@@ -1462,6 +1640,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     review_parser.add_argument("--symbol", required=True, help="Ticker to review (e.g. AAPL, RELIANCE.NS).")
     review_parser.add_argument("--decision-db", type=str, default=None, help=f"Read the latest decision from this path (default: {DEFAULT_DECISION_DB_PATH}).")
 
+    shadow_run_parser = subparsers.add_parser(
+        "shadow-run",
+        help=(
+            "Phase 27: one full pass through scan -> research -> decide -> predict -> evaluate -> learn for a "
+            "watchlist. Orchestration only -- reuses each stage's own existing function. NOT an order; places no trade."
+        ),
+    )
+    shadow_run_parser.add_argument("--symbols", type=str, default=None, help="Comma-separated watchlist (e.g. AAPL,MSFT,RELIANCE.NS). Required unless --watchlist-file is given.")
+    shadow_run_parser.add_argument("--watchlist-file", type=str, default=None, help="Path to a YAML file with a top-level `market_universe: {mode: watchlist, symbols: [...]}` key.")
+    shadow_run_parser.add_argument("--period", default="1y", help="Historical window used for scanning, market context, and evaluation (default: 1y).")
+    shadow_run_parser.add_argument("--interval", default="1d", help="Bar interval (default: 1d).")
+    shadow_run_parser.add_argument("--benchmark", default="^NSEI", help="Benchmark symbol for scanner relative strength (default: ^NSEI). Pass an empty string to disable.")
+    shadow_run_parser.add_argument("--news-limit", type=int, default=10, help="Max news items to fetch per symbol (default: 10).")
+    shadow_run_parser.add_argument("--horizon-bars", type=int, default=20, help="Bars after entry before an unresolved prediction is marked EXPIRED (default: 20).")
+    shadow_run_parser.add_argument("--paper-db", type=str, default=None, help="Optional: check this paper-trading database for an existing open position per symbol, to distinguish BUY/WATCH from EXIT.")
+    shadow_run_parser.add_argument("--with-ai", action="store_true", help="Include the optional AI research summary and decision narrative for every symbol (default: off, to avoid an LLM call per symbol in a bulk run).")
+    shadow_run_parser.add_argument("--skip-evaluate", action="store_true", help="Stop after recording predictions -- skip the evaluate/learn tail (default: run the full pipeline through learning).")
+    shadow_run_parser.add_argument("--scanner-db", type=str, default=None, help=f"SQLite scan-history path (default: {DEFAULT_SCANNER_DB_PATH}).")
+    shadow_run_parser.add_argument("--research-db", type=str, default=None, help=f"SQLite research-history path (default: {DEFAULT_RESEARCH_DB_PATH}).")
+    shadow_run_parser.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")
+    shadow_run_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
+
     return parser.parse_args(argv)
 
 
@@ -1499,6 +1699,8 @@ def main() -> None:
             run_learn_command(args)
         elif args.command == "review":
             run_review_command(args)
+        elif args.command == "shadow-run":
+            run_shadow_run_command(args)
         else:
             run_analyze_command(args)
     except _CONTROLLED_ERRORS as exc:
