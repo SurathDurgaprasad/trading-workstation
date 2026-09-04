@@ -289,6 +289,80 @@ def test_decision_detail_page_shows_decision_confidence_and_rationale(client, _i
     assert "SCANNER EVIDENCE" in response.text
 
 
+# --- AI narrative transparency -------------------------------------------------
+#
+# Real gap found via adversarial UI audit (new mission workstream, Section 6/13
+# -- "the user must understand that the LLM did not secretly make the trade
+# decision" / "AI activity transparency"): Decision.narrative and
+# Decision.narrative_unavailable_reason are real, persisted fields (populated
+# by `decide --with-ai` / `shadow-run --with-ai`, decision_engine/engine.py:
+# include_narrative), but decision_detail_page never rendered either one --
+# confirmed by grepping dashboard/app.py for ".narrative": zero matches before
+# this fix. An operator running with --with-ai had no way to see the AI's own
+# explanation on the dashboard at all, let alone see it clearly separated from
+# the deterministic rationale above it.
+
+
+def test_decision_detail_page_shows_ai_narrative_when_present(client, _isolated_intelligence_dbs):
+    from decision_engine.models import Decision, RiskContext
+    from decision_engine.store import DecisionStore
+
+    tmp_path = _isolated_intelligence_dbs
+    candidate = _candidate("AAPL", composite=1.75)
+    store = DecisionStore(tmp_path / "decisions.db")
+    store.save_decision(Decision(
+        decision_id="dec-AAPL", symbol="AAPL", as_of=datetime(2024, 6, 1, tzinfo=timezone.utc), label=DecisionLabel.BUY,
+        rationale=["deterministic rationale line"], config_version="cfg1", scanner_evidence=candidate, research_evidence=None,
+        market_context=None, risk_context=RiskContext.unknown(),
+        narrative="The AI's own plain-language explanation of this BUY.", narrative_unavailable_reason=None,
+    ))
+    store.close()
+
+    response = client.get("/intelligence/AAPL")
+
+    assert "AI EXPLANATION" in response.text
+    assert "The AI&#x27;s own plain-language explanation of this BUY." in response.text or "The AI's own plain-language explanation of this BUY." in response.text
+    # The deterministic rationale must still be present and visually distinct
+    # from the AI narrative -- the user must never confuse the two.
+    assert "deterministic rationale line" in response.text
+    assert "DETERMINISTIC" in response.text
+
+
+def test_decision_detail_page_shows_narrative_unavailable_reason(client, _isolated_intelligence_dbs):
+    from decision_engine.models import Decision, RiskContext
+    from decision_engine.store import DecisionStore
+
+    tmp_path = _isolated_intelligence_dbs
+    candidate = _candidate("AAPL", composite=1.75)
+    store = DecisionStore(tmp_path / "decisions.db")
+    store.save_decision(Decision(
+        decision_id="dec-AAPL", symbol="AAPL", as_of=datetime(2024, 6, 1, tzinfo=timezone.utc), label=DecisionLabel.BUY,
+        rationale=["deterministic rationale line"], config_version="cfg1", scanner_evidence=candidate, research_evidence=None,
+        market_context=None, risk_context=RiskContext.unknown(),
+        narrative=None, narrative_unavailable_reason="AI narrative unavailable: Ollama connection refused",
+    ))
+    store.close()
+
+    response = client.get("/intelligence/AAPL")
+
+    assert "AI EXPLANATION" in response.text
+    assert "Ollama connection refused" in response.text
+
+
+def test_decision_detail_page_shows_narrative_not_requested_when_both_absent(client, _isolated_intelligence_dbs):
+    # _save_decision's own default: narrative=None, narrative_unavailable_reason=None
+    # -- the ordinary case for a decision made WITHOUT --with-ai. Must say so
+    # honestly, never silently omit the section or imply a failure occurred.
+    tmp_path = _isolated_intelligence_dbs
+    candidate = _candidate("AAPL", composite=1.75)
+    _save_decision(tmp_path / "decisions.db", "AAPL", DecisionLabel.BUY, candidate)
+
+    response = client.get("/intelligence/AAPL")
+
+    assert "AI EXPLANATION" in response.text
+    assert "not requested" in response.text.lower() or "--with-ai" in response.text
+
+
 def test_decision_detail_page_shows_decision_history_most_recent_first(client, _isolated_intelligence_dbs):
     tmp_path = _isolated_intelligence_dbs
     store = DecisionStore(tmp_path / "decisions.db")

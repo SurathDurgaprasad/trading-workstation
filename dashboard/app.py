@@ -564,6 +564,30 @@ async def decision_detail_page(request: Request) -> HTMLResponse:
             f"<td>{html.escape(d.config_version)}</td></tr>"
             for d in decisions
         )
+        # Mission requirement (new UI/UX workstream, Section 6/13 -- "the user
+        # must understand that the LLM did not secretly make the trade
+        # decision" / "AI activity transparency"): Decision.narrative and
+        # narrative_unavailable_reason are real, persisted fields (populated by
+        # `decide`/`shadow-run --with-ai`) that were never rendered anywhere in
+        # this dashboard -- found missing via adversarial UI audit. Rendered in
+        # its OWN, clearly-labeled section, visually separate from the
+        # deterministic rationale above -- never merged into one block, so an
+        # operator can never mistake AI narration for the actual decision basis.
+        if latest.narrative is not None:
+            ai_section = (
+                "<h3 style='font-size:14px;color:#9aa4b2;'>AI EXPLANATION <span class='tag tag-mock'>LLM narration -- not the decision basis</span></h3>"
+                f"<p>{html.escape(latest.narrative)}</p>"
+            )
+        elif latest.narrative_unavailable_reason is not None:
+            ai_section = (
+                "<h3 style='font-size:14px;color:#9aa4b2;'>AI EXPLANATION</h3>"
+                f"<p class='muted'>{html.escape(latest.narrative_unavailable_reason)}</p>"
+            )
+        else:
+            ai_section = (
+                "<h3 style='font-size:14px;color:#9aa4b2;'>AI EXPLANATION</h3>"
+                "<p class='muted'>Not requested for this decision -- run with <code>--with-ai</code> to include one.</p>"
+            )
         decision_section = f"""
 <div class="kv">
 <div>Latest label</div><div><span class='tag {decision_class}'>{html.escape(latest.label.value)}</span></div>
@@ -573,8 +597,9 @@ async def decision_detail_page(request: Request) -> HTMLResponse:
 <div>Config version</div><div>{html.escape(latest.config_version)}</div>
 <div>Data source/status</div><div>{data_source_text}</div>
 </div>
-<p><strong>Rationale:</strong></p>
+<h3 style='font-size:14px;color:#9aa4b2;'>DETERMINISTIC RATIONALE <span class='tag tag-long'>decision_engine.rules.classify -- the actual basis for the label above</span></h3>
 <ul>{rationale_items}</ul>
+{ai_section}
 <h3 style='font-size:14px;color:#9aa4b2;'>Decision history ({len(decisions)})</h3>
 <table><tr><th>As Of</th><th>Label</th><th>Confidence</th><th>Config Version</th></tr>{history_rows}</table>
 """
