@@ -1088,6 +1088,46 @@ def _size_if_requested(decision, *, market_context, args: argparse.Namespace):
     return size_decision(decision, market_context=market_context, account=account, risk_config=_risk_config_from_args(args))
 
 
+def _critic_config_for_interval(interval: str):
+    """Adversarial-audit finding (Section 6 of the autonomous mission --
+    multi-timeframe support): critic.config.CriticConfig's own 432000s
+    (5-day) default DATA_FRESHNESS threshold is deliberately generous for
+    shadow-run's own --interval 1d default (see that module's own
+    docstring: "a caller running on an intraday interval should pass a
+    tighter value") -- but nothing calling critic.engine.evaluate() ever
+    did, silently leaving DATA_FRESHNESS unable to catch genuinely stale
+    intraday data (5 days vastly exceeds any realistic staleness for a
+    5-minute bar) the moment --interval is anything shorter than daily.
+    No real workflow in this project uses an intraday --interval today,
+    but it is a fully general, unrestricted CLI parameter -- this closes
+    the gap for when one does, this is that caller finally doing so.
+
+    Byte-for-byte unchanged for daily-or-longer intervals (the actually-
+    used default). Reuses live.freshness.interval_to_timedelta rather
+    than a second interval parser; falls back to the unchanged default on
+    any unparseable interval string (e.g. yfinance's "mo") rather than
+    crashing shadow-run over a staleness-threshold detail."""
+    from critic.config import CriticConfig
+    from live.freshness import interval_to_timedelta
+
+    try:
+        bar_seconds = interval_to_timedelta(interval).total_seconds()
+    except ValueError:
+        return CriticConfig()
+    if bar_seconds >= 86400:  # daily or longer -- keep the existing, tested default exactly
+        return CriticConfig()
+    # Intraday: generous but meaningful -- 20x the bar interval, floored at
+    # 30 minutes (transient provider hiccups must not spuriously REJECT)
+    # and capped at 4 hours (a "5-minute" feed that's 4+ hours stale during
+    # a session is genuinely broken, not just slow) -- not tuned against
+    # any backtest, an explicit, documented, conservative choice, same "no
+    # fabricated threshold until proven otherwise" posture
+    # market_intelligence.config.ScannerConfig already documents for its
+    # own gates.
+    staleness = max(bar_seconds * 20, 1800.0)
+    return CriticConfig(max_data_staleness_seconds=min(staleness, 14400.0))
+
+
 def _bridge_to_paper_execution(signal, risk_decision, *, engine, state_store) -> str | None:
     """Explicit, opt-in bridge from a decision_engine BUY into a REAL
     paper.engine.PaperTradingEngine order -- the SAME idempotent,
@@ -1719,7 +1759,8 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
                             existing_open = paper_engine.store.get_open_position(symbol) is not None if paper_engine is not None else False
                             kill_switch_active = state_store.is_kill_switch_active() if state_store is not None else None
                             critic_assessment = critic_evaluate(
-                                decision, signal, kill_switch_active=kill_switch_active,
+                                decision, signal, config=_critic_config_for_interval(args.interval),
+                                kill_switch_active=kill_switch_active,
                                 existing_pending_order=existing_pending, existing_open_position=existing_open,
                             )
                             critic_verdicts[critic_assessment.verdict.value] = critic_verdicts.get(critic_assessment.verdict.value, 0) + 1

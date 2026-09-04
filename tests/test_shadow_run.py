@@ -429,6 +429,64 @@ def test_shadow_run_max_holding_bars_is_threaded_through_to_the_paper_engine(tmp
     assert captured.get("max_holding_bars") == 5
 
 
+# --- interval-aware critic staleness threshold -----------------------------------
+
+
+def test_critic_config_for_interval_unchanged_for_daily():
+    """Byte-for-byte the same as CriticConfig()'s own default -- the
+    actually-used --interval 1d default must never regress."""
+    from critic.config import CriticConfig
+    from main import _critic_config_for_interval
+
+    assert _critic_config_for_interval("1d").max_data_staleness_seconds == CriticConfig().max_data_staleness_seconds
+
+
+def test_critic_config_for_interval_scales_for_5m():
+    from main import _critic_config_for_interval
+
+    assert _critic_config_for_interval("5m").max_data_staleness_seconds == 6000.0  # 5*60*20
+
+
+def test_critic_config_for_interval_floors_at_30_minutes():
+    from main import _critic_config_for_interval
+
+    assert _critic_config_for_interval("1m").max_data_staleness_seconds == 1800.0  # 60*20=1200 < floor
+
+
+def test_critic_config_for_interval_caps_at_4_hours():
+    from main import _critic_config_for_interval
+
+    assert _critic_config_for_interval("1h").max_data_staleness_seconds == 14400.0  # 3600*20=72000 > cap
+
+
+def test_critic_config_for_interval_falls_back_on_unparseable_string():
+    from critic.config import CriticConfig
+    from main import _critic_config_for_interval
+
+    assert _critic_config_for_interval("1mo").max_data_staleness_seconds == CriticConfig().max_data_staleness_seconds
+    assert _critic_config_for_interval("garbage").max_data_staleness_seconds == CriticConfig().max_data_staleness_seconds
+
+
+def test_shadow_run_critic_config_interval_scaling_reaches_the_real_critic_call(tmp_path, monkeypatch):
+    """CLI-to-critic wiring: --interval must actually reach
+    critic.engine.evaluate()'s config= argument, not just parse -- the
+    scaling math itself is covered directly above."""
+    import critic.engine as critic_engine_module
+
+    captured = {}
+    real_evaluate = critic_engine_module.evaluate
+
+    def _capturing_evaluate(*args, **kwargs):
+        captured["max_data_staleness_seconds"] = kwargs["config"].max_data_staleness_seconds
+        return real_evaluate(*args, **kwargs)
+
+    monkeypatch.setattr(critic_engine_module, "evaluate", _capturing_evaluate)
+
+    run_shadow_run_command(_paper_execute_args(tmp_path, symbols="AAPL", extra=["--interval", "5m"]))
+
+    assert captured.get("max_data_staleness_seconds") == 6000.0
+
+
 def test_shadow_run_paper_execute_never_touches_a_prediction_when_disabled(tmp_path, capsys):
     """Backward compatibility: without --paper-execute, no paper store is
     ever created or touched at all, exactly as before this feature existed."""
