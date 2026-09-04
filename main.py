@@ -1958,6 +1958,7 @@ def _run_tick_from_args(args: argparse.Namespace, schedule_config, store, *, now
         horizon_bars=args.horizon_bars, paper_db=args.paper_db, with_ai=args.with_ai, resilient=args.resilient,
         live_source=args.live_source, scanner_db=args.scanner_db, research_db=args.research_db,
         decision_db=args.decision_db, predictions_db=args.predictions_db, initial_capital=args.initial_capital,
+        paper_execute=args.paper_execute, state_db=args.state_db,
         staleness_seconds=args.staleness_seconds, now=now,
     )
 
@@ -2009,6 +2010,8 @@ def run_schedule_command(args: argparse.Namespace) -> None:
         print("=" * 70)
         print("SCHEDULER TICK -- AT MOST ONE SLOT EXECUTED, THEN EXITS")
         print("=" * 70)
+        if args.paper_execute:
+            print(f"--paper-execute is ON: a shadow_run slot WILL submit real PENDING paper orders and advance existing ones against database {args.paper_db}.")
         _print_tick_result(result)
         return
 
@@ -2018,7 +2021,11 @@ def run_schedule_command(args: argparse.Namespace) -> None:
         print("SCHEDULER LOOP -- CONTINUOUS, EXPLICIT MODE (Ctrl+C to stop cleanly)")
         print("=" * 70)
         print(f"Polling every {args.interval_seconds:.0f}s. Database: {run_db_path}")
-        print("No real or paper order is ever placed by this command.")
+        print("No real broker order is EVER placed by this command (structurally impossible -- no order-placement code path exists anywhere in this project).")
+        if args.paper_execute:
+            print(f"--paper-execute is ON: shadow_run slots WILL submit real PENDING paper orders and advance existing ones against database {args.paper_db}. Run `python main.py paper status` to see current state.")
+        else:
+            print("No paper order is placed either -- --paper-execute was not given (shadow_run slots only record shadow predictions).")
 
         ticks = 0
         tick_failures = 0
@@ -2542,6 +2549,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         p.add_argument("--run-db", type=str, default=None, help=f"SQLite scheduler-run-history path (default: {DEFAULT_SCHEDULER_DB_PATH}).")
         p.add_argument("--staleness-seconds", type=float, default=1800.0, help="A RUNNING lock older than this with no completion is treated as an orphaned/crashed run and reclaimed (default: 1800 = 30 minutes).")
         p.add_argument("--log-file", type=str, default=None, help="Phase 39: also write logs to this path via a size-bounded, rotating file handler (default: 10MB x 5 backups) -- console output is unchanged either way. Recommended for `schedule loop` run unattended for days.")
+        p.add_argument(
+            "--paper-execute", action="store_true",
+            help=(
+                "Explicit opt-in, default OFF: forward --paper-execute to every shadow_run slot this scheduler runs, "
+                "so unattended ticks also submit real PENDING paper orders AND advance existing ones with fresh data "
+                "(the same paper/advance.py mechanism `shadow-run --paper-execute` itself uses -- not a second "
+                "execution path). Without this flag, `schedule tick`/`schedule loop` only ever records shadow "
+                "predictions, exactly as before this flag existed. Requires --initial-capital, --paper-db, and "
+                "--state-db all given, same as `shadow-run --paper-execute` -- refused with a clear error otherwise."
+            ),
+        )
+        p.add_argument("--state-db", type=str, default=None, help=f"SQLite kill-switch/pending-approval state path (default: {DEFAULT_LIVE_STATE_DB_PATH}). Required when --paper-execute is passed.")
 
     tick_parser = schedule_subparsers.add_parser("tick", help="Check whether a configured slot is due right now; if so, run it exactly once, then exit. Never loops.")
     _add_schedule_common_args(tick_parser)

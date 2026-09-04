@@ -335,3 +335,58 @@ def test_custom_schedule_config_is_honored(tmp_path, run_store):
     result = run_tick(schedule_config=custom, run_store=run_store, symbols="AAPL", benchmark="", now=_TRADING_TIME, **_db_paths(tmp_path))
     assert result.ran is True
     assert result.slot_name == "only_slot"
+
+
+def test_paper_execute_defaults_to_off_no_paper_order_submitted(tmp_path, run_store):
+    """Mission requirement: unattended paper execution must stay OFF by
+    default -- `schedule tick`/`schedule loop` must never submit a real
+    paper order just because a slot happens to be a shadow_run slot and
+    --initial-capital/--paper-db/--state-db happen to be given. Only an
+    explicit --paper-execute may turn this on."""
+    result = run_tick(
+        schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", benchmark="",
+        initial_capital=20_000.0, now=_TRADING_TIME, **_db_paths(tmp_path),
+    )
+    assert result.ran is True
+    assert result.slot_name == "intraday" and "FAILED" not in result.reason
+
+    paper_db = tmp_path / "paper.db"
+    assert not paper_db.exists()  # never even created -- no --paper-db was threaded through
+
+
+def test_paper_execute_is_threaded_through_and_submits_a_real_pending_order(tmp_path, run_store, monkeypatch):
+    """The scheduler-level opt-in: --paper-execute passed to run_tick must
+    reach the underlying shadow_run slot's `shadow-run --paper-execute`
+    invocation, using the SAME bridge (main.py's run_shadow_run_command,
+    paper/advance.py) `shadow-run --paper-execute` itself uses directly --
+    not a second, scheduler-specific execution path."""
+    import main as main_module
+
+    captured_args = {}
+    real_run_shadow_run_command = main_module.run_shadow_run_command
+
+    def _capture(args):
+        captured_args["paper_execute"] = args.paper_execute
+        captured_args["state_db"] = args.state_db
+        return real_run_shadow_run_command(args)
+
+    monkeypatch.setattr(main_module, "run_shadow_run_command", _capture)
+
+    paper_db = tmp_path / "paper.db"
+    state_db = tmp_path / "state.db"
+    result = run_tick(
+        schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", benchmark="",
+        initial_capital=20_000.0, paper_db=str(paper_db), paper_execute=True, state_db=str(state_db),
+        now=_TRADING_TIME, **_db_paths(tmp_path),
+    )
+
+    assert result.ran is True
+    assert captured_args.get("paper_execute") is True
+    assert captured_args.get("state_db") == str(state_db)
+
+    from paper.store import PaperStore
+
+    store = PaperStore(paper_db)
+    entries = store.list_journal_entries()
+    store.close()
+    assert len(entries) == 1  # a real paper order was actually submitted this tick

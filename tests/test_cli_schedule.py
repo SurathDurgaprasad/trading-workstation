@@ -94,6 +94,23 @@ def test_schedule_tick_initial_capital_override():
     assert args.initial_capital == 20_000.0
 
 
+def test_schedule_paper_execute_defaults_to_off():
+    args = parse_args(["schedule", "tick", "--symbols", "AAPL"])
+    assert args.paper_execute is False
+    assert args.state_db is None
+
+
+def test_schedule_paper_execute_flag_parses():
+    args = parse_args(["schedule", "tick", "--symbols", "AAPL", "--paper-execute", "--state-db", "/tmp/s.db"])
+    assert args.paper_execute is True
+    assert args.state_db == "/tmp/s.db"
+
+
+def test_schedule_loop_paper_execute_flag_parses():
+    args = parse_args(["schedule", "loop", "--symbols", "AAPL", "--paper-execute", "--state-db", "/tmp/s.db"])
+    assert args.paper_execute is True
+
+
 def test_schedule_loop_defaults():
     args = parse_args(["schedule", "loop", "--symbols", "AAPL"])
     assert args.schedule_command == "loop"
@@ -286,6 +303,58 @@ def test_schedule_loop_log_file_writes_a_persistent_log(tmp_path, capsys):
             if handler not in added_before:
                 root.removeHandler(handler)
                 handler.close()
+
+
+def test_schedule_loop_says_no_paper_order_either_by_default(tmp_path, capsys):
+    """Default OFF, honestly stated: without --paper-execute, `schedule
+    loop` must claim (correctly) that no paper order is placed either --
+    not just that no REAL broker order is placed."""
+    args = parse_args(["schedule", "loop", "--symbols", "AAPL", "--max-ticks", "1", "--interval-seconds", "0", *_db_args(tmp_path)])
+    run_schedule_command(args)
+    output = capsys.readouterr().out
+    assert "No real broker order is EVER placed" in output
+    assert "No paper order is placed either" in output
+    assert "--paper-execute is ON" not in output
+
+
+def test_schedule_loop_paper_execute_on_prints_honest_warning_not_false_safety_claim(tmp_path, capsys):
+    """Regression (self-audit finding): the loop header used to claim
+    'No real or paper order is ever placed by this command' unconditionally
+    -- false the moment --paper-execute submits a real paper order. Must
+    never claim that when --paper-execute is on; must say so plainly instead."""
+    paper_db = tmp_path / "paper.db"
+    state_db = tmp_path / "state.db"
+    args = parse_args([
+        "schedule", "loop", "--symbols", "AAPL", "--benchmark", "", "--max-ticks", "1", "--interval-seconds", "0",
+        "--initial-capital", "20000", "--paper-execute", "--paper-db", str(paper_db), "--state-db", str(state_db),
+        *_db_args(tmp_path),
+    ])
+    run_schedule_command(args)
+    output = capsys.readouterr().out
+    assert "No real broker order is EVER placed" in output  # still true, still stated
+    assert "No paper order is placed either" not in output  # would be false here
+    assert "--paper-execute is ON" in output
+    assert str(paper_db) in output
+
+    from paper.store import PaperStore
+
+    store = PaperStore(paper_db)
+    entries = store.list_journal_entries()
+    store.close()
+    assert len(entries) == 1  # the real CLI path actually submitted a paper order
+
+
+def test_schedule_tick_paper_execute_on_prints_honest_warning(tmp_path, capsys):
+    paper_db = tmp_path / "paper.db"
+    state_db = tmp_path / "state.db"
+    args = parse_args([
+        "schedule", "tick", "--symbols", "AAPL", "--benchmark", "", "--now", _TRADING_TIME,
+        "--initial-capital", "20000", "--paper-execute", "--paper-db", str(paper_db), "--state-db", str(state_db),
+        *_db_args(tmp_path),
+    ])
+    run_schedule_command(args)
+    output = capsys.readouterr().out
+    assert "--paper-execute is ON" in output
 
 
 def test_schedule_tick_dry_run_now_flag_does_not_persist_anything_for_a_skip(tmp_path):
