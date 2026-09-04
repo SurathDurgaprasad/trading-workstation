@@ -6,17 +6,29 @@ not just that the Python objects survive within one process.
 """
 
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from paper.engine import PaperTradingEngine
+from paper.engine import Bar, PaperTradingEngine
 from paper.reconciliation import reconcile
 from paper.replay import replay_historical
 from paper.store import PaperStore
 from risk.config import RiskConfig
 from strategy.baseline import TrendMomentumBaseline
+from strategy.signal import ReasonCode, Side, Signal
 from tests.conftest import make_bar, make_indicator_series
+
+
+def _expiry_signal(**overrides) -> Signal:
+    base = dict(
+        symbol="TEST", generated_at=datetime(2026, 1, 1), side=Side.LONG,
+        reference_price=100.0, stop_price=50.0, target_price=500.0,  # unreachable -- only expiry can close it
+        risk_reward=2.0, strategy_name="unit-test", reason_codes=[ReasonCode.TREND_CONFIRMED],
+    )
+    base.update(overrides)
+    return Signal(**base)
 
 
 def _volatile_series(n: int = 60):
@@ -95,3 +107,65 @@ def engine_risk(risk_config: RiskConfig):
     from risk.engine import RiskEngine
 
     return RiskEngine(risk_config)
+
+
+def test_position_expiry_bars_held_survives_a_restart(tmp_path):
+    """Genuine gap found via self-audit: the existing restart test above
+    (and every test in tests/test_paper_engine.py, by that file's own
+    stated ":memory:"-only convention) never exercises max_holding_bars,
+    so bars_held's restart-safety had only ever been proven via repeated
+    calls on the SAME in-memory engine object -- never a real
+    process-boundary restart. Same methodology as
+    test_restarted_replay_matches_an_uninterrupted_one: compares an
+    uninterrupted 3-bar run (max_holding_bars=3, expiring on the 3rd bar,
+    stop/target set unreachable so ONLY expiry can close it) against one
+    paused after 2 bars, persisted, and resumed from a freshly-opened
+    PaperStore/PaperTradingEngine."""
+    signal = _expiry_signal()
+    bars = [
+        Bar(timestamp=datetime(2026, 1, 2), open=101.0, high=102.0, low=100.5, close=101.5),
+        Bar(timestamp=datetime(2026, 1, 3), open=101.5, high=102.5, low=101.0, close=102.0),
+        Bar(timestamp=datetime(2026, 1, 4), open=102.0, high=103.0, low=101.5, close=102.5),
+    ]
+
+    # --- uninterrupted ---
+    uninterrupted_db = _tmp_db_path(tmp_path)
+    store_a = PaperStore(uninterrupted_db)
+    engine_a = PaperTradingEngine(store_a, initial_capital=100_000.0, max_holding_bars=3)
+    engine_a.submit_signal(signal)
+    for bar in bars:
+        engine_a.process_bar("TEST", bar)
+    state_uninterrupted = _business_state(store_a)
+    assert engine_a.store.get_open_position("TEST") is None  # expired
+    store_a.close()
+
+    # --- restarted: process 1 runs 2 bars (not yet expired), persists,
+    # "terminates"; process 2 resumes and processes the 3rd (expires) ---
+    restarted_db = _tmp_db_path(tmp_path)
+
+    store_b1 = PaperStore(restarted_db)
+    engine_b1 = PaperTradingEngine(store_b1, initial_capital=100_000.0, max_holding_bars=3)
+    engine_b1.submit_signal(signal)
+    engine_b1.process_bar("TEST", bars[0])
+    engine_b1.process_bar("TEST", bars[1])
+    assert engine_b1.store.get_open_position("TEST").bars_held == 2  # not yet expired
+    store_b1.close()  # simulates process termination
+
+    store_b2 = PaperStore(restarted_db)  # fresh connection, fresh engine -- loads persisted state
+    engine_b2 = PaperTradingEngine(store_b2, initial_capital=100_000.0, max_holding_bars=3)
+    # The resumed process must recover the CORRECT bars_held (2, not 0)
+    # from the persisted Position row -- if this were lost on restart, the
+    # position would incorrectly need 3 MORE bars to expire instead of 1.
+    assert engine_b2.store.get_open_position("TEST").bars_held == 2
+    engine_b2.process_bar("TEST", bars[2])
+    state_restarted = _business_state(store_b2)
+
+    assert state_restarted == state_uninterrupted, (
+        f"Restarted run diverged from an uninterrupted one.\n"
+        f"uninterrupted={state_uninterrupted}\nrestarted={state_restarted}"
+    )
+    assert engine_b2.store.get_open_position("TEST") is None  # expired, same as the uninterrupted run
+
+    report = reconcile(store_b2)
+    assert report.ok, report.issues
+    store_b2.close()
