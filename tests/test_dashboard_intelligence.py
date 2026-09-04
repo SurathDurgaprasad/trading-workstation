@@ -348,6 +348,100 @@ def test_decision_detail_page_no_predictions_yet(client, _isolated_intelligence_
     assert "No shadow predictions recorded for AAPL" in response.text
 
 
+def _decision_and_signal_for_critic(symbol: str = "AAPL"):
+    from decision_engine.models import Decision, RiskContext
+    from market.context import MarketContext
+    from research.models import ResearchReport
+    from risk.sizing import build_signal_for_buy
+
+    candidate = _candidate(symbol)
+    research = ResearchReport(report_id="r1", symbol=symbol, as_of=datetime(2024, 6, 1, tzinfo=timezone.utc), news=[], sector=None, ai_summary=None, ai_summary_unavailable_reason=None)
+    decision = Decision(
+        decision_id=f"dec-{symbol}", symbol=symbol, as_of=datetime(2024, 6, 1, tzinfo=timezone.utc), label=DecisionLabel.BUY,
+        rationale=["fake"], config_version="cfg1", scanner_evidence=candidate, research_evidence=research,
+        market_context=MarketContext(symbol=symbol, as_of=datetime(2024, 6, 1), price=100.0, atr_14=2.5),
+        risk_context=RiskContext.unknown(), confidence=0.8, confidence_explanation="fake",
+        narrative=None, narrative_unavailable_reason=None,
+    )
+    signal = build_signal_for_buy(decision, decision.market_context)
+    return decision, signal
+
+
+def test_decision_detail_page_shows_critic_na_when_no_assessment_was_recorded(client, _isolated_intelligence_dbs):
+    """Never fabricated: a prediction recorded before the critic existed,
+    or with --skip-critic, genuinely has no verdict to show."""
+    tmp_path = _isolated_intelligence_dbs
+    _save_prediction_and_evaluation(tmp_path / "predictions.db", "AAPL", "dec-AAPL", PredictionOutcomeState.TARGET_HIT, 0.15)
+
+    response = client.get("/intelligence/AAPL")
+    assert "n/a" in response.text
+
+
+def test_decision_detail_page_shows_a_real_approve_verdict(client, _isolated_intelligence_dbs):
+    from critic.engine import evaluate as critic_evaluate
+
+    tmp_path = _isolated_intelligence_dbs
+    decision, signal = _decision_and_signal_for_critic("AAPL")
+    assessment = critic_evaluate(decision, signal, now=datetime(2024, 6, 1, tzinfo=timezone.utc))
+    assert assessment.verdict.value == "APPROVE"  # sanity: this fixture is a genuinely clean case
+
+    store = PredictionStore(tmp_path / "predictions.db")
+    store.save_prediction(PredictionRecord(
+        prediction_id="pred-approve", decision_id="dec-AAPL", symbol="AAPL", created_at=datetime.now(timezone.utc),
+        label=DecisionLabel.BUY, entry_price=signal.reference_price, stop_price=signal.stop_price, target_price=signal.target_price,
+        entry_time=signal.generated_at, horizon_bars=20, interval="1d", critic_assessment=assessment,
+    ))
+    store.close()
+
+    response = client.get("/intelligence/AAPL")
+    assert "APPROVE" in response.text
+
+
+def test_decision_detail_page_shows_a_real_reject_verdict_with_reasons(client, _isolated_intelligence_dbs):
+    from critic.engine import evaluate as critic_evaluate
+
+    tmp_path = _isolated_intelligence_dbs
+    decision, signal = _decision_and_signal_for_critic("AAPL")
+    assessment = critic_evaluate(decision, signal, now=datetime(2024, 6, 1, tzinfo=timezone.utc), existing_open_position=True)
+    assert assessment.verdict.value == "REJECT"
+
+    store = PredictionStore(tmp_path / "predictions.db")
+    store.save_prediction(PredictionRecord(
+        prediction_id="pred-reject", decision_id="dec-AAPL", symbol="AAPL", created_at=datetime.now(timezone.utc),
+        label=DecisionLabel.BUY, entry_price=signal.reference_price, stop_price=signal.stop_price, target_price=signal.target_price,
+        entry_time=signal.generated_at, horizon_bars=20, interval="1d", critic_assessment=assessment,
+    ))
+    store.close()
+
+    response = client.get("/intelligence/AAPL")
+    assert "REJECT" in response.text
+    assert "already has" in response.text  # the DUPLICATE_EXPOSURE reason text, not fabricated
+
+
+def test_decision_detail_page_escapes_critic_reasons(client, _isolated_intelligence_dbs):
+    """Defense in depth, same discipline as the journal-entry escaping
+    test elsewhere in this file: critic reasons are always html.escape()'d."""
+    from critic.models import CriticAssessment, CriticCheck, CriticCheckName, CriticCheckSeverity, CriticVerdict
+
+    tmp_path = _isolated_intelligence_dbs
+    malicious_assessment = CriticAssessment(
+        verdict=CriticVerdict.REJECT,
+        checks=(CriticCheck(name=CriticCheckName.KILL_SWITCH, evaluated=True, passed=False, severity=CriticCheckSeverity.HARD, detail="x"),),
+        failed_checks=(CriticCheckName.KILL_SWITCH.value,), warnings=(), reasons=("<script>alert(1)</script>",),
+        config_version="cfg1",
+    )
+    store = PredictionStore(tmp_path / "predictions.db")
+    store.save_prediction(PredictionRecord(
+        prediction_id="pred-xss", decision_id="dec-AAPL", symbol="AAPL", created_at=datetime.now(timezone.utc),
+        label=DecisionLabel.BUY, entry_price=100.0, stop_price=95.0, target_price=110.0, entry_time=datetime(2024, 6, 1),
+        horizon_bars=20, interval="1d", critic_assessment=malicious_assessment,
+    ))
+    store.close()
+
+    response = client.get("/intelligence/AAPL")
+    assert "<script>alert(1)</script>" not in response.text
+
+
 def test_decision_detail_page_normalizes_symbol_case(client, _isolated_intelligence_dbs):
     tmp_path = _isolated_intelligence_dbs
     _save_decision(tmp_path / "decisions.db", "AAPL", DecisionLabel.BUY, _candidate("AAPL"))

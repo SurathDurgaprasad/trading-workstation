@@ -534,13 +534,26 @@ async def decision_detail_page(request: Request) -> HTMLResponse:
             rd = prediction.risk_decision
             qty_text = str(rd.position_size.quantity) if (rd is not None and rd.position_size is not None) else "n/a"
             capital_text = f"{rd.account_equity:,.0f}" if rd is not None else "n/a"
+
+            ca = prediction.critic_assessment
+            if ca is None:
+                # Never fabricated: a prediction recorded before the critic
+                # existed, or with --skip-critic, genuinely has no verdict.
+                critic_cell = "<span class='muted'>n/a</span>"
+            else:
+                critic_class = "tag-long" if ca.verdict.value == "APPROVE" else ("tag-short" if ca.verdict.value == "REJECT" else "tag-sim")
+                critic_cell = f"<span class='tag {critic_class}'>{html.escape(ca.verdict.value)}</span>"
+                if ca.verdict.value != "APPROVE":
+                    reasons_text = "; ".join(ca.reasons)
+                    critic_cell += f"<br><span class='muted' style='font-size:11px;'>{html.escape(reasons_text)}</span>"
+
             prediction_rows.append(
                 f"<tr><td>{html.escape(prediction.created_at.isoformat())}</td>"
                 f"<td>{prediction.entry_price:.2f}</td><td>{prediction.stop_price:.2f}</td><td>{prediction.target_price:.2f}</td>"
-                f"<td>{qty_text}</td><td>{capital_text}</td>"
+                f"<td>{qty_text}</td><td>{capital_text}</td><td>{critic_cell}</td>"
                 f"<td><span class='tag {outcome_class}'>{outcome_text}</span></td><td>{return_text}</td></tr>"
             )
-        prediction_section = f"<table><tr><th>Created</th><th>Entry</th><th>Stop</th><th>Target</th><th>Qty</th><th>Capital</th><th>Outcome</th><th>Return</th></tr>{''.join(prediction_rows)}</table>"
+        prediction_section = f"<table><tr><th>Created</th><th>Entry</th><th>Stop</th><th>Target</th><th>Qty</th><th>Capital</th><th>Critic</th><th>Outcome</th><th>Return</th></tr>{''.join(prediction_rows)}</table>"
 
     body = f"""
 <p><a href="/intelligence">&larr; back to market intelligence</a></p>
