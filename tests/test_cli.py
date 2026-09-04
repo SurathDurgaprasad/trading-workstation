@@ -5,6 +5,7 @@ from main import (
     run_decide_command,
     run_evaluate_command,
     run_learn_command,
+    run_paper_command,
     run_paper_live_command,
     run_predict_command,
     run_research_command,
@@ -67,6 +68,43 @@ def test_paper_status_subcommand():
     assert args.command == "paper"
     assert args.paper_command == "status"
     assert args.db is None
+    assert args.initial_capital == 100_000.0
+
+
+def test_paper_initial_capital_override(tmp_path, capsys):
+    """Phase 42+ mission: simulated starting capital must be configurable,
+    never hardcoded -- proves it end-to-end, not just argparse plumbing:
+    a fresh `paper status` with --initial-capital creates an account with
+    exactly that capital, and the value is visible in the printed status."""
+    args = parse_args(["paper", "--db", str(tmp_path / "paper.db"), "--initial-capital", "20000", "status"])
+    assert args.initial_capital == 20_000.0
+
+    run_paper_command(args)
+    output = capsys.readouterr().out
+    assert "Initial Capital:     20,000.00" in output
+    assert "Equity:              20,000.00" in output
+    assert "Cash:                20,000.00" in output
+
+    from paper.store import PaperStore
+
+    store = PaperStore(tmp_path / "paper.db")
+    account = store.get_account()
+    store.close()
+    assert account.initial_capital == 20_000.0
+    assert account.cash == 20_000.0
+
+
+def test_paper_initial_capital_only_applies_on_first_creation(tmp_path, capsys):
+    """A second `paper status` against the SAME db with a DIFFERENT
+    --initial-capital must not reset the already-persisted account --
+    restart-safe, matching every other store in this project."""
+    db_path = str(tmp_path / "paper.db")
+    run_paper_command(parse_args(["paper", "--db", db_path, "--initial-capital", "20000", "status"]))
+    capsys.readouterr()
+
+    run_paper_command(parse_args(["paper", "--db", db_path, "--initial-capital", "999999", "status"]))
+    output = capsys.readouterr().out
+    assert "Initial Capital:     20,000.00" in output  # unchanged, NOT 999,999
 
 
 def test_paper_run_subcommand_defaults():
@@ -99,18 +137,21 @@ def test_live_sim_subcommand_defaults():
     assert args.max_bars is None
     assert args.freshness_multiplier == 2.0
     assert args.require_human_approval is False
+    assert args.initial_capital == 100_000.0
 
 
 def test_live_sim_subcommand_overrides():
     args = parse_args([
         "live-sim", "--symbol", "AAPL", "--interval", "5m", "--period", "1d",
         "--max-bars", "10", "--freshness-multiplier", "5.0", "--require-human-approval",
+        "--initial-capital", "20000",
     ])
     assert args.interval == "5m"
     assert args.period == "1d"
     assert args.max_bars == 10
     assert args.freshness_multiplier == 5.0
     assert args.require_human_approval is True
+    assert args.initial_capital == 20_000.0
 
 
 def test_paper_live_subcommand_defaults():
@@ -133,6 +174,7 @@ def test_paper_live_subcommand_defaults():
     assert args.reset_kill_switch is False
     assert args.source == "mock"  # real Dhan connection is opt-in, never the default
     assert args.refresh_instrument_map is False
+    assert args.initial_capital == 100_000.0
 
 
 def test_paper_live_source_dhan_flag():
@@ -150,7 +192,7 @@ def test_paper_live_subcommand_overrides():
     args = parse_args([
         "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
         "--no-human-approval", "--approval-timeout-seconds", "30", "--no-ai-explanation",
-        "--auto-approve", "--freshness-multiplier", "10.0",
+        "--auto-approve", "--freshness-multiplier", "10.0", "--initial-capital", "20000",
     ])
     assert args.interval == "1d"
     assert args.period == "1y"
@@ -159,6 +201,7 @@ def test_paper_live_subcommand_overrides():
     assert args.no_ai_explanation is True
     assert args.auto_approve is True
     assert args.freshness_multiplier == 10.0
+    assert args.initial_capital == 20_000.0
 
 
 def test_dashboard_subcommand_defaults():

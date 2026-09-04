@@ -207,7 +207,7 @@ def run_paper_command(args: argparse.Namespace) -> None:
 
     db_path = args.db or DEFAULT_PAPER_DB_PATH
     store = PaperStore(db_path)
-    engine = PaperTradingEngine(store)
+    engine = PaperTradingEngine(store, initial_capital=args.initial_capital)
 
     if args.paper_command == "status":
         account = engine.account
@@ -218,7 +218,8 @@ def run_paper_command(args: argparse.Namespace) -> None:
         print("PAPER TRADING STATUS")
         print("=" * 50)
         print(f"\nDatabase: {db_path}")
-        print(f"\nEquity:              {account.equity:,.2f}")
+        print(f"\nInitial Capital:     {account.initial_capital:,.2f}")
+        print(f"Equity:              {account.equity:,.2f}")
         print(f"Cash:                {account.cash:,.2f}")
         print(f"Realized PnL:        {account.realized_pnl:,.2f}")
         print(f"Peak Equity:         {account.peak_equity:,.2f}")
@@ -296,7 +297,7 @@ def run_live_sim_command(args: argparse.Namespace) -> None:
 
     db_path = args.db or DEFAULT_LIVE_SIM_DB_PATH
     store = PaperStore(db_path)
-    engine = PaperTradingEngine(store)
+    engine = PaperTradingEngine(store, initial_capital=args.initial_capital)
     strategy = get_strategy(args.strategy)
 
     source = MockMarketDataSource.from_cached_history(args.symbol, interval=args.interval, period=args.period)
@@ -480,7 +481,7 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
 
     db_path = args.db or DEFAULT_LIVE_SIM_DB_PATH
     store = PaperStore(db_path)
-    engine = PaperTradingEngine(store)
+    engine = PaperTradingEngine(store, initial_capital=args.initial_capital)
     strategy = get_strategy(args.strategy)
 
     source, source_label, status_label = _build_market_data_source(args)
@@ -2027,6 +2028,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help=f"SQLite journal path (default: {DEFAULT_PAPER_DB_PATH}).",
     )
+    paper_parser.add_argument(
+        "--initial-capital",
+        type=float,
+        default=100_000.0,
+        help=(
+            "Simulated starting capital (default: 100000). Only takes effect the FIRST time this "
+            "database is used -- an existing account's capital is never reset by this flag on a later run "
+            "(restart-safe, same posture as every other persisted store in this project)."
+        ),
+    )
     paper_subparsers = paper_parser.add_subparsers(dest="paper_command", required=True)
 
     paper_subparsers.add_parser("status", help="Show account state, open positions, and reconciliation status.")
@@ -2056,6 +2067,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     live_sim_parser.add_argument("--max-bars", type=int, default=None, help="Stop after this many bars (default: run to feed exhaustion).")
     live_sim_parser.add_argument("--freshness-multiplier", type=float, default=2.0, help="Freshness threshold = multiplier x interval duration (default: 2.0).")
     live_sim_parser.add_argument("--require-human-approval", action="store_true", help="Stop each approved signal at PENDING_HUMAN_APPROVAL instead of auto-executing in paper (default: off).")
+    live_sim_parser.add_argument(
+        "--initial-capital", type=float, default=100_000.0,
+        help="Simulated starting capital (default: 100000). Only takes effect the first time this database is used.",
+    )
 
     paper_live_parser = subparsers.add_parser(
         "paper-live",
@@ -2092,6 +2107,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     paper_live_parser.add_argument("--kill-switch", action="store_true", help="Activate the local kill switch (blocks all new pending approvals/executions) and exit. Does not touch existing positions.")
     paper_live_parser.add_argument("--kill-switch-reason", type=str, default=None, help="Free-text reason recorded with --kill-switch.")
     paper_live_parser.add_argument("--reset-kill-switch", action="store_true", help="Explicitly clear a previously activated kill switch and exit.")
+    paper_live_parser.add_argument(
+        "--initial-capital", type=float, default=100_000.0,
+        help="Simulated starting capital (default: 100000). Only takes effect the first time this database is used.",
+    )
 
     dashboard_parser = subparsers.add_parser(
         "dashboard",
