@@ -277,6 +277,55 @@ def test_resilient_flag_is_threaded_through_to_shadow_run(tmp_path, run_store, m
     assert captured_args.get("resilient") is True
 
 
+def test_initial_capital_is_threaded_through_to_shadow_run(tmp_path, run_store, monkeypatch):
+    """Mission auditability requirement: a scheduled shadow_run slot must
+    be able to size its predictions against configured capital exactly
+    like a manually-run `shadow-run --initial-capital ...` would -- the
+    scheduler must not silently drop it."""
+    import main as main_module
+
+    captured_args = {}
+    real_run_shadow_run_command = main_module.run_shadow_run_command
+
+    def _capture(args):
+        captured_args["initial_capital"] = args.initial_capital
+        return real_run_shadow_run_command(args)
+
+    monkeypatch.setattr(main_module, "run_shadow_run_command", _capture)
+
+    result = run_tick(
+        schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", benchmark="",
+        initial_capital=20_000.0, now=_TRADING_TIME, **_db_paths(tmp_path),
+    )
+
+    assert result.ran is True
+    assert captured_args.get("initial_capital") == 20_000.0
+
+    from predictions.store import PredictionStore
+
+    prediction_store = PredictionStore(tmp_path / "predictions.db")
+    predictions = prediction_store.list_predictions()
+    prediction_store.close()
+    assert len(predictions) == 1
+    assert predictions[0].risk_decision is not None
+    assert predictions[0].risk_decision.account_equity == 20_000.0
+
+
+def test_initial_capital_defaults_to_none_no_sizing_computed(tmp_path, run_store):
+    """Backward compatibility: a scheduled slot with no --initial-capital
+    behaves exactly as before this flag existed -- no risk_decision persisted."""
+    result = run_tick(schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", benchmark="", now=_TRADING_TIME, **_db_paths(tmp_path))
+    assert result.ran is True
+
+    from predictions.store import PredictionStore
+
+    prediction_store = PredictionStore(tmp_path / "predictions.db")
+    predictions = prediction_store.list_predictions()
+    prediction_store.close()
+    assert len(predictions) == 1
+    assert predictions[0].risk_decision is None
+
+
 def test_custom_schedule_config_is_honored(tmp_path, run_store):
     """A YAML-configurable schedule must actually change what runs --
     not just parse without effect."""

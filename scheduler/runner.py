@@ -61,6 +61,7 @@ def _execute_slot(
     period: str, interval: str, benchmark: str, news_limit: int, horizon_bars: int,
     paper_db: str | None, with_ai: bool, resilient: bool, live_source: str | None,
     scanner_db: str | None, research_db: str | None, decision_db: str | None, predictions_db: str | None,
+    initial_capital: float | None = None,
 ) -> str:
     from main import parse_args, run_evaluate_command, run_learn_command, run_shadow_run_command
 
@@ -89,6 +90,8 @@ def _execute_slot(
             argv += ["--decision-db", decision_db]
         if predictions_db:
             argv += ["--predictions-db", predictions_db]
+        if initial_capital is not None:
+            argv += ["--initial-capital", str(initial_capital)]
         return _run_and_capture(run_shadow_run_command, parse_args(argv))
 
     if slot.action == SlotAction.EVALUATE_AND_LEARN:
@@ -131,6 +134,7 @@ def run_tick(
     research_db: str | None = None,
     decision_db: str | None = None,
     predictions_db: str | None = None,
+    initial_capital: float | None = None,
     staleness_seconds: float = 1800.0,
     now: datetime | None = None,
 ) -> TickResult:
@@ -182,6 +186,7 @@ def run_tick(
             benchmark=benchmark, news_limit=news_limit, horizon_bars=horizon_bars, paper_db=paper_db,
             with_ai=with_ai, resilient=resilient, live_source=live_source, scanner_db=scanner_db,
             research_db=research_db, decision_db=decision_db, predictions_db=predictions_db,
+            initial_capital=initial_capital,
         )
     except Exception as exc:  # noqa: BLE001 -- a failed tick must never crash a long-lived scheduler process
         # `finished_at=now_utc`, not the default real wall-clock: this tick's

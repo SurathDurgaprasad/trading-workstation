@@ -86,6 +86,12 @@ def test_schedule_tick_defaults():
     assert args.symbols == "AAPL"
     assert args.staleness_seconds == 1800.0
     assert args.now is None
+    assert args.initial_capital is None
+
+
+def test_schedule_tick_initial_capital_override():
+    args = parse_args(["schedule", "tick", "--symbols", "AAPL", "--initial-capital", "20000"])
+    assert args.initial_capital == 20_000.0
 
 
 def test_schedule_loop_defaults():

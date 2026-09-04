@@ -1856,7 +1856,8 @@ def _run_tick_from_args(args: argparse.Namespace, schedule_config, store, *, now
         period=args.period, interval=args.interval, benchmark=args.benchmark, news_limit=args.news_limit,
         horizon_bars=args.horizon_bars, paper_db=args.paper_db, with_ai=args.with_ai, resilient=args.resilient,
         live_source=args.live_source, scanner_db=args.scanner_db, research_db=args.research_db,
-        decision_db=args.decision_db, predictions_db=args.predictions_db, staleness_seconds=args.staleness_seconds, now=now,
+        decision_db=args.decision_db, predictions_db=args.predictions_db, initial_capital=args.initial_capital,
+        staleness_seconds=args.staleness_seconds, now=now,
     )
 
 
@@ -2421,6 +2422,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         p.add_argument("--research-db", type=str, default=None, help=f"SQLite research-history path (default: {DEFAULT_RESEARCH_DB_PATH}).")
         p.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")
         p.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
+        p.add_argument("--initial-capital", type=float, default=None, help="Capital to size each BUY prediction against on shadow_run slots (default: not sized -- predictions are recorded without a persisted trade plan, matching `shadow-run`'s own default). Ignored for evaluate_and_learn slots.")
         p.add_argument("--run-db", type=str, default=None, help=f"SQLite scheduler-run-history path (default: {DEFAULT_SCHEDULER_DB_PATH}).")
         p.add_argument("--staleness-seconds", type=float, default=1800.0, help="A RUNNING lock older than this with no completion is treated as an orphaned/crashed run and reclaimed (default: 1800 = 30 minutes).")
         p.add_argument("--log-file", type=str, default=None, help="Phase 39: also write logs to this path via a size-bounded, rotating file handler (default: 10MB x 5 backups) -- console output is unchanged either way. Recommended for `schedule loop` run unattended for days.")
