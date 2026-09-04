@@ -79,7 +79,26 @@ class CandleBuilder:
         Quote/Full packets carry a cumulative day Volume rather than a
         per-tick delta; DhanMarketDataSource is responsible for that
         cumulative-to-incremental conversion before calling here (see its
-        own docstring) -- this class only ever sums whatever it's given."""
+        own docstring) -- this class only ever sums whatever it's given.
+
+        KNOWN, DOCUMENTED LIMITATION (not fixed -- explicitly acknowledged,
+        per this project's own "do not fake dedup without a reliable
+        message identifier" rule): Dhan's Ticker/Quote/Full packets carry
+        no per-message sequence number or unique tick ID (verified against
+        the documented packet formats -- only security_id/LTP/LTT), so an
+        exact-duplicate tick redelivered after a reconnect (same price,
+        volume, and timestamp as one already processed) cannot be reliably
+        told apart from a second, genuinely distinct trade that happens to
+        share those same values -- it is NOT deduplicated, and would be
+        merged into the current bucket again. In this project's actual,
+        currently-used configuration this is harmless: Ticker-mode
+        subscription is what `DhanMarketDataSource` sends (see
+        `_send_subscribe`), and Ticker packets always pass `volume=0.0`
+        here, so a redelivered duplicate changes nothing (max/min/close are
+        idempotent for a repeated identical price, and 0.0 volume adds
+        0.0). It would only matter for a real per-tick-volume feed, which
+        this project does not have (the Quote/Full cumulative-to-incremental
+        conversion above is explicitly not implemented either)."""
         bucket_start = self._bucket_start_for(timestamp)
         completed: OHLCVBar | None = None
 
