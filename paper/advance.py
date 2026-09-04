@@ -79,13 +79,29 @@ def advance_pending_paper_orders(
 
     One symbol's failure (a bad provider response, an unexpected
     exception) never aborts advancing the rest -- same posture as
-    shadow-run's own per-symbol isolation."""
+    shadow-run's own per-symbol isolation. If the failure happens
+    mid-loop (bar N of several), bars before it were already durably
+    committed (each process_bar() call is its own transaction) --
+    the returned AdvanceResult.bars_processed reports that real count,
+    never a hardcoded 0, so the audit trail never under-states what
+    actually happened before the error."""
     pending_symbols = {order.symbol for order in engine.store.list_pending_orders()}
     open_symbols = {position.symbol for position in engine.store.list_positions() if position.status == PositionStatus.OPEN}
     symbols = sorted(pending_symbols | open_symbols)
 
     results: list[AdvanceResult] = []
     for symbol in symbols:
+        # Tracked OUTSIDE the try block (not just inside it) so a mid-loop
+        # failure's `except` clause below can report how many bars ACTUALLY
+        # got committed before the error, not a hardcoded 0 -- each
+        # process_bar() call commits in its own transaction, so bars before
+        # the failing one are genuinely persisted even though this whole
+        # symbol's iteration is about to be reported as an error. Found via
+        # self-audit: the previous version reported bars_processed=0 on any
+        # exception, silently under-stating real state changes in the very
+        # audit trail this project is required to keep honest.
+        bars_processed = 0
+        last_outcome: str | None = None
         try:
             baseline = _baseline_timestamp_for(engine, symbol)
             if baseline is None:
@@ -122,7 +138,6 @@ def advance_pending_paper_orders(
                 key=lambda bar: bar.timestamp,
             )
 
-            last_outcome = None
             for ohlcv_bar in new_bars:
                 engine_bar = Bar(
                     timestamp=ohlcv_bar.timestamp, open=ohlcv_bar.open, high=ohlcv_bar.high,
@@ -130,9 +145,10 @@ def advance_pending_paper_orders(
                 )
                 outcome = engine.process_bar(symbol, engine_bar)
                 last_outcome = outcome.value
+                bars_processed += 1
 
-            results.append(AdvanceResult(symbol=symbol, bars_processed=len(new_bars), last_outcome=last_outcome))
+            results.append(AdvanceResult(symbol=symbol, bars_processed=bars_processed, last_outcome=last_outcome))
         except Exception as exc:  # noqa: BLE001 -- one symbol's failure must never abort advancing the rest
-            results.append(AdvanceResult(symbol=symbol, bars_processed=0, last_outcome=None, error=f"{type(exc).__name__}: {exc}"))
+            results.append(AdvanceResult(symbol=symbol, bars_processed=bars_processed, last_outcome=last_outcome, error=f"{type(exc).__name__}: {exc}"))
 
     return results

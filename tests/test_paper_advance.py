@@ -223,6 +223,39 @@ def test_advance_isolates_one_symbols_provider_failure_from_the_rest(engine):
     assert engine.store.get_open_position("GOOD") is not None  # unaffected by BAD's failure
 
 
+def test_advance_reports_the_real_partial_count_when_a_later_bar_in_the_loop_fails(engine, monkeypatch):
+    """Real bug found via self-audit: bars before a mid-loop failure are
+    ALREADY durably committed (each process_bar() call is its own
+    transaction) -- the AdvanceResult must report that real count, not a
+    hardcoded 0, or the audit trail understates what genuinely happened."""
+    engine.submit_signal(_signal())
+    provider = _FakeProvider([
+        _bar(1, open=103.0, high=104.0, low=102.0, close=103.5),  # succeeds
+        _bar(2, open=104.0, high=105.0, low=103.0, close=104.5),  # raises
+        _bar(3, open=105.0, high=106.0, low=104.0, close=105.5),  # never reached
+    ])
+
+    real_process_bar = engine.process_bar
+    calls = {"n": 0}
+
+    def _flaky_process_bar(symbol, bar):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("simulated transient failure on the second bar")
+        return real_process_bar(symbol, bar)
+
+    monkeypatch.setattr(engine, "process_bar", _flaky_process_bar)
+
+    results = advance_pending_paper_orders(engine, provider=provider)
+
+    assert len(results) == 1
+    assert results[0].bars_processed == 1  # NOT 0 -- the first bar genuinely committed before the failure
+    assert results[0].error is not None
+    assert "simulated transient failure" in results[0].error
+    # Prove the first bar's effect is genuinely persisted, not just claimed:
+    assert engine.store.get_last_bar_timestamp("TEST") == _GENERATED_AT + timedelta(days=1)
+
+
 # --- fail-closed on an unresolvable baseline ------------------------------------
 
 
