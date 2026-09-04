@@ -226,15 +226,22 @@ def test_shadow_run_paper_execute_requires_all_three_companion_flags(tmp_path, c
 
 
 def test_shadow_run_footer_never_claims_no_order_was_placed_when_one_actually_was(tmp_path, capsys):
-    """Regression: the footer's "No real or paper order was placed by
-    this command" line is false the moment --paper-execute submits a
-    real (paper) order -- found via self-audit while implementing the
-    bridge, before this became a real user-facing lie."""
+    """Regression (two rounds): the footer's "No real or paper order was
+    placed by this command" line is false the moment --paper-execute
+    submits a real (paper) order -- found via self-audit while building
+    the bridge. Then, once the advance step (paper/advance.py) was added
+    in the SAME cycle, an earlier fix's own "PENDING, not yet filled"
+    wording became a NEW stale claim -- the advance step, running later
+    in the SAME invocation, can already have filled or even closed the
+    order by the time the footer prints. Fixed to never assert a
+    specific resulting status; points to `paper status` instead."""
     run_shadow_run_command(_paper_execute_args(tmp_path, symbols="AAPL"))
     output = capsys.readouterr().out
     assert "No real or paper order was placed by this command." not in output
-    assert "1 REAL PAPER order(s) submitted" in output
-    assert "PENDING, not yet filled" in output
+    assert "PENDING, not yet filled" not in output  # the old, now-inaccurate claim must never reappear
+    assert "1 new order(s) submitted this run" in output
+    assert "existing order/position(s) advanced with new data this run" in output
+    assert "Run `python main.py paper status` for current state." in output
     assert "no real order was placed" in output.lower()  # still true -- REAL as in "a real object was created", not "a real broker order"
     assert "paper orders submitted: 1" in output
 
@@ -252,11 +259,20 @@ def test_shadow_run_footer_still_says_no_order_without_paper_execute(tmp_path, c
 
 def test_shadow_run_paper_execute_submits_a_real_pending_order(tmp_path, capsys):
     """The bridge: a risk-approved BUY decision must result in a REAL
-    PaperTradingEngine order (APPROVED_PENDING), not just a prediction."""
+    PaperTradingEngine order (APPROVED_PENDING at submission time), not
+    just a prediction -- and, since the fixture's fake provider already
+    has bars genuinely AFTER the signal-generating one available (a
+    fully-materialized historical series, same as any backtest -- not
+    fabricated "future" data), the same shadow-run invocation's own
+    advance step correctly carries it forward past PENDING using that
+    already-later data, proving the full submit -> advance -> fill
+    lifecycle works end-to-end, not just the first step."""
     run_shadow_run_command(_paper_execute_args(tmp_path, symbols="AAPL"))
 
     output = capsys.readouterr().out
-    assert "paper: APPROVED_PENDING" in output
+    assert "paper: APPROVED_PENDING" in output  # true the MOMENT it was submitted
+    assert "Advancing existing PENDING paper orders" in output
+    assert "new bar(s) processed" in output
 
     from paper.store import PaperStore
 
@@ -264,7 +280,9 @@ def test_shadow_run_paper_execute_submits_a_real_pending_order(tmp_path, capsys)
     entries = store.list_journal_entries()
     store.close()
     assert len(entries) == 1
-    assert entries[0].outcome.value == "APPROVED_PENDING"
+    # No longer PENDING by the time the run finishes -- the advance step (using
+    # bars genuinely later than the signal) carried it forward for real.
+    assert entries[0].outcome.value in ("APPROVED_FILLED_OPEN", "APPROVED_FILLED_CLOSED")
     assert entries[0].symbol == "AAPL"
     assert entries[0].strategy_name == "decision_engine_buy_bridge"
 
@@ -316,12 +334,22 @@ def test_shadow_run_paper_execute_two_different_symbols_each_get_their_own_pendi
     account.open_positions is incremented at FILL time -- which this
     bridge does not attempt (see its own docstring). So two DIFFERENT
     symbols, each independently risk-approved, correctly each get their
-    own APPROVED_PENDING order in the SAME run -- not a bug, and stated
-    honestly in this phase's own report rather than assumed away."""
+    own APPROVED_PENDING order at SUBMISSION time -- not a bug.
+
+    The advance step (paper/advance.py) that runs later in this SAME
+    invocation then processes each symbol's 19 already-available later
+    bars in turn: AAPL fills and (in this fixture's strong uptrend)
+    reaches TARGET_HIT and CLOSES entirely within its own turn, freeing
+    the account's one open-position slot before MSFT's turn even
+    begins -- so MSFT correctly fills and closes too, never held back.
+    Proves both the multi-symbol PENDING coexistence AND the
+    single-position hold-back/retry mechanism (tests/test_paper_advance.py's
+    own unit-level proof) compose correctly end-to-end through the real
+    CLI path, not just in isolation."""
     run_shadow_run_command(_paper_execute_args(tmp_path, symbols="AAPL,MSFT"))
 
     output = capsys.readouterr().out
-    assert output.count("paper: APPROVED_PENDING") == 2
+    assert output.count("paper: APPROVED_PENDING") == 2  # true at submission time, for both
 
     from paper.store import PaperStore
 
@@ -330,7 +358,8 @@ def test_shadow_run_paper_execute_two_different_symbols_each_get_their_own_pendi
     store.close()
     assert len(entries) == 2
     assert {e.symbol for e in entries} == {"AAPL", "MSFT"}
-    assert all(e.outcome.value == "APPROVED_PENDING" for e in entries)
+    # Neither is stuck PENDING or held back by the other by the time the run finishes.
+    assert all(e.outcome.value in ("APPROVED_FILLED_OPEN", "APPROVED_FILLED_CLOSED") for e in entries)
 
 
 def test_shadow_run_paper_execute_the_same_symbol_twice_is_idempotent(tmp_path, capsys):

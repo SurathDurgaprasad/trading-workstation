@@ -183,6 +183,18 @@ class PaperStore:
         ).fetchone()
         return PaperOrder.model_validate_json(row[0]) if row else None
 
+    def list_pending_orders(self) -> list[PaperOrder]:
+        """Every symbol's pending order, not just one -- needed to advance
+        ALL outstanding orders (see paper/advance.py), since a single
+        single-position account can hold multiple simultaneous PENDING
+        orders across different symbols (nothing vetoes a second symbol's
+        order until one of them actually FILLS -- see risk/engine.py's
+        own account-wide, fill-time-only single-position check)."""
+        rows = self._conn.execute(
+            "SELECT data_json FROM paper_orders WHERE status = 'PENDING' ORDER BY created_at"
+        ).fetchall()
+        return [PaperOrder.model_validate_json(r[0]) for r in rows]
+
     # --- fills -----------------------------------------------------------------
 
     def save_fill(self, fill: PaperFill) -> None:

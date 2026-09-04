@@ -1728,6 +1728,24 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     research_store.close()
     decision_store.close()
 
+    paper_orders_advanced = 0
+    if paper_engine is not None:
+        from paper.advance import advance_pending_paper_orders
+
+        advance_results = advance_pending_paper_orders(paper_engine, provider=provider, period=args.period, interval=args.interval)
+        paper_orders_advanced = sum(1 for r in advance_results if r.bars_processed > 0)
+        if advance_results:
+            print("\nAdvancing existing PENDING paper orders / OPEN positions with fresh data:")
+            for r in advance_results:
+                if r.error is not None:
+                    print(f"  {r.symbol:12s} FAILED: {r.error}")
+                elif r.skipped_reason is not None:
+                    print(f"  {r.symbol:12s} skipped: {r.skipped_reason}")
+                elif r.bars_processed > 0:
+                    print(f"  {r.symbol:12s} {r.bars_processed} new bar(s) processed -> {r.last_outcome}")
+                else:
+                    print(f"  {r.symbol:12s} no new data yet")
+
     if paper_engine_store is not None:
         paper_engine_store.close()
     if state_store is not None:
@@ -1740,7 +1758,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
         prediction_store.close()
         print("\n[3/4] Evaluation skipped (--skip-evaluate).")
         print("[4/4] Learning summary skipped (--skip-evaluate).")
-        _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded, paper_orders_submitted)
+        _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded, paper_orders_submitted, paper_orders_advanced)
         _print_provider_metrics(resilient)
         return
 
@@ -1769,16 +1787,30 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     print(f"  Win rate:          {_fmt_pct(summary.win_rate)}")
     print(f"  Average return:    {_fmt_pct(summary.average_return)}")
 
-    _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded, paper_orders_submitted)
+    _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded, paper_orders_submitted, paper_orders_advanced)
     _print_provider_metrics(resilient)
 
 
-def _print_shadow_run_footer(scan_report, decisions_by_label: dict[str, int], predictions_recorded: int, paper_orders_submitted: int = 0) -> None:
+def _print_shadow_run_footer(
+    scan_report, decisions_by_label: dict[str, int], predictions_recorded: int,
+    paper_orders_submitted: int = 0, paper_orders_advanced: int = 0,
+) -> None:
     label_summary = ", ".join(f"{label}={count}" for label, count in sorted(decisions_by_label.items())) or "(none)"
     paper_note = f"; paper orders submitted: {paper_orders_submitted}" if paper_orders_submitted else ""
     print(f"\nRun summary: {len(scan_report.candidates)} candidate(s) scanned; decisions: {label_summary}; predictions recorded: {predictions_recorded}{paper_note}.")
-    if paper_orders_submitted:
-        print(f"{paper_orders_submitted} REAL PAPER order(s) submitted (--paper-execute) -- PENDING, not yet filled. No real order was placed by this command, and no real broker was ever contacted for execution.")
+    if paper_orders_submitted or paper_orders_advanced:
+        # Deliberately does NOT claim a specific resulting status (e.g. "still
+        # PENDING") -- the advance step run earlier in THIS SAME invocation may
+        # already have filled and even closed an order using genuinely later
+        # data (see paper/advance.py) -- run `python main.py paper status` for
+        # the actual current state, never assumed here.
+        parts = []
+        if paper_orders_submitted:
+            parts.append(f"{paper_orders_submitted} new order(s) submitted this run")
+        if paper_orders_advanced:
+            parts.append(f"{paper_orders_advanced} existing order/position(s) advanced with new data this run")
+        print(f"REAL PAPER order activity (--paper-execute): {', '.join(parts)}. Run `python main.py paper status` for current state.")
+        print("No real order was placed by this command, and no real broker was ever contacted for execution.")
     else:
         print("No real or paper order was placed by this command.")
     print("This is ONE pass, not 'sufficient time' -- run `shadow-run` again later (e.g. on a schedule) to accumulate real validation evidence over time.")
