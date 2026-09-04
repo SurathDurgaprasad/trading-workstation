@@ -1061,6 +1061,15 @@ def run_size_command(args: argparse.Namespace) -> None:
 DEFAULT_PREDICTIONS_DB_PATH = PROJECT_ROOT / "data" / "predictions.db"
 
 
+def _risk_config_from_args(args: argparse.Namespace) -> RiskConfig:
+    return RiskConfig(
+        risk_per_trade_pct=args.risk_per_trade, max_daily_loss_pct=args.max_daily_loss,
+        max_drawdown_pct=args.max_drawdown, max_exposure_pct=args.max_exposure,
+        max_consecutive_losses=args.max_consecutive_losses, consecutive_loss_risk_multiplier=args.consecutive_loss_risk_multiplier,
+        consecutive_loss_hard_limit=args.consecutive_loss_hard_limit, min_risk_reward=args.min_risk_reward,
+    )
+
+
 def _size_if_requested(decision, *, market_context, args: argparse.Namespace):
     """Shared by `predict`/`shadow-run`: computes and returns a real
     risk.contracts.RiskDecision to persist alongside a prediction, ONLY
@@ -1076,13 +1085,36 @@ def _size_if_requested(decision, *, market_context, args: argparse.Namespace):
     from risk.sizing import size_decision
 
     account = new_account(args.initial_capital)
-    risk_config = RiskConfig(
-        risk_per_trade_pct=args.risk_per_trade, max_daily_loss_pct=args.max_daily_loss,
-        max_drawdown_pct=args.max_drawdown, max_exposure_pct=args.max_exposure,
-        max_consecutive_losses=args.max_consecutive_losses, consecutive_loss_risk_multiplier=args.consecutive_loss_risk_multiplier,
-        consecutive_loss_hard_limit=args.consecutive_loss_hard_limit, min_risk_reward=args.min_risk_reward,
-    )
-    return size_decision(decision, market_context=market_context, account=account, risk_config=risk_config)
+    return size_decision(decision, market_context=market_context, account=account, risk_config=_risk_config_from_args(args))
+
+
+def _bridge_to_paper_execution(signal, risk_decision, *, engine, state_store) -> str | None:
+    """Explicit, opt-in bridge from a decision_engine BUY into a REAL
+    paper.engine.PaperTradingEngine order -- the SAME idempotent,
+    risk-gated `submit_signal` mechanism `paper`/`paper-live` already
+    use, never a second, competing execution path. Returns a short
+    outcome string to print, or None if paper execution was not even
+    attempted (no risk_decision was computed, or the kill switch is
+    active) -- the shadow prediction itself is recorded regardless,
+    completely independent of this.
+
+    Deliberately does NOT re-check risk_decision.approved before calling
+    submit_signal: `_size_if_requested`'s preview evaluates against a
+    FRESH, hypothetical account every time (the same posture `size`
+    itself has), while `engine`'s real account reflects whatever THIS
+    SAME run's earlier symbols already submitted -- for a
+    single-position account, a later symbol in the same run can
+    genuinely and correctly differ from its own preview (e.g.
+    SKIPPED_ALREADY_ACTIVE after an earlier symbol's order was
+    submitted). submit_signal's own real-account evaluation is the only
+    authoritative answer for what actually happens; the persisted
+    risk_decision is a preview, not a promise."""
+    if risk_decision is None:
+        return None
+    if state_store.is_kill_switch_active():
+        return "SKIPPED (kill switch active)"
+    journal = engine.submit_signal(signal, strategy_version="decision_engine_buy_bridge/1.0")
+    return journal.outcome.value
 
 
 def _print_risk_decision_if_present(risk_decision) -> None:
@@ -1575,6 +1607,27 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
         print("shadow-run: one of --symbols or --watchlist-file is required.", file=sys.stderr)
         sys.exit(2)
 
+    if args.paper_execute and (args.initial_capital is None or not args.paper_db or not args.state_db):
+        print(
+            "shadow-run: --paper-execute requires --initial-capital, --paper-db, AND --state-db all to be given "
+            "(the kill switch must be checkable before any paper order is submitted).",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    paper_engine = None
+    paper_engine_store = None
+    state_store = None
+    if args.paper_execute:
+        from live.state_store import LiveStateStore
+        from paper.engine import PaperTradingEngine
+        from paper.store import PaperStore
+        from risk.engine import RiskEngine
+
+        paper_engine_store = PaperStore(args.paper_db)
+        paper_engine = PaperTradingEngine(paper_engine_store, risk_engine=RiskEngine(_risk_config_from_args(args)), initial_capital=args.initial_capital)
+        state_store = LiveStateStore(args.state_db)
+
     provider, resilient = _build_provider(args)
     benchmark_symbol = args.benchmark or None
     live_snapshot_provider = _build_live_snapshot_provider(args)
@@ -1609,6 +1662,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     sector_provider = YahooSectorInfoProvider()
 
     predictions_recorded = 0
+    paper_orders_submitted = 0
     decisions_by_label: dict[str, int] = {}
 
     print(f"\n[2/4] Research + decide + predict for {len(scan_report.candidates)} candidate(s):")
@@ -1657,6 +1711,12 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
                         predictions_recorded += 1
                         sized_note = f", qty={risk_decision.position_size.quantity}" if (risk_decision is not None and risk_decision.position_size is not None) else ""
                         prediction_note = f" -> prediction recorded ({prediction.prediction_id[:12]}{sized_note})"
+                        if args.paper_execute:
+                            paper_outcome = _bridge_to_paper_execution(signal, risk_decision, engine=paper_engine, state_store=state_store)
+                            if paper_outcome is not None:
+                                prediction_note += f" | paper: {paper_outcome}"
+                                if paper_outcome == "APPROVED_PENDING":
+                                    paper_orders_submitted += 1
                 except (SizingUnavailableError, PredictionUnavailableError) as exc:
                     prediction_note = f" -> no prediction recorded ({exc})"
 
@@ -1668,6 +1728,11 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     research_store.close()
     decision_store.close()
 
+    if paper_engine_store is not None:
+        paper_engine_store.close()
+    if state_store is not None:
+        state_store.close()
+
     if live_snapshot_provider is not None:
         live_snapshot_provider.close()
 
@@ -1675,7 +1740,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
         prediction_store.close()
         print("\n[3/4] Evaluation skipped (--skip-evaluate).")
         print("[4/4] Learning summary skipped (--skip-evaluate).")
-        _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded)
+        _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded, paper_orders_submitted)
         _print_provider_metrics(resilient)
         return
 
@@ -1704,14 +1769,18 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     print(f"  Win rate:          {_fmt_pct(summary.win_rate)}")
     print(f"  Average return:    {_fmt_pct(summary.average_return)}")
 
-    _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded)
+    _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded, paper_orders_submitted)
     _print_provider_metrics(resilient)
 
 
-def _print_shadow_run_footer(scan_report, decisions_by_label: dict[str, int], predictions_recorded: int) -> None:
+def _print_shadow_run_footer(scan_report, decisions_by_label: dict[str, int], predictions_recorded: int, paper_orders_submitted: int = 0) -> None:
     label_summary = ", ".join(f"{label}={count}" for label, count in sorted(decisions_by_label.items())) or "(none)"
-    print(f"\nRun summary: {len(scan_report.candidates)} candidate(s) scanned; decisions: {label_summary}; predictions recorded: {predictions_recorded}.")
-    print("No real or paper order was placed by this command.")
+    paper_note = f"; paper orders submitted: {paper_orders_submitted}" if paper_orders_submitted else ""
+    print(f"\nRun summary: {len(scan_report.candidates)} candidate(s) scanned; decisions: {label_summary}; predictions recorded: {predictions_recorded}{paper_note}.")
+    if paper_orders_submitted:
+        print(f"{paper_orders_submitted} REAL PAPER order(s) submitted (--paper-execute) -- PENDING, not yet filled. No real order was placed by this command, and no real broker was ever contacted for execution.")
+    else:
+        print("No real or paper order was placed by this command.")
     print("This is ONE pass, not 'sufficient time' -- run `shadow-run` again later (e.g. on a schedule) to accumulate real validation evidence over time.")
 
 
@@ -2395,6 +2464,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     shadow_run_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker/rate-limit protection across the whole run (default: off, matches prior behavior exactly). Prints a provider-metrics summary at the end.")
     shadow_run_parser.add_argument("--live-source", choices=["dhan"], default=None, help="Phase 32: overlay every candidate's price with a real Dhan live quote (requires DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN) instead of the Yahoo historical close. One adapter is built for the whole run and closed at the end. A failed/unhealthy live source silently falls back to the Yahoo historical price per symbol.")
     _add_optional_sizing_args(shadow_run_parser)
+    shadow_run_parser.add_argument(
+        "--paper-execute", action="store_true",
+        help=(
+            "Explicit opt-in: bridge each risk-approved BUY into a REAL paper.engine.PaperTradingEngine order via "
+            "the SAME idempotent submit_signal() `paper`/`paper-live` already use (default: off -- shadow-run only "
+            "ever records a shadow prediction, exactly as before this flag existed). Requires --initial-capital, "
+            "--paper-db, and --state-db all given, and is refused with a clear error otherwise. HONEST SCOPE: this "
+            "creates a PENDING order, not an immediately open position -- PaperTradingEngine's own execution model "
+            "fills a PENDING order at the NEXT bar's open, which by definition does not exist yet at decision time; "
+            "advancing/filling it against a genuinely later bar is a separate mechanism this flag does not attempt. "
+            "The kill switch (--state-db) is checked before every submission; an active kill switch skips paper "
+            "execution for that symbol without affecting the shadow prediction itself."
+        ),
+    )
+    shadow_run_parser.add_argument("--state-db", type=str, default=None, help=f"SQLite kill-switch/pending-approval state path (default: {DEFAULT_LIVE_STATE_DB_PATH}). Required when --paper-execute is passed.")
 
     schedule_parser = subparsers.add_parser(
         "schedule",
