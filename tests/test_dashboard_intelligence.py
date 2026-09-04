@@ -30,6 +30,7 @@ def _isolated_intelligence_dbs(monkeypatch, tmp_path):
     monkeypatch.setattr(intelligence_module, "RESEARCH_DB_PATH", tmp_path / "research.db")
     monkeypatch.setattr(intelligence_module, "DECISIONS_DB_PATH", tmp_path / "decisions.db")
     monkeypatch.setattr(intelligence_module, "PREDICTIONS_DB_PATH", tmp_path / "predictions.db")
+    monkeypatch.setattr(intelligence_module, "PAPER_DB_PATH", tmp_path / "paper.db")
     yield tmp_path
 
 
@@ -92,6 +93,7 @@ def test_intelligence_page_empty_state_when_nothing_persisted(client):
     assert response.status_code == 200
     assert "No scan has been run yet" in response.text
     assert "No evaluated predictions yet" in response.text
+    assert "No paper-execution account exists yet" in response.text
     assert "READ-ONLY SNAPSHOT" in response.text
 
 
@@ -358,3 +360,76 @@ def test_decision_detail_page_normalizes_symbol_case(client, _isolated_intellige
 def test_decision_detail_page_escapes_malicious_symbol(client, _isolated_intelligence_dbs):
     response = client.get("/intelligence/%3Cscript%3E")
     assert "<script>" not in response.text
+
+
+# --- PAPER EXECUTION section ----------------------------------------------------
+
+
+def _paper_signal(symbol: str = "AAPL"):
+    from strategy.signal import ReasonCode, Side, Signal
+
+    return Signal(
+        symbol=symbol, generated_at=datetime(2024, 6, 1), side=Side.LONG,
+        reference_price=100.0, stop_price=95.0, target_price=110.0, risk_reward=2.0,
+        strategy_name="decision_engine_buy_bridge", reason_codes=[ReasonCode.DECISION_ENGINE_SCORED],
+    )
+
+
+def test_intelligence_page_shows_a_real_pending_paper_order(client, _isolated_intelligence_dbs):
+    from paper.engine import PaperTradingEngine
+    from paper.store import PaperStore
+
+    tmp_path = _isolated_intelligence_dbs
+    engine = PaperTradingEngine(PaperStore(tmp_path / "paper.db"), initial_capital=20_000.0)
+    engine.submit_signal(_paper_signal("AAPL"))
+    engine.store.close()
+
+    response = client.get("/intelligence")
+    assert response.status_code == 200
+    assert "No paper-execution account exists yet" not in response.text
+    assert "AAPL" in response.text
+    assert "20,000.00" in response.text  # real account equity, not fabricated
+    assert "Pending orders" in response.text
+
+
+def test_intelligence_page_shows_a_real_open_paper_position(client, _isolated_intelligence_dbs):
+    from paper.engine import Bar, PaperTradingEngine
+    from paper.store import PaperStore
+
+    tmp_path = _isolated_intelligence_dbs
+    engine = PaperTradingEngine(PaperStore(tmp_path / "paper.db"), initial_capital=20_000.0)
+    engine.submit_signal(_paper_signal("MSFT"))
+    engine.process_bar("MSFT", Bar(
+        timestamp=datetime(2024, 6, 2), open=101.0, high=102.0, low=100.5, close=101.5, volume=1000.0,
+    ))
+    engine.store.close()
+
+    response = client.get("/intelligence")
+    assert "MSFT" in response.text
+    assert "Open positions" in response.text
+    assert response.text.count("MSFT") >= 2  # appears in the open-positions table AND the journal
+
+
+def test_intelligence_page_paper_section_escapes_html_in_journal(client, _isolated_intelligence_dbs):
+    """Defense in depth: even though a symbol can never actually contain
+    HTML in real use (upstream validation), the page must not trust that
+    and render it unescaped -- same discipline as the decision-detail
+    page's own symbol-escaping test above."""
+    from paper.engine import PaperTradingEngine
+    from paper.store import PaperStore
+
+    tmp_path = _isolated_intelligence_dbs
+    store = PaperStore(tmp_path / "paper.db")
+    engine = PaperTradingEngine(store, initial_capital=20_000.0)
+    signal = _paper_signal("AAPL")
+    engine.submit_signal(signal)
+
+    entries = store.list_journal_entries()
+    entry = entries[0]
+    store.update_journal_entry(entry.model_copy(update={
+        "symbol": "<script>alert(1)</script>", "outcome": entry.outcome,
+    }))
+    store.close()
+
+    response = client.get("/intelligence")
+    assert "<script>alert(1)</script>" not in response.text

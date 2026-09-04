@@ -246,6 +246,7 @@ async def intelligence_page(request: Request) -> HTMLResponse:
     can place an order; there is no action route on this page at all."""
     scan = intelligence.get_latest_scan()
     learning_snapshot = intelligence.get_learning_snapshot()
+    paper_snapshot = intelligence.get_paper_execution_snapshot()
 
     if scan is None:
         candidates_section = (
@@ -351,6 +352,72 @@ async def intelligence_page(request: Request) -> HTMLResponse:
             f"{profitability_section}"
         )
 
+    if paper_snapshot is None:
+        paper_section = (
+            "<p class='muted'>No paper-execution account exists yet &mdash; run "
+            "<code>python main.py shadow-run --paper-execute --initial-capital ... --paper-db ... --state-db ...</code> "
+            "(or `schedule tick/loop --paper-execute`) first. This is a DIFFERENT account/database than the "
+            "paper-live workstation on the page above.</p>"
+        )
+    else:
+        account = paper_snapshot["account"]
+        account_kv = (
+            "<div class='kv'>"
+            f"<div>Equity</div><div>{_fmt_money(account.equity)}</div>"
+            f"<div>Cash</div><div>{_fmt_money(account.cash)}</div>"
+            f"<div>Realized PnL</div><div>{_fmt_money(account.realized_pnl)}</div>"
+            f"<div>Open positions</div><div>{account.open_positions}</div>"
+            f"<div>Current drawdown</div><div>{account.current_drawdown_pct:.2f}%</div>"
+            f"<div>Consecutive losses</div><div>{account.consecutive_losses}</div>"
+            f"<div>Total trades</div><div>{account.total_trades}</div>"
+            "</div>"
+        )
+
+        pending_rows = "".join(
+            f"<tr><td>{html.escape(o.symbol)}</td><td><span class='tag tag-{'long' if o.side.value == 'LONG' else 'short'}'>{html.escape(o.side.value)}</span></td>"
+            f"<td>{o.quantity}</td><td>{_fmt_money(o.requested_price)}</td><td>{_fmt_money(o.stop_price)}</td>"
+            f"<td>{_fmt_money(o.target_price)}</td><td>{html.escape(o.created_at.isoformat())}</td></tr>"
+            for o in paper_snapshot["pending_orders"]
+        ) or "<tr><td colspan='7' class='muted'>(none)</td></tr>"
+        pending_table = f"<table><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Requested</th><th>Stop</th><th>Target</th><th>Submitted</th></tr>{pending_rows}</table>"
+
+        open_rows = "".join(
+            f"<tr><td>{html.escape(p.symbol)}</td><td>{p.quantity}</td><td>{_fmt_money(p.entry_price)}</td>"
+            f"<td>{_fmt_money(p.stop_price)}</td><td>{_fmt_money(p.target_price)}</td><td>{html.escape(p.entry_time.isoformat())}</td></tr>"
+            for p in paper_snapshot["open_positions"]
+        ) or "<tr><td colspan='6' class='muted'>(none)</td></tr>"
+        open_table = f"<table><tr><th>Symbol</th><th>Qty</th><th>Entry</th><th>Stop</th><th>Target</th><th>Entry Time</th></tr>{open_rows}</table>"
+
+        closed_rows = "".join(
+            f"<tr><td>{html.escape(p.symbol)}</td><td>{_fmt_money(p.entry_price)}</td>"
+            f"<td>{_fmt_money(p.exit_price) if p.exit_price is not None else 'n/a'}</td>"
+            f"<td>{html.escape(p.exit_reason.value) if p.exit_reason is not None else 'n/a'}</td>"
+            f"<td>{html.escape(p.exit_time.isoformat()) if p.exit_time is not None else 'n/a'}</td></tr>"
+            for p in paper_snapshot["closed_positions"]
+        ) or "<tr><td colspan='5' class='muted'>(none)</td></tr>"
+        closed_table = f"<table><tr><th>Symbol</th><th>Entry</th><th>Exit</th><th>Exit Reason</th><th>Exit Time</th></tr>{closed_rows}</table>"
+
+        journal_rows = "".join(
+            f"<tr><td>{html.escape(e.symbol)}</td><td>{html.escape(e.outcome.value)}</td><td>{html.escape(e.updated_at.isoformat())}</td></tr>"
+            for e in paper_snapshot["journal_entries"]
+        ) or "<tr><td colspan='3' class='muted'>(none)</td></tr>"
+        journal_table = f"<table><tr><th>Symbol</th><th>Outcome</th><th>Last Updated</th></tr>{journal_rows}</table>"
+
+        paper_section = (
+            f"<p class='muted'>Real, persisted paper.engine.PaperTradingEngine state at {html.escape(str(intelligence.PAPER_DB_PATH))} "
+            "&mdash; a DIFFERENT account/database than the paper-live workstation on the page above. No real broker order can ever "
+            "originate from this data.</p>"
+            f"{account_kv}"
+            "<h3 style='font-size:14px;color:#9aa4b2;'>Pending orders</h3>"
+            f"{pending_table}"
+            "<h3 style='font-size:14px;color:#9aa4b2;'>Open positions</h3>"
+            f"{open_table}"
+            "<h3 style='font-size:14px;color:#9aa4b2;'>Recently closed positions</h3>"
+            f"{closed_table}"
+            "<h3 style='font-size:14px;color:#9aa4b2;'>Recent journal entries</h3>"
+            f"{journal_table}"
+        )
+
     body = f"""
 <p><a href="/">&larr; back to paper-live workstation</a></p>
 <div class="banner">READ-ONLY SNAPSHOT of the last scan/research/decide/predict/evaluate/learn runs &mdash; not live, and no order of any kind can be placed from this page.</div>
@@ -360,6 +427,9 @@ async def intelligence_page(request: Request) -> HTMLResponse:
 
 <h2>PREDICTION PERFORMANCE</h2>
 {learning_section}
+
+<h2>PAPER EXECUTION</h2>
+{paper_section}
 """
     return HTMLResponse(_page(body))
 

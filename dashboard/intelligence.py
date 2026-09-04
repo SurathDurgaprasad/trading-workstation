@@ -36,6 +36,7 @@ SCANNER_DB_PATH = Path(os.environ["TRADING_SCANNER_DB_PATH"]) if "TRADING_SCANNE
 RESEARCH_DB_PATH = Path(os.environ["TRADING_RESEARCH_DB_PATH"]) if "TRADING_RESEARCH_DB_PATH" in os.environ else PROJECT_ROOT / "data" / "research.db"
 DECISIONS_DB_PATH = Path(os.environ["TRADING_DECISIONS_DB_PATH"]) if "TRADING_DECISIONS_DB_PATH" in os.environ else PROJECT_ROOT / "data" / "decisions.db"
 PREDICTIONS_DB_PATH = Path(os.environ["TRADING_PREDICTIONS_DB_PATH"]) if "TRADING_PREDICTIONS_DB_PATH" in os.environ else PROJECT_ROOT / "data" / "predictions.db"
+PAPER_DB_PATH = Path(os.environ["TRADING_PAPER_DB_PATH"]) if "TRADING_PAPER_DB_PATH" in os.environ else PROJECT_ROOT / "data" / "paper_trading.db"
 
 
 def get_latest_scan():
@@ -111,6 +112,45 @@ def get_learning_snapshot() -> dict | None:
         "real_calibration": compute_real_confidence_calibration(items),
         "signal_quality": compute_signal_quality(items),
         "profitability": compute_profitability_report(items),
+    }
+
+
+def get_paper_execution_snapshot() -> dict | None:
+    """Real, persisted paper.engine.PaperTradingEngine state (the
+    shadow-run/`schedule --paper-execute` and paper/advance.py world --
+    a DIFFERENT store than live/workstation.py's LiveSimPipeline the
+    root `/` page already shows) -- account, PENDING orders, OPEN
+    positions, and the most recent journal entries, exactly as
+    persisted. Never fabricates a value: an account with zero activity
+    still returns a snapshot (so its real, currently-idle numbers show),
+    but None is returned only when the database itself doesn't exist
+    yet -- the same "don't fabricate a page for data that was never
+    written" rule every other get_*() in this module already follows."""
+    from paper.engine import _naive
+    from paper.models import PositionStatus
+    from paper.store import PaperStore
+
+    if not PAPER_DB_PATH.exists():
+        return None
+
+    store = PaperStore(PAPER_DB_PATH)
+    account = store.get_account()
+    pending_orders = store.list_pending_orders()
+    positions = store.list_positions()
+    open_positions = [p for p in positions if p.status == PositionStatus.OPEN]
+    closed_positions = [p for p in positions if p.status == PositionStatus.CLOSED]
+    journal_entries = sorted(store.list_journal_entries(), key=lambda e: _naive(e.created_at), reverse=True)[:20]
+    store.close()
+
+    if account is None:
+        return None
+
+    return {
+        "account": account,
+        "pending_orders": pending_orders,
+        "open_positions": open_positions,
+        "closed_positions": sorted(closed_positions, key=lambda p: _naive(p.exit_time or p.entry_time), reverse=True)[:20],
+        "journal_entries": journal_entries,
     }
 
 
