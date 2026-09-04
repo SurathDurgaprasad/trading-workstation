@@ -210,6 +210,27 @@ def test_intelligence_page_shows_profitability_evidence_insufficient_data_for_on
     assert "NOT a profitability claim" in response.text
 
 
+def test_intelligence_page_shows_active_vs_resolved_prediction_counts(client, _isolated_intelligence_dbs):
+    """Mission requirement (Section 16 -- 'PREDICTIONS: active/resolved/
+    accuracy') found genuinely missing via self-audit: a prediction whose
+    latest evaluation is genuinely ACTIVE (still unresolved) was
+    previously invisible on the dashboard -- the section only ever showed
+    "N evaluated prediction(s) considered" with no breakdown of how many
+    of those are still pending vs. actually resolved."""
+    tmp_path = _isolated_intelligence_dbs
+    _save_decision(tmp_path / "decisions.db", "AAPL", DecisionLabel.BUY, _candidate("AAPL"))
+    _save_decision(tmp_path / "decisions.db", "MSFT", DecisionLabel.BUY, _candidate("MSFT"))
+    _save_prediction_and_evaluation(tmp_path / "predictions.db", "AAPL", "dec-AAPL", PredictionOutcomeState.TARGET_HIT, 0.10)
+    _save_prediction_and_evaluation(tmp_path / "predictions.db", "MSFT", "dec-MSFT", PredictionOutcomeState.ACTIVE, None)
+
+    response = client.get("/intelligence")
+
+    assert "Predictions by outcome" in response.text
+    assert "<div>Active (unresolved)</div><div>1</div>" in response.text
+    assert "<div>Target hit</div><div>1</div>" in response.text
+    assert "<div>Stop hit</div><div>0</div>" in response.text
+
+
 # --- HTML escaping -----------------------------------------------------------------
 
 

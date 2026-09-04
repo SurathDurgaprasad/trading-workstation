@@ -84,6 +84,7 @@ def get_learning_snapshot() -> dict | None:
     )
     from learning.profitability import compute_profitability_report
     from predictions.store import PredictionStore
+    from predictions.tracker import summarize_predictions
 
     if not PREDICTIONS_DB_PATH.exists():
         return None
@@ -99,6 +100,19 @@ def get_learning_snapshot() -> dict | None:
         decision = decision_store.get_decision(prediction.decision_id) if decision_store is not None else None
         items.append(EvaluatedPrediction(prediction=prediction, evaluation=evaluation, decision=decision))
 
+    # Mission requirement (Section 16 -- "PREDICTIONS: active/resolved/
+    # accuracy") found genuinely missing via this session's own adversarial
+    # audit: `items` above only ever holds EVALUATED predictions -- a
+    # prediction whose latest evaluation genuinely says ACTIVE (still
+    # unresolved) was silently invisible on the dashboard, which showed
+    # only "N evaluated prediction(s) considered" with no breakdown of how
+    # many of those are still pending. Reuses predictions.tracker.
+    # summarize_predictions verbatim -- the SAME function shadow-run's own
+    # "[4/4] Learning summary" CLI printout already uses -- rather than
+    # inventing a second counting method that could silently disagree
+    # with it.
+    prediction_summary = summarize_predictions(prediction_store.list_all_evaluations())
+
     prediction_store.close()
     if decision_store is not None:
         decision_store.close()
@@ -113,6 +127,7 @@ def get_learning_snapshot() -> dict | None:
         "real_calibration": compute_real_confidence_calibration(items),
         "signal_quality": compute_signal_quality(items),
         "profitability": compute_profitability_report(items),
+        "prediction_summary": prediction_summary,
     }
 
 

@@ -310,6 +310,16 @@ async def intelligence_page(request: Request) -> HTMLResponse:
             "<code>python main.py predict --symbol ...</code> then <code>python main.py evaluate</code> first.</p>"
         )
     else:
+        ps = learning_snapshot["prediction_summary"]
+        prediction_summary_kv = (
+            "<div class='kv'>"
+            f"<div>Active (unresolved)</div><div>{ps.active}</div>"
+            f"<div>Target hit</div><div>{ps.target_hit}</div>"
+            f"<div>Stop hit</div><div>{ps.stop_hit}</div>"
+            f"<div>Expired</div><div>{ps.expired}</div>"
+            f"<div>Insufficient data</div><div>{ps.insufficient_data}</div>"
+            "</div>"
+        )
         strategy_rows = "".join(
             f"<tr><td>{html.escape(s.config_version)}</td><td>{s.total}</td><td>{s.resolved}</td>"
             f"<td>{f'{s.win_rate:.1%}' if s.win_rate is not None else 'n/a'}</td>"
@@ -342,6 +352,8 @@ async def intelligence_page(request: Request) -> HTMLResponse:
         )
         learning_section = (
             f"<p class='muted'>{learning_snapshot['total']} evaluated prediction(s) considered.</p>"
+            "<h3 style='font-size:14px;color:#9aa4b2;'>Predictions by outcome</h3>"
+            f"{prediction_summary_kv}"
             f"<table><tr><th>Config Version</th><th>Total</th><th>Resolved</th><th>Win Rate</th><th>Avg Return</th></tr>{strategy_rows}</table>"
             "<h3 style='font-size:14px;color:#9aa4b2;'>Confidence calibration (real decision_engine.confidence score)</h3>"
             f"<table><tr><th>Bucket</th><th>Total</th><th>Resolved</th><th>Win Rate</th><th>Avg Return</th></tr>{real_calibration_rows}</table>"
