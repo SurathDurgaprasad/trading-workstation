@@ -61,14 +61,9 @@ class RiskEngine:
         if account.open_positions > 0:
             veto_reasons.append(VetoReason.POSITION_ALREADY_OPEN)
 
-        if self._daily_loss_breached(account):
-            veto_reasons.append(VetoReason.MAX_DAILY_LOSS)
-        if account.current_drawdown_pct >= self.config.max_drawdown_pct:
-            veto_reasons.append(VetoReason.MAX_DRAWDOWN)  # intentionally no auto-recovery — blueprint §6.3
+        veto_reasons.extend(self.account_level_halt_reasons(account))
 
         in_loss_recovery = account.consecutive_losses >= self.config.max_consecutive_losses
-        if account.consecutive_losses >= self.config.consecutive_loss_hard_limit:
-            veto_reasons.append(VetoReason.CONSECUTIVE_LOSS_LIMIT)
 
         position_size: PositionSize | None = None
         exposure: Exposure | None = None
@@ -130,6 +125,39 @@ class RiskEngine:
             requested_quantity=requested_quantity,
             approved_quantity=position_size.quantity if (approved and position_size) else 0,
         )
+
+    def account_level_halt_reasons(self, account: Account) -> list[VetoReason]:
+        """The three circuit breakers that depend ONLY on account state --
+        daily loss, drawdown, and the consecutive-loss hard limit -- none
+        of them need a specific Signal to evaluate. Extracted out of
+        evaluate() so a caller that must ask "is trading halted right
+        now?" without a signal in hand (paper/advance.py, deciding
+        whether a symbol's already-approved, still-PENDING order may
+        actually fill) can reuse the EXACT same halt logic evaluate()
+        itself uses, rather than risking a second, drifting copy of it.
+
+        Real bug this exists to prevent (found via adversarial audit,
+        reproduced before this method existed): a PENDING order is only
+        ever risk-evaluated ONCE, at submission time. paper/advance.py's
+        own hold-back/retry mechanism can leave a symbol's approval
+        outstanding for an arbitrarily long time (held back behind the
+        account's single open position) — long enough for the account to
+        have since crossed max_drawdown_pct/max_daily_loss_pct/
+        consecutive_loss_hard_limit through OTHER trades. Without this
+        check, that stale approval would still fill unconditionally
+        (Account.open_position() itself performs no risk validation at
+        all), silently bypassing the exact same halt that would reject a
+        brand new signal submitted in that same moment — the blueprint's
+        own "Critical: All trading suspended" tier, defeated by nothing
+        more than order timing."""
+        reasons: list[VetoReason] = []
+        if self._daily_loss_breached(account):
+            reasons.append(VetoReason.MAX_DAILY_LOSS)
+        if account.current_drawdown_pct >= self.config.max_drawdown_pct:
+            reasons.append(VetoReason.MAX_DRAWDOWN)
+        if account.consecutive_losses >= self.config.consecutive_loss_hard_limit:
+            reasons.append(VetoReason.CONSECUTIVE_LOSS_LIMIT)
+        return reasons
 
     def _daily_loss_breached(self, account: Account) -> bool:
         if account.daily_start_equity <= 0:

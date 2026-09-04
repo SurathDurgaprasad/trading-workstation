@@ -282,3 +282,217 @@ def test_advance_skips_a_symbol_with_no_resolvable_baseline_fail_closed(engine):
     assert ghost_result.bars_processed == 0
     assert ghost_result.skipped_reason is not None
     assert "no safe baseline" in ghost_result.skipped_reason
+
+
+# --- account-level risk halts (weekend hardening audit) -------------------------
+
+
+def _drive_account_into_max_drawdown(engine, risk_config, *, start_day: int = 1) -> int:
+    """Repeatedly submits, fills, and hard-stops-out symbol "DRAWDOWN_X" until
+    the account's current_drawdown_pct reaches risk_config.max_drawdown_pct.
+    Returns the day offset the caller should continue from. Raises if the
+    configured risk/drawdown combination genuinely cannot reach it within a
+    bounded number of cycles (a test-authoring error, not a production one)."""
+    day = start_day
+    for _ in range(30):
+        if engine.account.current_drawdown_pct >= risk_config.max_drawdown_pct:
+            return day
+        signal = _signal(
+            symbol="DRAWDOWN_X", generated_at=_GENERATED_AT + timedelta(days=day),
+            reference_price=100.0, stop_price=90.0, target_price=300.0, risk_reward=20.0,
+        )
+        journal = engine.submit_signal(signal)
+        if journal.outcome != JournalOutcome.APPROVED_PENDING:
+            raise AssertionError(f"expected APPROVED_PENDING while driving drawdown, got {journal.outcome} -- test setup needs adjustment")
+        engine.process_bar("DRAWDOWN_X", Bar(timestamp=_GENERATED_AT + timedelta(days=day, hours=1), open=100.0, high=101.0, low=99.5, close=100.5))
+        engine.process_bar("DRAWDOWN_X", Bar(timestamp=_GENERATED_AT + timedelta(days=day, hours=2), open=100.0, high=100.5, low=80.0, close=85.0))
+        day += 1
+    raise AssertionError(f"never reached max_drawdown_pct={risk_config.max_drawdown_pct} after 30 cycles -- test setup needs adjustment")
+
+
+def test_advance_holds_back_a_stale_pending_order_when_the_account_is_in_max_drawdown():
+    """Real bug found via adversarial audit, reproduced before this guard
+    existed: a PENDING order is risk-evaluated exactly ONCE, at submission
+    time -- process_bar()'s fill path never re-checks anything, and
+    Account.open_position() itself performs NO risk validation at all.
+    Combined with advance()'s own hold-back/retry mechanism (which can
+    leave an approval outstanding indefinitely while OTHER trades cycle
+    through the account's one position slot), a symbol approved while the
+    account was healthy could fill unconditionally even after the account
+    has since crossed max_drawdown_pct -- silently bypassing the exact
+    circuit breaker that correctly rejects a brand-new signal in that same
+    moment (the blueprint's own "Critical: All trading suspended" tier,
+    defeated by nothing more than order timing)."""
+    from risk.config import RiskConfig
+    from risk.engine import RiskEngine
+
+    risk_config = RiskConfig(risk_per_trade_pct=2.0, max_drawdown_pct=10.0, consecutive_loss_hard_limit=100)
+    engine = PaperTradingEngine(PaperStore(":memory:"), risk_engine=RiskEngine(risk_config), initial_capital=20_000.0)
+
+    # Approved while the account is still perfectly healthy.
+    signal_b = _signal(symbol="B", generated_at=_GENERATED_AT, reference_price=50.0, stop_price=45.0, target_price=200.0, risk_reward=20.0)
+    journal_b = engine.submit_signal(signal_b)
+    assert journal_b.outcome == JournalOutcome.APPROVED_PENDING
+
+    day = _drive_account_into_max_drawdown(engine, risk_config)
+    assert engine.account.current_drawdown_pct >= risk_config.max_drawdown_pct
+
+    # Sanity check: a BRAND NEW signal is correctly rejected right now.
+    signal_c = _signal(symbol="C", generated_at=_GENERATED_AT + timedelta(days=day), reference_price=10.0, stop_price=9.0, target_price=30.0, risk_reward=20.0)
+    journal_c = engine.submit_signal(signal_c)
+    assert journal_c.outcome == JournalOutcome.REJECTED
+
+    # THE FIX: B's stale, already-approved PENDING order must NOT fill either.
+    provider = _FakeProvider([OHLCVBar(timestamp=_GENERATED_AT + timedelta(days=day + 1), open=50.0, high=50.5, low=49.5, close=50.2, volume=1000.0)])
+    results = advance_pending_paper_orders(engine, provider=provider)
+
+    b_result = next(r for r in results if r.symbol == "B")
+    assert b_result.bars_processed == 0
+    assert b_result.skipped_reason is not None
+    assert "MAX_DRAWDOWN" in b_result.skipped_reason
+    assert engine.store.get_open_position("B") is None  # never filled
+    assert engine.store.get_pending_order("B") is not None  # still PENDING, not silently dropped either
+
+
+def test_advance_still_manages_an_existing_open_position_during_a_risk_halt():
+    """The fix above must NOT also block risk MANAGEMENT of an already-open
+    position during a halt -- refusing to check its stop/target while the
+    account is in max drawdown would be a worse, new bug (an unmonitored
+    real position). Only a bare PENDING order (a NEW capital commitment)
+    is held back."""
+    from risk.config import RiskConfig
+    from risk.engine import RiskEngine
+
+    risk_config = RiskConfig(risk_per_trade_pct=2.0, max_drawdown_pct=10.0, consecutive_loss_hard_limit=100)
+    engine = PaperTradingEngine(PaperStore(":memory:"), risk_engine=RiskEngine(risk_config), initial_capital=20_000.0)
+
+    # Open a real position in "B" BEFORE the account enters max drawdown.
+    signal_b = _signal(symbol="B", generated_at=_GENERATED_AT, reference_price=50.0, stop_price=45.0, target_price=200.0, risk_reward=20.0)
+    engine.submit_signal(signal_b)
+    engine.process_bar("B", Bar(timestamp=_GENERATED_AT + timedelta(hours=1), open=50.0, high=50.5, low=49.5, close=50.2))
+    assert engine.store.get_open_position("B") is not None
+
+    # Drive the account (via a DIFFERENT symbol) into max drawdown -- but B's
+    # own position stays open throughout (single-position engine: submitting
+    # for DRAWDOWN_X would itself be blocked while B is open, so drive
+    # drawdown by closing B out first is not an option here -- instead,
+    # directly force the account's own drawdown state to prove the
+    # monitoring-continues guarantee in isolation).
+    engine.account.peak_equity = engine.account.equity / (1 - risk_config.max_drawdown_pct / 100 - 0.01)
+    assert engine.account.current_drawdown_pct >= risk_config.max_drawdown_pct
+
+    # B must still be monitored for its stop/target -- advance() must not
+    # skip it just because the account is halted.
+    provider = _FakeProvider([OHLCVBar(timestamp=_GENERATED_AT + timedelta(days=1), open=50.0, high=50.5, low=44.0, close=44.5, volume=1000.0)])
+    results = advance_pending_paper_orders(engine, provider=provider)
+
+    b_result = next(r for r in results if r.symbol == "B")
+    assert b_result.skipped_reason is None
+    assert b_result.bars_processed == 1
+    assert engine.store.get_open_position("B") is None  # correctly stopped out, not silently left unmonitored
+
+
+def test_advance_holds_back_a_stale_pending_order_on_max_daily_loss():
+    """The same fix, exercised via MAX_DAILY_LOSS specifically -- not just
+    MAX_DRAWDOWN. account_level_halt_reasons() covers all three
+    account-level circuit breakers (daily loss, drawdown, consecutive-loss
+    hard limit) with one shared method, but each deserves its own direct
+    coverage rather than relying on the drawdown test alone to imply the
+    others are wired correctly too."""
+    from risk.config import RiskConfig
+    from risk.engine import RiskEngine
+
+    risk_config = RiskConfig(max_daily_loss_pct=3.0)
+    engine = PaperTradingEngine(PaperStore(":memory:"), risk_engine=RiskEngine(risk_config), initial_capital=20_000.0)
+
+    signal_b = _signal(symbol="B", generated_at=_GENERATED_AT, reference_price=50.0, stop_price=45.0, target_price=200.0, risk_reward=20.0)
+    journal_b = engine.submit_signal(signal_b)
+    assert journal_b.outcome == JournalOutcome.APPROVED_PENDING
+
+    # Directly force a same-day loss beyond the 3% threshold (equivalent to
+    # what several real intraday losing trades would produce) -- isolates
+    # this specific halt condition without needing a multi-cycle drive.
+    engine.account.daily_start_equity = engine.account.equity / (1 - risk_config.max_daily_loss_pct / 100 - 0.01)
+    assert engine.account.daily_pnl < 0
+    assert -engine.account.daily_pnl >= engine.account.daily_start_equity * risk_config.max_daily_loss_pct / 100
+
+    # Sanity check: a BRAND NEW signal is correctly rejected right now.
+    signal_c = _signal(symbol="C", generated_at=_GENERATED_AT + timedelta(days=1), reference_price=10.0, stop_price=9.0, target_price=30.0, risk_reward=20.0)
+    journal_c = engine.submit_signal(signal_c)
+    assert journal_c.outcome == JournalOutcome.REJECTED
+
+    provider = _FakeProvider([OHLCVBar(timestamp=_GENERATED_AT + timedelta(days=1), open=50.0, high=50.5, low=49.5, close=50.2, volume=1000.0)])
+    results = advance_pending_paper_orders(engine, provider=provider)
+
+    b_result = next(r for r in results if r.symbol == "B")
+    assert b_result.bars_processed == 0
+    assert b_result.skipped_reason is not None
+    assert "MAX_DAILY_LOSS" in b_result.skipped_reason
+    assert engine.store.get_open_position("B") is None
+
+
+def test_advance_holds_back_a_stale_pending_order_when_the_kill_switch_is_active(tmp_path, engine):
+    """Real bug found via adversarial audit, reproduced before this guard
+    existed: advance_pending_paper_orders() had NO kill-switch awareness
+    at all -- unlike _bridge_to_paper_execution (which checks
+    state_store.is_kill_switch_active() before every NEW submission), the
+    fill path this function drives had no equivalent check whatsoever. A
+    symbol approved and left PENDING BEFORE the kill switch was activated
+    would still fill via advance() afterward, completely bypassing the
+    project's own primary emergency stop -- exactly the "Never bypass kill
+    switches" rule stated as an absolute, non-negotiable safety boundary."""
+    from live.state_store import LiveStateStore
+
+    signal_b = _signal(symbol="B")
+    journal_b = engine.submit_signal(signal_b)
+    assert journal_b.outcome == JournalOutcome.APPROVED_PENDING
+
+    state_store = LiveStateStore(tmp_path / "state.db")
+    state_store.activate_kill_switch(reason="test")
+
+    provider = _FakeProvider([_bar(1, open=100.0, high=101.0, low=99.0, close=100.5)])
+    results = advance_pending_paper_orders(engine, provider=provider, state_store=state_store)
+    state_store.close()
+
+    b_result = next(r for r in results if r.symbol == "B")
+    assert b_result.bars_processed == 0
+    assert b_result.skipped_reason is not None
+    assert "kill switch" in b_result.skipped_reason.lower()
+    assert engine.store.get_open_position("B") is None  # never filled
+    assert engine.store.get_pending_order("B") is not None  # still PENDING, not silently dropped
+
+
+def test_advance_still_manages_an_open_position_while_the_kill_switch_is_active(tmp_path, engine):
+    """Same distinction as the risk-halt fix: an active kill switch must
+    still block a NEW fill, but must NOT stop monitoring a position that
+    is ALREADY open -- refusing to check its stop/target during a kill
+    switch would leave a real position unmonitored, a worse, new bug."""
+    from live.state_store import LiveStateStore
+
+    engine.submit_signal(_signal(symbol="B"))
+    engine.process_bar("B", Bar(timestamp=_GENERATED_AT + timedelta(days=1), open=100.0, high=101.0, low=99.5, close=100.5))
+    assert engine.store.get_open_position("B") is not None
+
+    state_store = LiveStateStore(tmp_path / "state.db")
+    state_store.activate_kill_switch(reason="test")
+
+    provider = _FakeProvider([_bar(2, open=100.0, high=100.5, low=90.0, close=91.0)])  # hits the 95 stop
+    results = advance_pending_paper_orders(engine, provider=provider, state_store=state_store)
+    state_store.close()
+
+    b_result = next(r for r in results if r.symbol == "B")
+    assert b_result.skipped_reason is None
+    assert b_result.bars_processed == 1
+    assert engine.store.get_open_position("B") is None  # correctly stopped out, not left unmonitored
+
+
+def test_advance_kill_switch_check_is_optional_backward_compatible(engine):
+    """No state_store supplied (the parameter's default) must behave
+    exactly as it did before this parameter existed -- never fabricates a
+    kill-switch state it cannot actually observe."""
+    engine.submit_signal(_signal(symbol="B"))
+    provider = _FakeProvider([_bar(1, open=100.0, high=101.0, low=99.0, close=100.5)])
+    results = advance_pending_paper_orders(engine, provider=provider)
+    b_result = next(r for r in results if r.symbol == "B")
+    assert b_result.skipped_reason is None
+    assert engine.store.get_open_position("B") is not None

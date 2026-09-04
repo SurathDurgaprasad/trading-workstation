@@ -33,10 +33,14 @@ generated the order:
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from market.data_provider import MarketDataProvider
 from paper.engine import Bar, PaperTradingEngine, _naive
 from paper.models import PositionStatus
+
+if TYPE_CHECKING:
+    from live.state_store import LiveStateStore
 
 
 @dataclass(frozen=True)
@@ -64,6 +68,7 @@ def _baseline_timestamp_for(engine: PaperTradingEngine, symbol: str) -> datetime
 
 def advance_pending_paper_orders(
     engine: PaperTradingEngine, *, provider: MarketDataProvider, period: str = "1y", interval: str = "1d",
+    state_store: "LiveStateStore | None" = None,
 ) -> list[AdvanceResult]:
     """For every symbol with a PENDING order or an OPEN position in
     `engine`'s account, fetches fresh OHLCV and feeds every bar strictly
@@ -71,6 +76,22 @@ def advance_pending_paper_orders(
     -- in chronological order, so an intermediate stop/target crossing
     between two calls to this function is never silently skipped (only
     checking the single latest bar each time would miss that).
+
+    `state_store` is OPTIONAL (default None, matching every other
+    optional input this module already threads through) -- when
+    supplied, an active kill switch holds back any symbol that only has
+    a bare PENDING order (never a symbol that already has an OPEN
+    position, which must still be monitored for stop/target/expiry
+    regardless of the kill switch). Real bug this exists to prevent,
+    found via adversarial audit: this function previously had NO
+    kill-switch awareness at all -- unlike `_bridge_to_paper_execution`
+    (which checks the kill switch before every NEW submission), the fill
+    path this function drives had no equivalent check, so a symbol
+    approved and left PENDING BEFORE the kill switch was activated would
+    still fill afterward, completely bypassing the project's own primary
+    emergency stop. None (not supplied) never fabricates a kill-switch
+    state this function cannot actually observe -- matches every other
+    "no input, no assumption" guard in this module.
 
     Idempotent: calling this again with no new data for a symbol simply
     finds zero eligible bars and does nothing (bars_processed=0) --
@@ -131,6 +152,45 @@ def advance_pending_paper_orders(
                     skipped_reason="another symbol already holds this single-position account's one open position -- will retry once it closes",
                 ))
                 continue
+
+            # Real, reproduced finding (weekend hardening audit): a PENDING
+            # order is risk-evaluated exactly ONCE, at submission time --
+            # process_bar()'s fill path never re-checks anything, and
+            # Account.open_position() itself performs NO risk validation at
+            # all. Combined with this function's own hold-back/retry
+            # mechanism above (which can leave an approval outstanding for
+            # an arbitrarily long time, however many OTHER trades cycle
+            # through the account's one position slot in the meantime),
+            # a symbol approved while the account was healthy could later
+            # fill unconditionally even after the account has since crossed
+            # max_drawdown_pct/max_daily_loss_pct/consecutive_loss_hard_limit
+            # -- silently bypassing the exact same circuit breaker that
+            # would reject a brand-new signal submitted in that same
+            # moment. Reproduced directly before this guard existed: an
+            # account driven past max_drawdown_pct via a different symbol's
+            # repeated stop-outs correctly REJECTED a fresh signal, yet a
+            # symbol's OLD, already-approved PENDING order (sized while the
+            # account was still healthy) filled anyway once its turn came.
+            # Only applies to a bare PENDING order (a NEW capital
+            # commitment) -- a symbol that already has an OPEN position of
+            # its own must still be monitored for stop/target/expiry
+            # regardless of an account-level halt; refusing to manage an
+            # EXISTING position during a drawdown would be a worse, new bug.
+            if engine.store.get_open_position(symbol) is None:
+                halt_reasons = engine.risk_engine.account_level_halt_reasons(engine.account)
+                if halt_reasons:
+                    reasons_text = ", ".join(reason.value for reason in halt_reasons)
+                    results.append(AdvanceResult(
+                        symbol=symbol, bars_processed=0, last_outcome=None,
+                        skipped_reason=f"account-level risk halt ({reasons_text}) -- filling this stale PENDING order now would bypass the same circuit breaker that would reject a fresh signal",
+                    ))
+                    continue
+                if state_store is not None and state_store.is_kill_switch_active():
+                    results.append(AdvanceResult(
+                        symbol=symbol, bars_processed=0, last_outcome=None,
+                        skipped_reason="kill switch is active -- filling this stale PENDING order now would bypass the project's primary emergency stop",
+                    ))
+                    continue
 
             ohlcv = provider.fetch_ohlcv(symbol, period=period, interval=interval)
             new_bars = sorted(

@@ -557,6 +557,47 @@ def test_shadow_run_paper_execute_kill_switch_still_caught_with_skip_critic(tmp_
     assert entries == []
 
 
+def test_shadow_run_state_store_is_threaded_through_to_advance_pending_paper_orders(tmp_path, monkeypatch):
+    """paper/advance.py's kill-switch guard (added via adversarial audit
+    -- see paper/advance.py's own module docstring) is only useful if the
+    REAL LiveStateStore actually reaches it from the CLI path. The guard's
+    actual BEHAVIOR (holds back a stale PENDING order while the kill
+    switch is active / still manages an already-OPEN position regardless
+    / unaffected when state_store is omitted) is already thoroughly
+    covered at the unit level in tests/test_paper_advance.py -- this test
+    only proves main.py's CLI wiring reaches it, mirroring
+    test_shadow_run_max_holding_bars_is_threaded_through_to_the_paper_engine's
+    own capture pattern above.
+
+    An earlier version of this test tried to prove the wiring end-to-end
+    by running shadow-run twice (kill switch off, then on) and asserting
+    no new AAPL journal entry appeared on the second run. That was
+    vacuous: this fixture's own fully-materialized "future" bars make a
+    submitted PENDING order fill AND close (APPROVED_FILLED_CLOSED)
+    within the SAME first shadow-run call -- confirmed directly by
+    forcing the journal entry to print. With nothing left PENDING by the
+    second run, the "no new entry" assertion held trivially regardless of
+    whether the kill-switch guard did anything at all. Capturing the
+    kwarg itself is the only reliable way to prove the wiring here."""
+    import paper.advance as paper_advance_module
+
+    captured = {}
+    real_fn = paper_advance_module.advance_pending_paper_orders
+
+    def _capturing(*args, **kwargs):
+        captured["state_store"] = kwargs.get("state_store")
+        return real_fn(*args, **kwargs)
+
+    monkeypatch.setattr(paper_advance_module, "advance_pending_paper_orders", _capturing)
+
+    run_shadow_run_command(_paper_execute_args(tmp_path, symbols="AAPL"))
+
+    from live.state_store import LiveStateStore
+
+    assert "state_store" in captured, "advance_pending_paper_orders was never called"
+    assert isinstance(captured["state_store"], LiveStateStore)
+
+
 def test_shadow_run_paper_execute_two_different_symbols_each_get_their_own_pending_order(tmp_path, capsys):
     """Real, verified behavior of the reused, unmodified PaperTradingEngine
     (not new logic introduced by this bridge): PaperTradingEngine's own

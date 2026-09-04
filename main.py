@@ -1800,7 +1800,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     if paper_engine is not None:
         from paper.advance import advance_pending_paper_orders
 
-        advance_results = advance_pending_paper_orders(paper_engine, provider=provider, period=args.period, interval=args.interval)
+        advance_results = advance_pending_paper_orders(paper_engine, provider=provider, period=args.period, interval=args.interval, state_store=state_store)
         paper_orders_advanced = sum(1 for r in advance_results if r.bars_processed > 0)
         if advance_results:
             print("\nAdvancing existing PENDING paper orders / OPEN positions with fresh data:")
