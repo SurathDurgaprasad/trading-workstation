@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from agents.errors import AgentOutputError
 from backtesting.report import format_backtest_report
 from backtesting.runner import FullBacktestRun, run_full_backtest
+from backtesting.universe import UniverseBacktestResult, per_trade_returns, run_universe_backtest
 from core.config import PROJECT_ROOT
 from core.logging import setup_logging
 from live.dhan.config import DhanCredentialsMissingError
@@ -44,7 +45,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime", "experiment")
+_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime", "experiment")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -192,6 +193,77 @@ def run_backtest_command(args: argparse.Namespace) -> None:
             out_of_sample_baseline=run_result.out_of_sample_baseline,
         )
     )
+
+
+# --------------------------------------------------------------------------
+# `backtest-universe` -- weekend hardening, Phase 7 (strategy edge
+# validation): a single symbol's backtest is far too small a sample to say
+# anything about a real edge (16-29 trades over 5 years, per real RELIANCE.
+# NS/TCS.NS/etc runs). Pools every trade's per-trade return across an
+# entire symbol universe into one sample and applies learning.
+# profitability's own Wilson-CI/mean-CI statistical standard -- see
+# backtesting/universe.py's own module docstring for the full reasoning.
+# --------------------------------------------------------------------------
+
+
+def run_backtest_universe_command(args: argparse.Namespace) -> None:
+    from market_data.universe import MarketUniverse
+
+    from learning.profitability import compute_profitability_report_from_returns
+    from strategy.registry import get_strategy
+
+    if args.watchlist_file:
+        universe = MarketUniverse.from_yaml_file(args.watchlist_file)
+    elif args.symbols:
+        universe = MarketUniverse.from_watchlist([s for s in args.symbols.split(",") if s.strip()])
+    else:
+        print("backtest-universe: one of --symbols or --watchlist-file is required.", file=sys.stderr)
+        sys.exit(2)
+
+    strategy = get_strategy(args.strategy)
+    result: UniverseBacktestResult = run_universe_backtest(
+        universe.symbols, strategy=strategy, period=args.period, interval=args.interval,
+        initial_capital=args.initial_capital,
+    )
+
+    print("=" * 50)
+    print("BACKTEST-UNIVERSE -- POOLED STATISTICAL EDGE VALIDATION")
+    print("=" * 50)
+    print(f"\nStrategy: {strategy.name}")
+    print(f"Universe: {len(universe.symbols)} symbols requested, {len(result.per_symbol)} backtested, {len(result.failed_symbols)} failed")
+    if result.failed_symbols:
+        print("\nFailed symbols (excluded, not silently dropped):")
+        for symbol, reason in result.failed_symbols.items():
+            print(f"  {symbol}: {reason}")
+
+    print("\n" + "-" * 50)
+    print("PER-SYMBOL SUMMARY")
+    print("-" * 50 + "\n")
+    for symbol, backtest_result in sorted(result.per_symbol.items()):
+        m = backtest_result.metrics
+        print(f"{symbol:<16} {m.total_trades:>3} trades, win rate {m.win_rate_pct:>6.2f}%, net PnL {m.net_pnl:>12,.2f}, expectancy {('%.2fR' % m.expectancy) if m.expectancy is not None else 'N/A':>8}")
+
+    pooled_returns = per_trade_returns(result.pooled_trades)
+    report = compute_profitability_report_from_returns(pooled_returns)
+
+    print("\n" + "-" * 50)
+    print("POOLED VERDICT (every trade across every backtested symbol, one sample)")
+    print("-" * 50 + "\n")
+    print(f"Pooled trades:       {report.sample_size}")
+    print(f"Win rate:            {f'{report.win_rate:.2%} (95% CI {report.win_rate_ci_low:.2%}-{report.win_rate_ci_high:.2%})' if report.win_rate is not None else 'N/A'}")
+    print(f"Expectancy:          {f'{report.expectancy:+.2%}' if report.expectancy is not None else 'N/A'}")
+    print(f"Mean return 95% CI:  {f'[{report.mean_return_ci_low:+.2%}, {report.mean_return_ci_high:+.2%}]' if report.mean_return_ci_low is not None else 'N/A'}")
+    print(f"Profit factor:       {f'{report.profit_factor:.2f}' if report.profit_factor is not None else 'N/A'}")
+    print(f"Max drawdown:        {f'{report.max_drawdown:.2%}' if report.max_drawdown is not None else 'N/A'}")
+    print(f"\nVerdict: {report.verdict.value}")
+    for line in report.reasoning:
+        print(f"  - {line}")
+
+    print("\n" + "-" * 50)
+    print("\nIMPORTANT:")
+    print("This is historical simulation across a fixed universe, not evidence of future profitability.")
+    print("A single pooled verdict does not account for cross-symbol correlation (many of these")
+    print("symbols moved together in the same market regime) -- treat this as directional evidence only.")
 
 
 # --------------------------------------------------------------------------
@@ -2274,6 +2346,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"Minimum acceptable signal risk/reward (default: {default_risk.min_risk_reward}).",
     )
 
+    backtest_universe_parser = subparsers.add_parser(
+        "backtest-universe",
+        help=(
+            "Weekend hardening Phase 7: pool every trade's return across an entire symbol universe "
+            "into one sample and apply learning.profitability's Wilson-CI/mean-CI statistical standard -- "
+            "a single symbol's backtest (16-29 trades over 5y) is too small a sample to say anything about a real edge."
+        ),
+    )
+    backtest_universe_parser.add_argument("--symbols", type=str, default=None, help="Comma-separated tickers, e.g. RELIANCE.NS,TCS.NS,AAPL.")
+    backtest_universe_parser.add_argument("--watchlist-file", type=str, default=None, help="YAML watchlist file (see market_data.universe.MarketUniverse.from_yaml_file). Alternative to --symbols.")
+    backtest_universe_parser.add_argument("--period", default="5y", help="Historical window to fetch, Yahoo Finance format (default: 5y).")
+    backtest_universe_parser.add_argument("--interval", default="1d", help="Bar interval (default: 1d).")
+    backtest_universe_parser.add_argument("--initial-capital", type=float, default=100_000.0, help="Starting capital per symbol's own independent backtest (default: 100000).")
+    backtest_universe_parser.add_argument("--strategy", default="trend_momentum_baseline", help="Registered strategy name (default: trend_momentum_baseline).")
+
     paper_parser = subparsers.add_parser(
         "paper",
         help="Deterministic paper trading + journal (Phase 6). No LLM, no broker, no live orders.",
@@ -2704,6 +2791,8 @@ def main() -> None:
     try:
         if args.command == "backtest":
             run_backtest_command(args)
+        elif args.command == "backtest-universe":
+            run_backtest_universe_command(args)
         elif args.command == "paper":
             run_paper_command(args)
         elif args.command == "live-sim":

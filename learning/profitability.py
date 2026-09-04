@@ -191,10 +191,25 @@ def _normalize_for_sort(value: datetime) -> datetime:
 
 
 def compute_profitability_report(items: list["EvaluatedPrediction"]) -> ProfitabilityReport:
-    from learning.analysis import _resolution_stats, _resolved_returns
+    from learning.analysis import _resolved_returns
 
     chronological = sorted(items, key=lambda item: _normalize_for_sort(item.prediction.entry_time))
     returns = _resolved_returns(chronological)
+    return compute_profitability_report_from_returns(returns)
+
+
+def compute_profitability_report_from_returns(returns: list[float]) -> ProfitabilityReport:
+    """The exact same Wilson-CI/mean-CI verdict machinery
+    compute_profitability_report uses, factored out to operate on a plain
+    list of per-trade returns rather than EvaluatedPrediction objects --
+    lets backtesting.universe pool returns across an entire symbol
+    universe using the SAME statistical standard this project already
+    applies to prediction evidence, rather than inventing a second,
+    potentially-drifting one. compute_profitability_report itself is now
+    a thin wrapper around this (behavior-preserving refactor -- verified
+    via the existing test suite passing unchanged)."""
+    from learning.analysis import _resolution_stats
+
     n = len(returns)
 
     if n == 0:

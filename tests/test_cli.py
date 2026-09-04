@@ -2,6 +2,7 @@ import pytest
 
 from main import (
     parse_args,
+    run_backtest_universe_command,
     run_decide_command,
     run_evaluate_command,
     run_learn_command,
@@ -40,6 +41,29 @@ def test_backtest_subcommand_defaults():
     assert args.interval == "1d"
     assert args.initial_capital == 100_000.0
     assert args.strategy == "trend_momentum_baseline"
+
+
+def test_backtest_universe_subcommand_defaults():
+    args = parse_args(["backtest-universe", "--symbols", "AAPL,MSFT"])
+    assert args.command == "backtest-universe"
+    assert args.symbols == "AAPL,MSFT"
+    assert args.watchlist_file is None
+    assert args.period == "5y"
+    assert args.interval == "1d"
+    assert args.initial_capital == 100_000.0
+    assert args.strategy == "trend_momentum_baseline"
+
+
+def test_backtest_universe_subcommand_accepts_watchlist_file():
+    args = parse_args(["backtest-universe", "--watchlist-file", "watchlist.yaml"])
+    assert args.watchlist_file == "watchlist.yaml"
+    assert args.symbols is None
+
+
+def test_backtest_universe_command_requires_symbols_or_watchlist_file():
+    args = parse_args(["backtest-universe"])
+    with pytest.raises(SystemExit):
+        run_backtest_universe_command(args)
 
 
 def test_backtest_subcommand_overrides():
