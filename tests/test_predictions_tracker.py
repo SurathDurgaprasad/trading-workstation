@@ -178,6 +178,38 @@ def test_evaluate_prediction_same_bar_ambiguity_reuses_check_exits_stop_wins_rul
     assert evaluation.outcome == PredictionOutcomeState.STOP_HIT
 
 
+def test_evaluate_prediction_never_resolves_against_the_entry_bar_itself():
+    """Real look-ahead-adjacent boundary this project's existing tests never
+    actually exercised: evaluate_prediction's own guard is
+    `subsequent = frame[frame.index > prediction.entry_time]` (strict `>`,
+    excluding the entry bar). Every existing target/stop test's own bar 0
+    happens to be harmless regardless of whether it's included or excluded
+    (its range never touches stop/target) -- so a regression changing `>`
+    to `>=` would pass the entire existing suite silently. This test's bar
+    0 (timestamp == entry_time exactly, since _bars() starts at _START and
+    _signal()'s generated_at is also _START) deliberately has a low of 50.0
+    -- catastrophically below stop_price=95.0 -- so an evaluation that
+    wrongly includes it would immediately report STOP_HIT at bar 1 with
+    exit_price=95.0. The correct, entry-bar-excluding evaluation must
+    instead resolve TARGET_HIT from the later, genuinely-subsequent bars.
+
+    Verified this test is meaningful (not vacuous) by temporarily changing
+    `>` to `>=` in predictions/tracker.py and confirming it then failed
+    with STOP_HIT/bars_observed=1, before restoring the real guard."""
+    provider = _FakeProvider(_ohlcv("AAPL", [
+        (101.0, 50.0),    # bar 0 == entry_time exactly -- must be excluded
+        (105.0, 99.0),    # bar 1: genuinely subsequent, no hit
+        (112.0, 101.0),   # bar 2: genuinely subsequent, hits target
+    ]))
+    prediction = _prediction(horizon_bars=5)
+
+    evaluation = evaluate_prediction(prediction, provider=provider)
+
+    assert evaluation.outcome == PredictionOutcomeState.TARGET_HIT
+    assert evaluation.bars_observed == 2
+    assert evaluation.exit_price == 110.0
+
+
 def test_evaluate_prediction_expired_when_horizon_reached_with_no_hit():
     provider = _FakeProvider(_ohlcv("AAPL", [(101.0, 99.0), (102.0, 98.0), (103.0, 97.0), (104.0, 96.0)]))
     prediction = _prediction(horizon_bars=3)
