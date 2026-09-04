@@ -30,11 +30,14 @@ per spec §6 rather than left implicit):
     why: "do not manufacture a price").
 """
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from live.freshness import interval_to_timedelta
 from market.data_provider import DataSource, DataStatus, OHLCVBar
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -79,6 +82,28 @@ class CandleBuilder:
         own docstring) -- this class only ever sums whatever it's given."""
         bucket_start = self._bucket_start_for(timestamp)
         completed: OHLCVBar | None = None
+
+        if self._state is not None and bucket_start < self._state.bucket_start:
+            # Adversarial-audit finding: a late/out-of-order tick (its OWN
+            # exchange timestamp belongs to a bucket that already closed)
+            # must never be merged into the CURRENT bucket -- doing so
+            # silently corrupts an already-in-progress bar's high/low/close/
+            # volume with a price that was never actually observed during
+            # that bucket, and can even push last_source_timestamp BEFORE
+            # the bar's own declared timestamp (an internally inconsistent
+            # record). Real, plausible cause: server-side reordering,
+            # reconnect-driven redelivery, or interleaved packet types for
+            # the same instrument -- TCP's in-order delivery guarantees
+            # only the transport layer, not the exchange-timestamp order of
+            # what arrives on it. Dropped, never fabricated into either
+            # bucket -- matches this module's own "do not manufacture a
+            # price" posture applied to corruption, not just fabrication.
+            logger.warning(
+                "CandleBuilder(%s, %s): dropping a late/out-of-order tick (timestamp=%s, bucket=%s) -- "
+                "bucket %s is already in progress and must not be corrupted by it.",
+                self.symbol, self.interval, timestamp, bucket_start, self._state.bucket_start,
+            )
+            return None
 
         if self._state is not None and bucket_start > self._state.bucket_start:
             completed = self._finalize(self._state)

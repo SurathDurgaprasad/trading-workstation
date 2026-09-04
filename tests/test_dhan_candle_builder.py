@@ -38,6 +38,40 @@ def test_a_tick_in_the_next_bucket_completes_the_previous_bar():
     assert bar.close == 102.0  # last tick BEFORE the boundary crossing, not the crossing tick itself
 
 
+def test_a_late_out_of_order_tick_is_dropped_not_merged_into_the_current_bucket():
+    """Adversarial-audit finding: a tick whose OWN exchange timestamp
+    belongs to a bucket EARLIER than the one already in progress (a
+    real, plausible scenario -- server-side reordering, reconnect
+    redelivery, interleaved packet types) must be dropped, never merged
+    into the current bucket. Merging it would corrupt an already-valid
+    bar's high/low/close/volume with a price that was never actually
+    observed during that bucket, and could even push the bar's own
+    last_source_timestamp BEFORE its declared bucket timestamp."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(65), received_at=_ts(65))  # bucket 60
+    builder.on_tick(price=105.0, volume=5, timestamp=_ts(90), received_at=_ts(90))  # still bucket 60
+
+    late_result = builder.on_tick(price=999.0, volume=100, timestamp=_ts(10), received_at=_ts(200))  # belongs to bucket 0 -- EARLIER
+    assert late_result is None  # dropped, not a completed bar
+
+    bar = builder.on_tick(price=110.0, volume=3, timestamp=_ts(125), received_at=_ts(125))  # crosses into bucket 120, completes bucket 60
+    assert bar is not None
+    assert bar.high == 105.0  # NOT 999.0 -- the late tick must never have touched this bucket's high
+    assert bar.low == 100.0
+    assert bar.close == 105.0  # NOT 999.0
+    assert bar.volume == 15.0  # 10 + 5 -- the late tick's volume=100 must never have been summed in
+    assert bar.source_timestamp >= bar.timestamp  # never pushed backward by the dropped late tick
+
+
+def test_a_late_tick_does_not_start_a_new_bucket_when_no_bucket_is_in_progress():
+    """The late-tick guard only applies when a bucket is ALREADY in
+    progress -- the very first tick ever received always starts a fresh
+    bucket, regardless of what timestamp it carries."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    result = builder.on_tick(price=100.0, volume=10, timestamp=_ts(5), received_at=_ts(5))
+    assert result is None  # first tick, no bucket to be "late" against
+
+
 def test_ohlc_correctness_within_one_bucket():
     builder = CandleBuilder(symbol="RELIANCE", interval="1m")
     builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
