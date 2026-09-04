@@ -111,6 +111,16 @@ def test_schedule_loop_paper_execute_flag_parses():
     assert args.paper_execute is True
 
 
+def test_schedule_max_holding_bars_defaults_to_none():
+    args = parse_args(["schedule", "tick", "--symbols", "AAPL"])
+    assert args.max_holding_bars is None
+
+
+def test_schedule_max_holding_bars_flag_parses():
+    args = parse_args(["schedule", "tick", "--symbols", "AAPL", "--max-holding-bars", "5"])
+    assert args.max_holding_bars == 5
+
+
 def test_schedule_loop_defaults():
     args = parse_args(["schedule", "loop", "--symbols", "AAPL"])
     assert args.schedule_command == "loop"

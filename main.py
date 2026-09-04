@@ -1625,7 +1625,10 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
         from risk.engine import RiskEngine
 
         paper_engine_store = PaperStore(args.paper_db)
-        paper_engine = PaperTradingEngine(paper_engine_store, risk_engine=RiskEngine(_risk_config_from_args(args)), initial_capital=args.initial_capital)
+        paper_engine = PaperTradingEngine(
+            paper_engine_store, risk_engine=RiskEngine(_risk_config_from_args(args)),
+            initial_capital=args.initial_capital, max_holding_bars=args.max_holding_bars,
+        )
         state_store = LiveStateStore(args.state_db)
 
     provider, resilient = _build_provider(args)
@@ -1958,7 +1961,7 @@ def _run_tick_from_args(args: argparse.Namespace, schedule_config, store, *, now
         horizon_bars=args.horizon_bars, paper_db=args.paper_db, with_ai=args.with_ai, resilient=args.resilient,
         live_source=args.live_source, scanner_db=args.scanner_db, research_db=args.research_db,
         decision_db=args.decision_db, predictions_db=args.predictions_db, initial_capital=args.initial_capital,
-        paper_execute=args.paper_execute, state_db=args.state_db,
+        paper_execute=args.paper_execute, state_db=args.state_db, max_holding_bars=args.max_holding_bars,
         staleness_seconds=args.staleness_seconds, now=now,
     )
 
@@ -2518,6 +2521,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     shadow_run_parser.add_argument("--state-db", type=str, default=None, help=f"SQLite kill-switch/pending-approval state path (default: {DEFAULT_LIVE_STATE_DB_PATH}). Required when --paper-execute is passed.")
+    shadow_run_parser.add_argument(
+        "--max-holding-bars", type=int, default=None,
+        help=(
+            "Explicit opt-in, default None (unlimited hold -- same behavior as before this flag existed): force-close "
+            "a PENDING order's eventual OPEN position after this many bars if neither its stop nor target has been hit "
+            "yet, at that bar's close (ExitReason.EXPIRED). Only takes effect once the order actually fills; only "
+            "meaningful together with --paper-execute. Mirrors --horizon-bars, which does the same thing for an "
+            "unresolved shadow PREDICTION -- this is the equivalent for a real paper POSITION."
+        ),
+    )
 
     schedule_parser = subparsers.add_parser(
         "schedule",
@@ -2561,6 +2574,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             ),
         )
         p.add_argument("--state-db", type=str, default=None, help=f"SQLite kill-switch/pending-approval state path (default: {DEFAULT_LIVE_STATE_DB_PATH}). Required when --paper-execute is passed.")
+        p.add_argument(
+            "--max-holding-bars", type=int, default=None,
+            help=(
+                "Forwarded to every shadow_run slot's `shadow-run --max-holding-bars` -- force-close a filled paper "
+                "position after this many bars if neither stop nor target has been hit (default: None, unlimited "
+                "hold). Only meaningful together with --paper-execute."
+            ),
+        )
 
     tick_parser = schedule_subparsers.add_parser("tick", help="Check whether a configured slot is due right now; if so, run it exactly once, then exit. Never loops.")
     _add_schedule_common_args(tick_parser)

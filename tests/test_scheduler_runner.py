@@ -390,3 +390,29 @@ def test_paper_execute_is_threaded_through_and_submits_a_real_pending_order(tmp_
     entries = store.list_journal_entries()
     store.close()
     assert len(entries) == 1  # a real paper order was actually submitted this tick
+
+
+def test_max_holding_bars_is_threaded_through_to_the_shadow_run_slot(tmp_path, run_store, monkeypatch):
+    """--max-holding-bars passed to run_tick must reach the underlying
+    shadow_run slot's `shadow-run --max-holding-bars` invocation, exactly
+    like --paper-execute/--state-db above."""
+    import main as main_module
+
+    captured_args = {}
+    real_run_shadow_run_command = main_module.run_shadow_run_command
+
+    def _capture(args):
+        captured_args["max_holding_bars"] = args.max_holding_bars
+        return real_run_shadow_run_command(args)
+
+    monkeypatch.setattr(main_module, "run_shadow_run_command", _capture)
+
+    result = run_tick(
+        schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", benchmark="",
+        initial_capital=20_000.0, paper_db=str(tmp_path / "paper.db"), paper_execute=True,
+        state_db=str(tmp_path / "state.db"), max_holding_bars=7,
+        now=_TRADING_TIME, **_db_paths(tmp_path),
+    )
+
+    assert result.ran is True
+    assert captured_args.get("max_holding_bars") == 7

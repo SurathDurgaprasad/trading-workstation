@@ -64,6 +64,7 @@ def _execute_slot(
     initial_capital: float | None = None,
     paper_execute: bool = False,
     state_db: str | None = None,
+    max_holding_bars: int | None = None,
 ) -> str:
     from main import parse_args, run_evaluate_command, run_learn_command, run_shadow_run_command
 
@@ -107,6 +108,8 @@ def _execute_slot(
             argv += ["--paper-execute"]
         if state_db:
             argv += ["--state-db", state_db]
+        if max_holding_bars is not None:
+            argv += ["--max-holding-bars", str(max_holding_bars)]
         return _run_and_capture(run_shadow_run_command, parse_args(argv))
 
     if slot.action == SlotAction.EVALUATE_AND_LEARN:
@@ -152,6 +155,7 @@ def run_tick(
     initial_capital: float | None = None,
     paper_execute: bool = False,
     state_db: str | None = None,
+    max_holding_bars: int | None = None,
     staleness_seconds: float = 1800.0,
     now: datetime | None = None,
 ) -> TickResult:
@@ -204,6 +208,7 @@ def run_tick(
             with_ai=with_ai, resilient=resilient, live_source=live_source, scanner_db=scanner_db,
             research_db=research_db, decision_db=decision_db, predictions_db=predictions_db,
             initial_capital=initial_capital, paper_execute=paper_execute, state_db=state_db,
+            max_holding_bars=max_holding_bars,
         )
     except Exception as exc:  # noqa: BLE001 -- a failed tick must never crash a long-lived scheduler process
         # `finished_at=now_utc`, not the default real wall-clock: this tick's

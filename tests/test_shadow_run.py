@@ -110,12 +110,18 @@ def test_shadow_run_subcommand_defaults():
     assert args.skip_evaluate is False
     assert args.paper_execute is False
     assert args.state_db is None
+    assert args.max_holding_bars is None
 
 
 def test_shadow_run_paper_execute_flag_parses():
     args = parse_args(["shadow-run", "--symbols", "AAPL", "--paper-execute", "--paper-db", "/tmp/p.db", "--state-db", "/tmp/s.db", "--initial-capital", "20000"])
     assert args.paper_execute is True
     assert args.state_db == "/tmp/s.db"
+
+
+def test_shadow_run_max_holding_bars_flag_parses():
+    args = parse_args(["shadow-run", "--symbols", "AAPL", "--max-holding-bars", "10"])
+    assert args.max_holding_bars == 10
 
 
 def test_shadow_run_requires_symbols_or_watchlist_file():
@@ -285,6 +291,29 @@ def test_shadow_run_paper_execute_submits_a_real_pending_order(tmp_path, capsys)
     assert entries[0].outcome.value in ("APPROVED_FILLED_OPEN", "APPROVED_FILLED_CLOSED")
     assert entries[0].symbol == "AAPL"
     assert entries[0].strategy_name == "decision_engine_buy_bridge"
+
+
+def test_shadow_run_max_holding_bars_is_threaded_through_to_the_paper_engine(tmp_path, monkeypatch):
+    """--max-holding-bars must actually reach the constructed
+    PaperTradingEngine, not just parse -- the engine-level mechanism
+    itself (force-close after N bars with ExitReason.EXPIRED) is already
+    covered directly in tests/test_paper_engine.py; this only proves the
+    CLI wiring reaches it."""
+    import paper.engine as paper_engine_module
+
+    captured = {}
+    real_engine_cls = paper_engine_module.PaperTradingEngine
+
+    class _CapturingEngine(real_engine_cls):
+        def __init__(self, *args, **kwargs):
+            captured["max_holding_bars"] = kwargs.get("max_holding_bars")
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(paper_engine_module, "PaperTradingEngine", _CapturingEngine)
+
+    run_shadow_run_command(_paper_execute_args(tmp_path, symbols="AAPL", extra=["--max-holding-bars", "5"]))
+
+    assert captured.get("max_holding_bars") == 5
 
 
 def test_shadow_run_paper_execute_never_touches_a_prediction_when_disabled(tmp_path, capsys):

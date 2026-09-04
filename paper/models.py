@@ -101,6 +101,15 @@ class Position(BaseModel):
     exit_price: float | None = None
     exit_reason: ExitReason | None = None
     trade_id: str | None = None
+    # Phase (paper order fill lifecycle hardening) -- bars processed for
+    # this symbol while this position was OPEN, counted only when
+    # PaperTradingEngine.max_holding_bars is set (see paper/engine.py's
+    # _process_open_position); stays 0 and is never persisted otherwise,
+    # so an engine that never opts in writes and reads this field exactly
+    # as if it did not exist. Defaulting to 0 also makes deserializing an
+    # OLDER position row (saved before this field existed) safe -- pydantic
+    # fills the default for a JSON object missing the key.
+    bars_held: int = 0
 
 
 class JournalOutcome(str, Enum):

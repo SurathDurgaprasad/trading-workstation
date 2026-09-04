@@ -104,10 +104,24 @@ class PaperTradingEngine:
         risk_engine: RiskEngine | None = None,
         cost_model: CostModel | None = None,
         initial_capital: float = 100_000.0,
+        max_holding_bars: int | None = None,
     ):
         self.store = store
         self.risk_engine = risk_engine or RiskEngine()
         self.cost_model = cost_model or CostModel()
+        # Explicit opt-in, default OFF (None = unlimited hold, byte-for-byte
+        # the same behavior as before this parameter existed): the mission's
+        # own position lifecycle definition names STOP/TARGET/EXIT/EXPIRY as
+        # distinct terminal states, but this engine previously had no
+        # EXPIRY at all -- a real position could stay OPEN forever in
+        # continuous unattended operation (`schedule loop --paper-execute`)
+        # if it never happens to hit its stop or target. When set, a
+        # position open for >= this many processed bars is force-closed at
+        # that bar's close with ExitReason.EXPIRED, mirroring the existing
+        # --horizon-bars concept predictions.tracker.py already applies to
+        # unresolved PREDICTIONS (a separate, unrelated concept -- this is
+        # for real OPEN positions).
+        self.max_holding_bars = max_holding_bars
 
         account = store.get_account()
         if account is None:
@@ -295,11 +309,22 @@ class PaperTradingEngine:
         open_position = self._to_open_position(position)
         bar_series = _bar_to_series(bar)
         exit_outcome = check_exit(open_position, bar_series)
-        if exit_outcome is None:
+        if exit_outcome is not None:
+            exit_price, exit_reason = exit_outcome
+            self._close_position(position, exit_price_override=exit_price, exit_time=bar.timestamp, exit_reason_override=exit_reason)
             return
 
-        exit_price, exit_reason = exit_outcome
-        self._close_position(position, exit_price_override=exit_price, exit_time=bar.timestamp, exit_reason_override=exit_reason)
+        if self.max_holding_bars is None:
+            return  # unlimited hold -- default, unchanged behavior
+
+        bars_held = position.bars_held + 1
+        if bars_held >= self.max_holding_bars:
+            self._close_position(
+                position, exit_price_override=bar.close, exit_time=bar.timestamp, exit_reason_override=ExitReason.EXPIRED,
+            )
+            return
+
+        self.store.update_position(position.model_copy(update={"bars_held": bars_held}))
 
     def _close_position(
         self,
@@ -312,9 +337,16 @@ class PaperTradingEngine:
     ) -> None:
         open_position = self._to_open_position(position)
         exit_reason = ExitReason.END_OF_DATA if is_end_of_data else exit_reason_override
+        # STOP/TARGET exit at an exact, pre-agreed price level -- no
+        # slippage applied, matching this engine's existing, unmodified
+        # design. END_OF_DATA and EXPIRED both close at the bar's raw
+        # market CLOSE price (a forced exit, not a level the position was
+        # resting on) -- slippage-adjusted the same way, for the same
+        # reason END_OF_DATA already was.
+        apply_slippage = is_end_of_data or exit_reason == ExitReason.EXPIRED
         exit_price = self.cost_model.slippage_adjusted_price(
             price=exit_price_override, side=open_position.signal.side, is_entry=False
-        ) if is_end_of_data else exit_price_override
+        ) if apply_slippage else exit_price_override
 
         trade = close_trade(
             open_position, exit_price=exit_price, exit_time=exit_time, exit_reason=exit_reason,
