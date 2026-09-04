@@ -25,6 +25,7 @@ from decision_engine.models import Decision, DecisionLabel
 from market.data_provider import MarketDataError, MarketDataProvider
 from predictions.errors import PredictionUnavailableError
 from predictions.models import PredictionEvaluation, PredictionOutcomeState, PredictionRecord, PredictionSummary
+from risk.contracts import RiskDecision
 from strategy.signal import ReasonCode, Side, Signal
 
 
@@ -35,7 +36,17 @@ def create_prediction(
     horizon_bars: int = 20,
     interval: str = "1d",
     now: datetime | None = None,
+    risk_decision: RiskDecision | None = None,
 ) -> PredictionRecord:
+    """`risk_decision` is OPTIONAL (see PredictionRecord.risk_decision's
+    own docstring) -- when the caller has capital/risk-config to size
+    against (predict/shadow-run's --initial-capital et al), pass the
+    risk.sizing.size_decision(decision, market_context=..., account=...)
+    result here to persist the full trade plan (quantity/capital/risk
+    amount) alongside the prediction, not just print it and lose it.
+    Never computed inside this function -- create_prediction stays a
+    pure carry-forward of already-computed values, same posture as
+    entry/stop/target above."""
     if decision.label != DecisionLabel.BUY:
         raise PredictionUnavailableError(
             f"Cannot record a trackable prediction for a {decision.label.value} decision -- "
@@ -58,6 +69,7 @@ def create_prediction(
         entry_time=signal.generated_at,
         horizon_bars=horizon_bars,
         interval=interval,
+        risk_decision=risk_decision,
     )
 
 

@@ -91,6 +91,54 @@ def test_create_prediction_rejects_mismatched_symbols():
         create_prediction(_decision(symbol="AAPL"), _signal(symbol="MSFT"))
 
 
+def test_create_prediction_leaves_risk_decision_none_by_default():
+    prediction = create_prediction(_decision(), _signal())
+    assert prediction.risk_decision is None
+
+
+def test_create_prediction_persists_a_real_risk_decision_when_given_one():
+    """Mission auditability requirement: create_prediction never computes
+    sizing itself (stays a pure carry-forward), but must faithfully
+    persist a real risk.contracts.RiskDecision the caller already
+    computed via risk.sizing.size_decision."""
+    from market.context import MarketContext
+    from risk.account import new_account
+    from risk.sizing import size_decision
+
+    decision = _decision()
+    market_context = MarketContext(symbol="AAPL", as_of=_START, price=100.0, atr_14=2.5)
+    account = new_account(20_000.0)
+    risk_decision = size_decision(decision, market_context=market_context, account=account)
+
+    prediction = create_prediction(decision, _signal(), risk_decision=risk_decision)
+
+    assert prediction.risk_decision is not None
+    assert prediction.risk_decision.account_equity == 20_000.0
+    assert prediction.risk_decision == risk_decision  # exact carry-forward, not a re-derivation
+
+
+def test_prediction_record_with_risk_decision_round_trips_through_json():
+    """The risk_decision field must survive PredictionStore's own
+    model_dump_json()/model_validate_json() persistence round trip --
+    the actual mechanism that makes it a real audit record, not just an
+    in-memory convenience."""
+    from market.context import MarketContext
+    from risk.account import new_account
+    from risk.sizing import size_decision
+
+    decision = _decision()
+    market_context = MarketContext(symbol="AAPL", as_of=_START, price=100.0, atr_14=2.5)
+    risk_decision = size_decision(decision, market_context=market_context, account=new_account(20_000.0))
+    prediction = create_prediction(decision, _signal(), risk_decision=risk_decision)
+
+    from predictions.models import PredictionRecord
+
+    restored = PredictionRecord.model_validate_json(prediction.model_dump_json())
+    assert restored.risk_decision is not None
+    assert restored.risk_decision.position_size.quantity == risk_decision.position_size.quantity
+    assert restored == prediction
+
+
 # --- evaluate_prediction -----------------------------------------------------
 
 

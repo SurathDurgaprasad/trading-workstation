@@ -185,8 +185,10 @@ async def index(request: Request) -> HTMLResponse:
 
 <h2>ACCOUNT</h2>
 <div class="kv">
+<div>Initial Capital</div><div>{_fmt_money(account.initial_capital)}</div>
 <div>Cash</div><div>{_fmt_money(account.cash)}</div>
 <div>Equity</div><div>{_fmt_money(account.equity)}</div>
+<div>Realized P&amp;L</div><div>{_fmt_money(account.realized_pnl)}</div>
 <div>Open P&amp;L</div><div>{_fmt_money(account.unrealized_pnl)}</div>
 <div>Daily P&amp;L</div><div>{_fmt_money(account.daily_pnl)}</div>
 <div>Drawdown</div><div>{account.current_drawdown_pct:.2f}%</div>
@@ -459,12 +461,16 @@ async def decision_detail_page(request: Request) -> HTMLResponse:
             outcome_text = html.escape(evaluation.outcome.value) if evaluation is not None else "not yet evaluated"
             return_text = f"{evaluation.actual_return:+.2%}" if evaluation is not None and evaluation.actual_return is not None else "n/a"
             outcome_class = "tag-long" if evaluation is not None and evaluation.outcome.value == "TARGET_HIT" else "tag-sim"
+            rd = prediction.risk_decision
+            qty_text = str(rd.position_size.quantity) if (rd is not None and rd.position_size is not None) else "n/a"
+            capital_text = f"{rd.account_equity:,.0f}" if rd is not None else "n/a"
             prediction_rows.append(
                 f"<tr><td>{html.escape(prediction.created_at.isoformat())}</td>"
                 f"<td>{prediction.entry_price:.2f}</td><td>{prediction.stop_price:.2f}</td><td>{prediction.target_price:.2f}</td>"
+                f"<td>{qty_text}</td><td>{capital_text}</td>"
                 f"<td><span class='tag {outcome_class}'>{outcome_text}</span></td><td>{return_text}</td></tr>"
             )
-        prediction_section = f"<table><tr><th>Created</th><th>Entry</th><th>Stop</th><th>Target</th><th>Outcome</th><th>Return</th></tr>{''.join(prediction_rows)}</table>"
+        prediction_section = f"<table><tr><th>Created</th><th>Entry</th><th>Stop</th><th>Target</th><th>Qty</th><th>Capital</th><th>Outcome</th><th>Return</th></tr>{''.join(prediction_rows)}</table>"
 
     body = f"""
 <p><a href="/intelligence">&larr; back to market intelligence</a></p>

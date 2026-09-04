@@ -309,6 +309,38 @@ def test_decision_detail_page_shows_prediction_history(client, _isolated_intelli
     assert "+15.00%" in response.text
 
 
+def test_decision_detail_page_shows_the_persisted_trade_plan_when_present(client, _isolated_intelligence_dbs):
+    """Mission auditability requirement: the dashboard's prediction
+    history must show quantity/capital when a prediction was recorded
+    with --initial-capital, and honestly say "n/a" when it wasn't."""
+    from decision_engine.models import Decision, RiskContext
+    from market.context import MarketContext
+    from risk.account import new_account
+    from risk.sizing import size_decision
+
+    tmp_path = _isolated_intelligence_dbs
+    candidate = _candidate("AAPL")
+    decision = Decision(
+        decision_id="dec-AAPL", symbol="AAPL", as_of=datetime(2024, 6, 1, tzinfo=timezone.utc), label=DecisionLabel.BUY,
+        rationale=["fake"], config_version="cfg1", scanner_evidence=candidate, research_evidence=None,
+        market_context=None, risk_context=RiskContext.unknown(), narrative=None, narrative_unavailable_reason=None,
+    )
+    market_context = MarketContext(symbol="AAPL", as_of=datetime(2024, 6, 1), price=100.0, atr_14=2.5)
+    risk_decision = size_decision(decision, market_context=market_context, account=new_account(20_000.0))
+
+    store = PredictionStore(tmp_path / "predictions.db")
+    store.save_prediction(PredictionRecord(
+        prediction_id="pred-sized", decision_id="dec-AAPL", symbol="AAPL", created_at=datetime.now(timezone.utc),
+        label=DecisionLabel.BUY, entry_price=100.0, stop_price=95.0, target_price=110.0, entry_time=datetime(2024, 6, 1),
+        horizon_bars=20, interval="1d", risk_decision=risk_decision,
+    ))
+    store.close()
+
+    response = client.get("/intelligence/AAPL")
+    assert str(risk_decision.position_size.quantity) in response.text
+    assert "20,000" in response.text
+
+
 def test_decision_detail_page_no_predictions_yet(client, _isolated_intelligence_dbs):
     response = client.get("/intelligence/AAPL")
     assert "No shadow predictions recorded for AAPL" in response.text

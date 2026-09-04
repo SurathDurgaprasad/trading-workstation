@@ -31,6 +31,7 @@ from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from decision_engine.models import DecisionLabel
+from risk.contracts import RiskDecision
 
 
 class PredictionOutcomeState(str, Enum):
@@ -77,6 +78,20 @@ class PredictionRecord(BaseModel):
 
     horizon_bars: int
     interval: str
+
+    risk_decision: RiskDecision | None = None
+    """Mission requirement (auditability §15 -- "TRADE PLAN: entry, stop,
+    target, quantity, capital, risk amount... persistent structured
+    records are required, not logs"): the FULL risk.sizing.size_decision()
+    output computed at prediction time, when the caller supplied capital/
+    risk-config to compute one (predict/shadow-run's optional
+    --initial-capital et al). None for any prediction recorded WITHOUT
+    that info (the historical default, and still fully valid -- a
+    prediction's price-level correctness is independent of what capital
+    was configured when it was recorded) -- never fabricated, never
+    backfilled onto an existing row. Reuses risk.contracts.RiskDecision
+    verbatim rather than inventing a second, competing "sizing record"
+    shape."""
 
     @model_validator(mode="after")
     def _prices_must_be_sanely_ordered(self) -> "PredictionRecord":

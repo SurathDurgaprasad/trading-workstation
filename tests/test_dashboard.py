@@ -86,6 +86,17 @@ def test_index_renders_empty_workstation(client):
     assert 'href="/intelligence"' in response.text
 
 
+def test_index_shows_initial_capital_and_realized_pnl(client):
+    """Mission requirement: the dashboard's ACCOUNT section must show
+    starting capital and realized P&L, not just cash/equity/open P&L --
+    an operator watching ₹20,000 simulated capital needs to see what it
+    started as, not infer it from equity minus P&L by hand."""
+    response = client.get("/")
+    assert "Initial Capital" in response.text
+    assert "100,000.00" in response.text  # this fixture's engine uses PaperTradingEngine's own default
+    assert "Realized P&amp;L" in response.text or "Realized P&L" in response.text
+
+
 def test_index_shows_no_feed_data_when_nothing_processed_yet(client):
     """Phase 15 §7/§22: absence of a feed_status row must never be
     silently filled in with a fabricated MOCK/SIMULATED default."""

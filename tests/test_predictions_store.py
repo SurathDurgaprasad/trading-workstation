@@ -40,6 +40,47 @@ def test_get_prediction_returns_none_for_unknown_id(tmp_path):
     store.close()
 
 
+def test_save_and_get_prediction_round_trips_a_real_risk_decision(tmp_path):
+    """Mission auditability requirement: the persisted trade plan
+    (quantity/capital/risk amount) must survive the ACTUAL sqlite
+    store round trip, not just an in-memory JSON round trip."""
+    from decision_engine.models import Decision, RiskContext
+    from market.context import MarketContext
+    from market_intelligence.models import CandidateScore
+    from risk.account import new_account
+    from risk.sizing import size_decision
+
+    candidate = CandidateScore(
+        symbol="AAPL", as_of=datetime(2024, 1, 1), last_close=100.0, avg_daily_value=1_000_000.0,
+        volume_ratio=1.1, trend_score=1.0, momentum_score=0.5, breakout_score=0.01,
+        relative_strength_score=0.02, sector_strength_score=None, composite_score=1.5, explanation=["fake"],
+    )
+    decision = Decision(
+        decision_id="dec-1", symbol="AAPL", as_of=datetime(2024, 1, 1, tzinfo=timezone.utc), label=DecisionLabel.BUY,
+        rationale=["fake"], config_version="cfg1", scanner_evidence=candidate, research_evidence=None,
+        market_context=None, risk_context=RiskContext.unknown(), narrative=None, narrative_unavailable_reason=None,
+    )
+    market_context = MarketContext(symbol="AAPL", as_of=datetime(2024, 1, 1), price=100.0, atr_14=2.5)
+    risk_decision = size_decision(decision, market_context=market_context, account=new_account(20_000.0))
+
+    prediction = PredictionRecord(
+        prediction_id="p-sized", decision_id="dec-1", symbol="AAPL", created_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        label=DecisionLabel.BUY, entry_price=100.0, stop_price=95.0, target_price=110.0, entry_time=datetime(2024, 1, 2),
+        horizon_bars=20, interval="1d", risk_decision=risk_decision,
+    )
+
+    store = PredictionStore(tmp_path / "predictions.db")
+    store.save_prediction(prediction)
+    fetched = store.get_prediction("p-sized")
+    store.close()
+
+    assert fetched is not None
+    assert fetched.risk_decision is not None
+    assert fetched.risk_decision.account_equity == 20_000.0
+    assert fetched.risk_decision.position_size.quantity == risk_decision.position_size.quantity
+    assert fetched == prediction
+
+
 def test_save_and_list_evaluations_round_trip(tmp_path):
     store = PredictionStore(tmp_path / "predictions.db")
     store.save_prediction(_prediction())

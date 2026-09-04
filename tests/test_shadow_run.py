@@ -162,6 +162,38 @@ def test_shadow_run_end_to_end_with_skip_evaluate_persists_every_stage(tmp_path,
     prediction_store.close()
 
 
+def test_shadow_run_persists_a_trade_plan_per_prediction_when_initial_capital_is_given(tmp_path, capsys):
+    """Mission auditability requirement, exercised through shadow-run's
+    own per-symbol loop (a separate code path from `predict`): each BUY
+    prediction gets its own risk_decision, sized independently against
+    the SAME configured capital (not sequentially depleted across
+    candidates in one scan -- this is a per-trade preview, not a
+    portfolio simulation)."""
+    args = parse_args([
+        "shadow-run", "--symbols", "AAPL,MSFT", "--benchmark", "", "--skip-evaluate",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--research-db", str(tmp_path / "research.db"),
+        "--decision-db", str(tmp_path / "decisions.db"), "--predictions-db", str(tmp_path / "predictions.db"),
+        "--initial-capital", "20000",
+    ])
+    run_shadow_run_command(args)
+
+    output = capsys.readouterr().out
+    assert "qty=" in output  # the per-symbol summary line now shows the sized quantity
+
+    from predictions.store import PredictionStore
+
+    prediction_store = PredictionStore(tmp_path / "predictions.db")
+    predictions = prediction_store.list_predictions()
+    prediction_store.close()
+    assert len(predictions) == 2
+    for prediction in predictions:
+        rd = prediction.risk_decision
+        assert rd is not None
+        assert rd.account_equity == 20_000.0
+        assert rd.position_size is not None
+        assert rd.position_size.quantity > 0
+
+
 def test_shadow_run_full_pipeline_runs_evaluate_and_learn_without_crashing(tmp_path, capsys):
     args = parse_args([
         "shadow-run", "--symbols", "AAPL", "--benchmark", "",

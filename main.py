@@ -1061,6 +1061,44 @@ def run_size_command(args: argparse.Namespace) -> None:
 DEFAULT_PREDICTIONS_DB_PATH = PROJECT_ROOT / "data" / "predictions.db"
 
 
+def _size_if_requested(decision, *, market_context, args: argparse.Namespace):
+    """Shared by `predict`/`shadow-run`: computes and returns a real
+    risk.contracts.RiskDecision to persist alongside a prediction, ONLY
+    when the caller passed --initial-capital (see _add_optional_sizing_args's
+    own docstring on why None is the sentinel for "don't size at all,
+    preserve prior behavior exactly"). A fresh risk.account.Account is
+    built each call -- this is a per-decision "what if I took this trade
+    against my configured capital" preview, the same posture `size`
+    itself already has, not a portfolio-aware sequential simulation."""
+    if args.initial_capital is None:
+        return None
+    from risk.account import new_account
+    from risk.sizing import size_decision
+
+    account = new_account(args.initial_capital)
+    risk_config = RiskConfig(
+        risk_per_trade_pct=args.risk_per_trade, max_daily_loss_pct=args.max_daily_loss,
+        max_drawdown_pct=args.max_drawdown, max_exposure_pct=args.max_exposure,
+        max_consecutive_losses=args.max_consecutive_losses, consecutive_loss_risk_multiplier=args.consecutive_loss_risk_multiplier,
+        consecutive_loss_hard_limit=args.consecutive_loss_hard_limit, min_risk_reward=args.min_risk_reward,
+    )
+    return size_decision(decision, market_context=market_context, account=account, risk_config=risk_config)
+
+
+def _print_risk_decision_if_present(risk_decision) -> None:
+    if risk_decision is None:
+        return
+    print("\nTrade plan (persisted with this prediction -- NOT an order):")
+    print(f"  Capital:        {risk_decision.account_equity:,.2f}")
+    print(f"  Approved:       {risk_decision.approved}")
+    if risk_decision.position_size is not None:
+        print(f"  Quantity:       {risk_decision.position_size.quantity}")
+        print(f"  Risk amount:    {risk_decision.risk_amount:,.2f} ({risk_decision.risk_percent:.2f}% of equity)")
+        print(f"  Notional:       {risk_decision.position_size.notional_value:,.2f}")
+    if risk_decision.veto_reasons:
+        print(f"  Veto reasons:   {', '.join(r.value for r in risk_decision.veto_reasons)}")
+
+
 def run_predict_command(args: argparse.Namespace) -> None:
     from pathlib import Path
 
@@ -1099,7 +1137,8 @@ def run_predict_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     signal = build_signal_for_buy(decision, market_context)
-    prediction = create_prediction(decision, signal, horizon_bars=args.horizon_bars, interval=args.interval)
+    risk_decision = _size_if_requested(decision, market_context=market_context, args=args)
+    prediction = create_prediction(decision, signal, horizon_bars=args.horizon_bars, interval=args.interval, risk_decision=risk_decision)
     store.save_prediction(prediction)
     store.close()
 
@@ -1115,6 +1154,7 @@ def run_predict_command(args: argparse.Namespace) -> None:
     print(f"Horizon:        {prediction.horizon_bars} bars ({prediction.interval})")
     print(f"Database:       {db_path}")
     print(f"Data source:    {market_context.data_source or 'UNKNOWN'} ({market_context.data_status or 'UNKNOWN'})")
+    _print_risk_decision_if_present(prediction.risk_decision)
     print("\nThis is a hypothetical shadow prediction, tracked whether or not you trade it.")
     print("Run `python main.py evaluate` later to check its outcome against real subsequent market data.")
 
@@ -1611,10 +1651,12 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
                         prediction_note = f" -> no prediction recorded (already have one for entry bar {market_context.as_of.isoformat()})"
                     else:
                         signal = build_signal_for_buy(decision, market_context)
-                        prediction = create_prediction(decision, signal, horizon_bars=args.horizon_bars, interval=args.interval)
+                        risk_decision = _size_if_requested(decision, market_context=market_context, args=args)
+                        prediction = create_prediction(decision, signal, horizon_bars=args.horizon_bars, interval=args.interval, risk_decision=risk_decision)
                         prediction_store.save_prediction(prediction)
                         predictions_recorded += 1
-                        prediction_note = f" -> prediction recorded ({prediction.prediction_id[:12]})"
+                        sized_note = f", qty={risk_decision.position_size.quantity}" if (risk_decision is not None and risk_decision.position_size is not None) else ""
+                        prediction_note = f" -> prediction recorded ({prediction.prediction_id[:12]}{sized_note})"
                 except (SizingUnavailableError, PredictionUnavailableError) as exc:
                     prediction_note = f" -> no prediction recorded ({exc})"
 
@@ -1965,6 +2007,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Registered strategy name (default: trend_momentum_baseline).",
     )
     default_risk = RiskConfig()
+
+    def _add_optional_sizing_args(parser: argparse.ArgumentParser) -> None:
+        """Autonomous-validation mission requirement (auditability):
+        `predict`/`shadow-run` can OPTIONALLY size against real capital/
+        risk config at prediction time -- when --initial-capital is
+        passed, the resulting risk.contracts.RiskDecision (quantity,
+        capital, risk amount -- the actual "trade plan") is persisted on
+        the PredictionRecord itself, not just printed and lost. Omitting
+        --initial-capital keeps prior behavior byte-for-byte (no sizing
+        computed, risk_decision stays None) -- this is purely additive.
+        Same flag names/defaults as `size`/`backtest` for consistency,
+        factored out here since three commands now need them."""
+        parser.add_argument("--initial-capital", type=float, default=None, help="Capital to size against (default: not sized -- the prediction is recorded without a persisted trade plan, exactly like before this flag existed).")
+        parser.add_argument("--risk-per-trade", type=float, default=default_risk.risk_per_trade_pct, help=f"Percent of equity risked per trade (default: {default_risk.risk_per_trade_pct}). Only used when --initial-capital is passed.")
+        parser.add_argument("--max-daily-loss", type=float, default=default_risk.max_daily_loss_pct, help=f"Percent daily-loss halt threshold (default: {default_risk.max_daily_loss_pct}). Only used when --initial-capital is passed.")
+        parser.add_argument("--max-drawdown", type=float, default=default_risk.max_drawdown_pct, help=f"Percent max-drawdown halt threshold (default: {default_risk.max_drawdown_pct}). Only used when --initial-capital is passed.")
+        parser.add_argument("--max-exposure", type=float, default=default_risk.max_exposure_pct, help=f"Percent max position-notional/equity exposure (default: {default_risk.max_exposure_pct}). Only used when --initial-capital is passed.")
+        parser.add_argument("--max-consecutive-losses", type=int, default=default_risk.max_consecutive_losses, help=f"Losing-streak threshold that triggers reduced-risk sizing (default: {default_risk.max_consecutive_losses}). Only used when --initial-capital is passed.")
+        parser.add_argument("--consecutive-loss-risk-multiplier", type=float, default=default_risk.consecutive_loss_risk_multiplier, help=f"Risk-per-trade multiplier while in a loss-streak recovery (default: {default_risk.consecutive_loss_risk_multiplier}). Only used when --initial-capital is passed.")
+        parser.add_argument("--consecutive-loss-hard-limit", type=int, default=default_risk.consecutive_loss_hard_limit, help=f"Losing-streak threshold that rejects outright (default: {default_risk.consecutive_loss_hard_limit}). Only used when --initial-capital is passed.")
+        parser.add_argument("--min-risk-reward", type=float, default=default_risk.min_risk_reward, help=f"Minimum acceptable signal risk/reward (default: {default_risk.min_risk_reward}). Only used when --initial-capital is passed.")
+
     backtest_parser.add_argument(
         "--risk-per-trade",
         type=float,
@@ -2229,6 +2293,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     predict_parser.add_argument("--horizon-bars", type=int, default=20, help="Bars after entry before an unresolved prediction is marked EXPIRED (default: 20).")
     predict_parser.add_argument("--db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
     predict_parser.add_argument("--live-source", choices=["dhan"], default=None, help="Phase 31: overlay the entry price with a real Dhan live quote (requires DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN) instead of the Yahoo historical close. A failed/unhealthy live source silently falls back to the Yahoo historical price.")
+    _add_optional_sizing_args(predict_parser)
 
     evaluate_parser = subparsers.add_parser(
         "evaluate",
@@ -2328,6 +2393,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     shadow_run_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
     shadow_run_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker/rate-limit protection across the whole run (default: off, matches prior behavior exactly). Prints a provider-metrics summary at the end.")
     shadow_run_parser.add_argument("--live-source", choices=["dhan"], default=None, help="Phase 32: overlay every candidate's price with a real Dhan live quote (requires DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN) instead of the Yahoo historical close. One adapter is built for the whole run and closed at the end. A failed/unhealthy live source silently falls back to the Yahoo historical price per symbol.")
+    _add_optional_sizing_args(shadow_run_parser)
 
     schedule_parser = subparsers.add_parser(
         "schedule",
