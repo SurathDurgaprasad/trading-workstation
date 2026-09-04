@@ -1,3 +1,4 @@
+from backtesting.baselines import BuyAndHoldResult
 from backtesting.engine import BacktestResult
 
 _RULE = "-" * 50
@@ -15,6 +16,10 @@ def format_backtest_report(
     development: BacktestResult | None = None,
     validation: BacktestResult | None = None,
     out_of_sample: BacktestResult | None = None,
+    full_baseline: BuyAndHoldResult | None = None,
+    development_baseline: BuyAndHoldResult | None = None,
+    validation_baseline: BuyAndHoldResult | None = None,
+    out_of_sample_baseline: BuyAndHoldResult | None = None,
 ) -> str:
     m = result.metrics
     lines = [
@@ -105,10 +110,40 @@ def format_backtest_report(
     lines += [
         "",
         _RULE,
+        "BASELINE COMPARISON (BUY & HOLD -- zero strategy logic)",
+        _RULE,
+        "",
+    ]
+    for label, sub_result, baseline in (
+        ("Full", result, full_baseline),
+        ("Development", development, development_baseline),
+        ("Validation", validation, validation_baseline),
+        ("Out-of-Sample", out_of_sample, out_of_sample_baseline),
+    ):
+        if baseline is None:
+            lines.append(f"{label}:{' ' * max(1, 14 - len(label))}(not computed -- see compute_buy_and_hold's own reasons)")
+            continue
+        strategy_net_pnl = sub_result.metrics.net_pnl if sub_result is not None else None
+        beat_text = (
+            "beats buy & hold" if strategy_net_pnl is not None and strategy_net_pnl > baseline.net_pnl
+            else "does NOT beat buy & hold" if strategy_net_pnl is not None
+            else "strategy result not computed for this period"
+        )
+        lines.append(
+            f"{label}:{' ' * max(1, 14 - len(label))}"
+            f"buy & hold net PnL {baseline.net_pnl:,.2f} ({baseline.return_pct:+.2f}%), "
+            f"max drawdown {baseline.max_drawdown_pct:.2f}% -- strategy {beat_text}"
+        )
+
+    lines += [
+        "",
+        _RULE,
         "",
         "IMPORTANT:",
         "This is historical simulation.",
         "It is not evidence of future profitability.",
+        "A strategy beating buy-and-hold in this sample is not proof of a durable edge --",
+        "see the sample sizes above before drawing any conclusion.",
         "",
     ]
 

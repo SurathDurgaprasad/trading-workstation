@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from backtesting.baselines import BuyAndHoldResult, compute_buy_and_hold
 from backtesting.cache import CachedMarketDataProvider
 from backtesting.costs import CostModel
 from backtesting.engine import BacktestResult, run_backtest
@@ -19,6 +20,10 @@ class FullBacktestRun:
     validation: BacktestResult
     out_of_sample: BacktestResult
     split: PeriodSplit
+    full_baseline: BuyAndHoldResult | None = None
+    development_baseline: BuyAndHoldResult | None = None
+    validation_baseline: BuyAndHoldResult | None = None
+    out_of_sample_baseline: BuyAndHoldResult | None = None
 
 
 def run_full_backtest(
@@ -78,12 +83,37 @@ def run_full_backtest(
         period_label="out_of_sample",
     )
 
+    # Weekend hardening, Phase 7 (strategy edge validation) -- computed for
+    # the EXACT same sliced series each period's own strategy backtest just
+    # ran against, so "did the strategy beat doing nothing" is a genuinely
+    # like-for-like, same-period comparison, not two different date ranges
+    # dressed up as comparable. None (not a fabricated zero) whenever a
+    # period is too short/cheap to buy even one share -- see
+    # compute_buy_and_hold's own docstring.
+    full_baseline = compute_buy_and_hold(indicator_series, symbol=symbol, initial_capital=initial_capital, period_label="full")
+    development_baseline = compute_buy_and_hold(
+        _slice_period(indicator_series, split.development_start, split.development_end),
+        symbol=symbol, initial_capital=initial_capital, period_label="development",
+    )
+    validation_baseline = compute_buy_and_hold(
+        _slice_period(indicator_series, split.validation_start, split.validation_end),
+        symbol=symbol, initial_capital=initial_capital, period_label="validation",
+    )
+    out_of_sample_baseline = compute_buy_and_hold(
+        _slice_period(indicator_series, split.out_of_sample_start, split.out_of_sample_end),
+        symbol=symbol, initial_capital=initial_capital, period_label="out_of_sample",
+    )
+
     return FullBacktestRun(
         full=full,
         development=development,
         validation=validation,
         out_of_sample=out_of_sample,
         split=split,
+        full_baseline=full_baseline,
+        development_baseline=development_baseline,
+        validation_baseline=validation_baseline,
+        out_of_sample_baseline=out_of_sample_baseline,
     )
 
 

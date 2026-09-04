@@ -186,6 +186,10 @@ def run_backtest_command(args: argparse.Namespace) -> None:
             development=run_result.development,
             validation=run_result.validation,
             out_of_sample=run_result.out_of_sample,
+            full_baseline=run_result.full_baseline,
+            development_baseline=run_result.development_baseline,
+            validation_baseline=run_result.validation_baseline,
+            out_of_sample_baseline=run_result.out_of_sample_baseline,
         )
     )
 
