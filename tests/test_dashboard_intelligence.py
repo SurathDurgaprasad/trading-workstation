@@ -31,6 +31,7 @@ def _isolated_intelligence_dbs(monkeypatch, tmp_path):
     monkeypatch.setattr(intelligence_module, "DECISIONS_DB_PATH", tmp_path / "decisions.db")
     monkeypatch.setattr(intelligence_module, "PREDICTIONS_DB_PATH", tmp_path / "predictions.db")
     monkeypatch.setattr(intelligence_module, "PAPER_DB_PATH", tmp_path / "paper.db")
+    monkeypatch.setattr(intelligence_module, "SCHEDULER_DB_PATH", tmp_path / "scheduler_runs.db")
     yield tmp_path
 
 
@@ -94,6 +95,7 @@ def test_intelligence_page_empty_state_when_nothing_persisted(client):
     assert "No scan has been run yet" in response.text
     assert "No evaluated predictions yet" in response.text
     assert "No paper-execution account exists yet" in response.text
+    assert "No scheduler run history yet" in response.text
     assert "READ-ONLY SNAPSHOT" in response.text
 
 
@@ -527,3 +529,58 @@ def test_intelligence_page_paper_section_escapes_html_in_journal(client, _isolat
 
     response = client.get("/intelligence")
     assert "<script>alert(1)</script>" not in response.text
+
+
+# --- SCHEDULER section -------------------------------------------------------
+
+
+def test_intelligence_page_shows_a_completed_scheduler_run(client, _isolated_intelligence_dbs):
+    from datetime import timezone
+
+    from scheduler.models import RunStatus
+    from scheduler.store import SchedulerRunStore
+
+    tmp_path = _isolated_intelligence_dbs
+    store = SchedulerRunStore(tmp_path / "scheduler_runs.db")
+    store.start_run(run_id="run-1", slot_name="intraday", run_date="2026-09-04", started_at=datetime.now(timezone.utc))
+    store.finish_run(run_id="run-1", status=RunStatus.COMPLETED, detail="ran 3 candidates")
+    store.close()
+
+    response = client.get("/intelligence")
+    assert "No scheduler run history yet" not in response.text
+    assert "intraday" in response.text
+    assert "COMPLETED" in response.text
+    assert "ran 3 candidates" in response.text
+    assert "Currently running" in response.text and "no</span>" in response.text
+
+
+def test_intelligence_page_shows_an_active_scheduler_lock(client, _isolated_intelligence_dbs):
+    from datetime import timezone
+
+    from scheduler.store import SchedulerRunStore
+
+    tmp_path = _isolated_intelligence_dbs
+    store = SchedulerRunStore(tmp_path / "scheduler_runs.db")
+    store.start_run(run_id="run-active", slot_name="pre_market", run_date="2026-09-04", started_at=datetime.now(timezone.utc))
+    store.close()
+
+    response = client.get("/intelligence")
+    assert "pre_market" in response.text
+    assert "yes</span>" in response.text  # currently running
+
+
+def test_intelligence_page_shows_a_failed_scheduler_run_with_its_error(client, _isolated_intelligence_dbs):
+    from datetime import timezone
+
+    from scheduler.models import RunStatus
+    from scheduler.store import SchedulerRunStore
+
+    tmp_path = _isolated_intelligence_dbs
+    store = SchedulerRunStore(tmp_path / "scheduler_runs.db")
+    store.start_run(run_id="run-fail", slot_name="market_open", run_date="2026-09-04", started_at=datetime.now(timezone.utc))
+    store.finish_run(run_id="run-fail", status=RunStatus.FAILED, error="simulated provider outage")
+    store.close()
+
+    response = client.get("/intelligence")
+    assert "FAILED" in response.text
+    assert "simulated provider outage" in response.text

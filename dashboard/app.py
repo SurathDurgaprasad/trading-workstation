@@ -247,6 +247,7 @@ async def intelligence_page(request: Request) -> HTMLResponse:
     scan = intelligence.get_latest_scan()
     learning_snapshot = intelligence.get_learning_snapshot()
     paper_snapshot = intelligence.get_paper_execution_snapshot()
+    scheduler_snapshot = intelligence.get_scheduler_status_snapshot()
 
     if scan is None:
         candidates_section = (
@@ -418,6 +419,39 @@ async def intelligence_page(request: Request) -> HTMLResponse:
             f"{journal_table}"
         )
 
+    if scheduler_snapshot is None:
+        scheduler_section = (
+            "<p class='muted'>No scheduler run history yet &mdash; run "
+            "<code>python main.py schedule tick</code> or <code>schedule loop</code> first.</p>"
+        )
+    else:
+        active_lock = scheduler_snapshot["active_lock"]
+        if active_lock is None:
+            active_kv = "<div class='kv'><div>Currently running</div><div><span class='tag tag-sim'>no</span></div></div>"
+        else:
+            active_kv = (
+                "<div class='kv'>"
+                "<div>Currently running</div><div><span class='tag tag-long'>yes</span></div>"
+                f"<div>Slot</div><div>{html.escape(active_lock.slot_name)}</div>"
+                f"<div>Started</div><div>{html.escape(active_lock.started_at.isoformat())}</div>"
+                "</div>"
+            )
+        run_rows = "".join(
+            f"<tr><td>{html.escape(r.slot_name)}</td>"
+            f"<td><span class='tag {'tag-long' if r.status.value == 'COMPLETED' else ('tag-short' if r.status.value == 'FAILED' else 'tag-sim')}'>{html.escape(r.status.value)}</span></td>"
+            f"<td>{html.escape(r.started_at.isoformat())}</td>"
+            f"<td>{html.escape(r.finished_at.isoformat()) if r.finished_at is not None else 'n/a'}</td>"
+            f"<td>{html.escape(r.error) if r.error is not None else html.escape(r.detail)}</td></tr>"
+            for r in scheduler_snapshot["recent_runs"]
+        ) or "<tr><td colspan='5' class='muted'>(none)</td></tr>"
+        run_table = f"<table><tr><th>Slot</th><th>Status</th><th>Started</th><th>Finished</th><th>Detail/Error</th></tr>{run_rows}</table>"
+        scheduler_section = (
+            f"<p class='muted'>Real, persisted scheduler run history at {html.escape(str(intelligence.SCHEDULER_DB_PATH))}.</p>"
+            f"{active_kv}"
+            "<h3 style='font-size:14px;color:#9aa4b2;'>Recent runs</h3>"
+            f"{run_table}"
+        )
+
     body = f"""
 <p><a href="/">&larr; back to paper-live workstation</a></p>
 <div class="banner">READ-ONLY SNAPSHOT of the last scan/research/decide/predict/evaluate/learn runs &mdash; not live, and no order of any kind can be placed from this page.</div>
@@ -430,6 +464,9 @@ async def intelligence_page(request: Request) -> HTMLResponse:
 
 <h2>PAPER EXECUTION</h2>
 {paper_section}
+
+<h2>SCHEDULER</h2>
+{scheduler_section}
 """
     return HTMLResponse(_page(body))
 

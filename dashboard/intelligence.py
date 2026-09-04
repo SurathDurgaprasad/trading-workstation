@@ -37,6 +37,7 @@ RESEARCH_DB_PATH = Path(os.environ["TRADING_RESEARCH_DB_PATH"]) if "TRADING_RESE
 DECISIONS_DB_PATH = Path(os.environ["TRADING_DECISIONS_DB_PATH"]) if "TRADING_DECISIONS_DB_PATH" in os.environ else PROJECT_ROOT / "data" / "decisions.db"
 PREDICTIONS_DB_PATH = Path(os.environ["TRADING_PREDICTIONS_DB_PATH"]) if "TRADING_PREDICTIONS_DB_PATH" in os.environ else PROJECT_ROOT / "data" / "predictions.db"
 PAPER_DB_PATH = Path(os.environ["TRADING_PAPER_DB_PATH"]) if "TRADING_PAPER_DB_PATH" in os.environ else PROJECT_ROOT / "data" / "paper_trading.db"
+SCHEDULER_DB_PATH = Path(os.environ["TRADING_SCHEDULER_DB_PATH"]) if "TRADING_SCHEDULER_DB_PATH" in os.environ else PROJECT_ROOT / "data" / "scheduler_runs.db"
 
 
 def get_latest_scan():
@@ -152,6 +153,28 @@ def get_paper_execution_snapshot() -> dict | None:
         "closed_positions": sorted(closed_positions, key=lambda p: _naive(p.exit_time or p.entry_time), reverse=True)[:20],
         "journal_entries": journal_entries,
     }
+
+
+def get_scheduler_status_snapshot() -> dict | None:
+    """Mission requirement (Section 16 -- 'SYSTEM HEALTH: scheduler
+    status') found genuinely missing from both dashboard pages via this
+    session's own adversarial audit: `python main.py schedule status`
+    already exposes this over the CLI (scheduler.store.SchedulerRunStore),
+    but nothing surfaced it on the dashboard. Read-only, same
+    never-fabricate discipline as every other get_*() here: None only
+    when the database itself doesn't exist yet (no `schedule tick`/`loop`
+    has ever run)."""
+    from scheduler.store import SchedulerRunStore
+
+    if not SCHEDULER_DB_PATH.exists():
+        return None
+
+    store = SchedulerRunStore(SCHEDULER_DB_PATH)
+    active_lock = store.active_lock()
+    recent_runs = store.list_runs(limit=20)
+    store.close()
+
+    return {"active_lock": active_lock, "recent_runs": recent_runs}
 
 
 def get_decision_history(symbol: str, limit: int = 10):
