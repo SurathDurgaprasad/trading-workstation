@@ -32,6 +32,7 @@ def _isolated_intelligence_dbs(monkeypatch, tmp_path):
     monkeypatch.setattr(intelligence_module, "PREDICTIONS_DB_PATH", tmp_path / "predictions.db")
     monkeypatch.setattr(intelligence_module, "PAPER_DB_PATH", tmp_path / "paper.db")
     monkeypatch.setattr(intelligence_module, "SCHEDULER_DB_PATH", tmp_path / "scheduler_runs.db")
+    monkeypatch.setattr(intelligence_module, "STATE_DB_PATH", tmp_path / "live_state.db")
     yield tmp_path
 
 
@@ -550,6 +551,102 @@ def test_intelligence_page_paper_section_escapes_html_in_journal(client, _isolat
 
     response = client.get("/intelligence")
     assert "<script>alert(1)</script>" not in response.text
+
+
+# --- MARKET STATUS banner (shared by every page via _page()) -----------------
+#
+# Real gap found via adversarial UI audit (Section O of the new mission --
+# "Is the market open?" must be answerable within seconds): neither
+# dashboard page showed market-session state at all, even though
+# live.dhan.market_session.current_market_session already existed and is
+# already used by the scheduler. Computed fresh, in-process, from
+# wall-clock IST time only -- no I/O, so testing it here (via the always-run
+# /intelligence route, not the AAPL-cache-gated root page) needs only to
+# monkeypatch the pure function, not any store.
+
+
+def test_intelligence_page_shows_market_status_open(client, monkeypatch):
+    import live.dhan.market_session as market_session_module
+
+    fixed = market_session_module.MarketSession(
+        state=market_session_module.MarketSessionState.OPEN,
+        as_of_ist=datetime(2026, 9, 7, 10, 0, 0),  # a Monday
+        is_weekday=True,
+    )
+    monkeypatch.setattr(market_session_module, "current_market_session", lambda *a, **k: fixed)
+
+    response = client.get("/intelligence")
+    assert "Market status" in response.text
+    assert "OPEN" in response.text
+    assert "2026-09-07 10:00:00" in response.text
+
+
+def test_intelligence_page_shows_market_status_closed(client, monkeypatch):
+    import live.dhan.market_session as market_session_module
+
+    fixed = market_session_module.MarketSession(
+        state=market_session_module.MarketSessionState.CLOSED,
+        as_of_ist=datetime(2026, 9, 6, 22, 0, 0),  # a Sunday night
+        is_weekday=False,
+    )
+    monkeypatch.setattr(market_session_module, "current_market_session", lambda *a, **k: fixed)
+
+    response = client.get("/intelligence")
+    assert "Market status" in response.text
+    assert "CLOSED" in response.text
+
+
+def test_intelligence_page_market_status_discloses_no_holiday_awareness(client):
+    # No monkeypatch -- the real current_market_session() runs, so this
+    # only checks the honesty disclaimer is always present, regardless of
+    # what today actually is.
+    response = client.get("/intelligence")
+    assert "does NOT know exchange" in response.text
+
+
+# --- KILL SWITCH section ------------------------------------------------------
+#
+# Real gap found via adversarial UI audit (a real, running dashboard was
+# inspected in a browser against actual persisted state -- not just an
+# HTTP-200 unit test): /intelligence (the page showing the shadow-run/
+# --paper-execute account this session's own risk-halt/kill-switch bug
+# fixes concern) had ZERO kill-switch visibility at all, even though the
+# root `/` page's kill switch banner is impossible to miss. An operator
+# watching only /intelligence -- the more complete, decision-oriented
+# view -- had no way to see the kill switch had been activated without
+# navigating back to the older paper-live workstation page. Confirmed by
+# grepping intelligence_page's own source for "kill_switch": zero matches,
+# before this fix.
+
+
+def test_intelligence_page_shows_kill_switch_inactive_by_default(client, _isolated_intelligence_dbs):
+    response = client.get("/intelligence")
+    assert "KILL SWITCH" in response.text
+    assert "INACTIVE" in response.text
+
+
+def test_intelligence_page_shows_kill_switch_active_with_reason(client, _isolated_intelligence_dbs):
+    from live.state_store import LiveStateStore
+
+    tmp_path = _isolated_intelligence_dbs
+    store = LiveStateStore(tmp_path / "live_state.db")
+    store.activate_kill_switch(reason="manual test activation")
+    store.close()
+
+    response = client.get("/intelligence")
+    assert "KILL SWITCH ACTIVE" in response.text
+    assert "manual test activation" in response.text
+
+
+def test_intelligence_page_kill_switch_survives_no_state_db_yet(client):
+    # No _isolated_intelligence_dbs override needed here beyond the
+    # autouse fixture's own tmp_path -- the point is the STATE_DB_PATH
+    # file itself was never created (no shadow-run/paper-live has ever
+    # touched it). Must render INACTIVE, never crash or fabricate ACTIVE.
+    response = client.get("/intelligence")
+    assert response.status_code == 200
+    assert "KILL SWITCH" in response.text
+    assert "INACTIVE" in response.text
 
 
 # --- SCHEDULER section -------------------------------------------------------

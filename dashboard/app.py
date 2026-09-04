@@ -40,6 +40,36 @@ from dashboard import intelligence
 _REFRESH_SECONDS = 15
 
 
+def _market_status_banner() -> str:
+    """Computed fresh, in-process, from wall-clock IST time only -- zero
+    I/O, zero network call, safe on every page load (mission rule: a
+    dashboard GET must never trigger a hidden market-data fetch).
+
+    Real gap found via adversarial UI audit: NEITHER dashboard page showed
+    whether the market was even open, forcing an operator to compute IST
+    time and NSE session hours in their head before anything else on the
+    page could be trusted. live.dhan.market_session.current_market_session
+    already existed (used by the scheduler) but was never surfaced here.
+
+    Honest about its own limitation, not just OPEN/PRE_OPEN/CLOSED: this
+    function has no exchange holiday calendar (see market_session.py's own
+    documented limitation), so a holiday weekday during session hours
+    would show OPEN -- stated explicitly rather than silently wrong."""
+    from live.dhan.market_session import current_market_session
+
+    session = current_market_session()
+    state = session.state.value
+    state_class = "tag-long" if state == "OPEN" else "tag-sim"
+    return (
+        '<div class="kv" style="max-width:640px;">'
+        f'<div>Market status</div><div><span class="tag {state_class}">{state}</span></div>'
+        f'<div>IST time</div><div>{session.as_of_ist.strftime("%Y-%m-%d %H:%M:%S")} ({session.as_of_ist.strftime("%A")})</div>'
+        "</div>"
+        '<p class="muted">NSE/BSE cash-market session hours only (09:15-15:30 IST, weekdays) -- does NOT know exchange '
+        "holidays (no holiday calendar is integrated); a holiday weekday during session hours would show OPEN.</p>"
+    )
+
+
 def _page(body: str) -> str:
     return f"""<!doctype html>
 <html>
@@ -73,6 +103,7 @@ def _page(body: str) -> str:
 </head>
 <body>
 <div class="banner">SIMULATED PAPER TRADING &mdash; NOT connected to a live broker or feed. No real order can ever be placed here.</div>
+{_market_status_banner()}
 {body}
 <p class="muted">Auto-refreshes every {_REFRESH_SECONDS}s. This page does not advance the market itself &mdash;
 run <code>python main.py paper-live --symbol ... --interval ... --period ...</code> in a terminal to process bars and generate signals.</p>
@@ -248,6 +279,18 @@ async def intelligence_page(request: Request) -> HTMLResponse:
     learning_snapshot = intelligence.get_learning_snapshot()
     paper_snapshot = intelligence.get_paper_execution_snapshot()
     scheduler_snapshot = intelligence.get_scheduler_status_snapshot()
+    kill_switch = intelligence.get_kill_switch_status()
+
+    # Same "impossible to miss" posture as the root `/` page's own kill
+    # switch banner -- this page shows the shadow-run/--paper-execute
+    # account (the one this project's risk-halt/kill-switch fixes concern),
+    # so it must never be silent about the switch that gates it. Found
+    # missing entirely via a real, running-dashboard adversarial UI audit.
+    kill_banner = ""
+    if kill_switch["active"]:
+        reason = html.escape(kill_switch["reason"] or "")
+        kill_banner = f'<div class="banner kill-active">KILL SWITCH ACTIVE &mdash; {reason} &mdash; no new signal will be approved or executed.</div>'
+    kill_switch_section = f"<h2>KILL SWITCH <span class=\"tag tag-sim\">{'ACTIVE' if kill_switch['active'] else 'INACTIVE'}</span></h2>"
 
     if scan is None:
         candidates_section = (
@@ -465,8 +508,10 @@ async def intelligence_page(request: Request) -> HTMLResponse:
         )
 
     body = f"""
+{kill_banner}
 <p><a href="/">&larr; back to paper-live workstation</a></p>
 <div class="banner">READ-ONLY SNAPSHOT of the last scan/research/decide/predict/evaluate/learn runs &mdash; not live, and no order of any kind can be placed from this page.</div>
+{kill_switch_section}
 
 <h2>MARKET INTELLIGENCE &mdash; LATEST SCAN</h2>
 {candidates_section}
