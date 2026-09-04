@@ -306,6 +306,7 @@ def test_shadow_run_paper_execute_submits_a_real_pending_order(tmp_path, capsys)
     output = capsys.readouterr().out
     assert "paper: APPROVED_PENDING" in output  # true the MOMENT it was submitted
     assert "critic=APPROVE" in output
+    assert "Critic verdicts: APPROVE=1." in output
     assert "Advancing existing PENDING paper orders" in output
     assert "new bar(s) processed" in output
 
@@ -348,6 +349,9 @@ def test_shadow_run_paper_execute_a_critic_reject_prevents_the_order_but_not_the
 
     run_shadow_run_command(_paper_execute_args(tmp_path, symbols="AAPL"))
 
+    output = capsys.readouterr().out
+    assert "Critic verdicts: REJECT=1." in output
+
     from paper.store import PaperStore
 
     store = PaperStore(tmp_path / "paper.db")
@@ -379,6 +383,9 @@ def test_shadow_run_skip_critic_leaves_critic_assessment_none_even_when_it_would
     state_store.close()
 
     run_shadow_run_command(_paper_execute_args(tmp_path, symbols="AAPL", extra=["--skip-critic"]))
+
+    output = capsys.readouterr().out
+    assert "Critic verdicts:" not in output  # never fabricated -- the critic never ran this pass
 
     from predictions.store import PredictionStore
 

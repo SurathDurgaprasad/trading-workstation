@@ -1668,6 +1668,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     predictions_recorded = 0
     paper_orders_submitted = 0
     decisions_by_label: dict[str, int] = {}
+    critic_verdicts: dict[str, int] = {}
 
     print(f"\n[2/4] Research + decide + predict for {len(scan_report.candidates)} candidate(s):")
     for candidate in scan_report.candidates:
@@ -1721,6 +1722,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
                                 decision, signal, kill_switch_active=kill_switch_active,
                                 existing_pending_order=existing_pending, existing_open_position=existing_open,
                             )
+                            critic_verdicts[critic_assessment.verdict.value] = critic_verdicts.get(critic_assessment.verdict.value, 0) + 1
 
                         risk_decision = _size_if_requested(decision, market_context=market_context, args=args)
                         prediction = create_prediction(
@@ -1783,7 +1785,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
         prediction_store.close()
         print("\n[3/4] Evaluation skipped (--skip-evaluate).")
         print("[4/4] Learning summary skipped (--skip-evaluate).")
-        _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded, paper_orders_submitted, paper_orders_advanced)
+        _print_shadow_run_footer(scan_report, decisions_by_label, predictions_recorded, paper_orders_submitted, paper_orders_advanced, critic_verdicts)
         _print_provider_metrics(resilient)
         return
 
@@ -1819,10 +1821,21 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
 def _print_shadow_run_footer(
     scan_report, decisions_by_label: dict[str, int], predictions_recorded: int,
     paper_orders_submitted: int = 0, paper_orders_advanced: int = 0,
+    critic_verdicts: dict[str, int] | None = None,
 ) -> None:
     label_summary = ", ".join(f"{label}={count}" for label, count in sorted(decisions_by_label.items())) or "(none)"
     paper_note = f"; paper orders submitted: {paper_orders_submitted}" if paper_orders_submitted else ""
     print(f"\nRun summary: {len(scan_report.candidates)} candidate(s) scanned; decisions: {label_summary}; predictions recorded: {predictions_recorded}{paper_note}.")
+    if critic_verdicts:
+        # Audit-trail completeness: an operator seeing 0 paper orders
+        # submitted (or fewer than expected) has no way to tell "the
+        # critic blocked them" from "risk rejected them" from "nothing
+        # was even a BUY" without this line -- found via self-audit of
+        # the footer's own existing accounting (it already aggregates
+        # decisions_by_label the same way; critic verdicts were
+        # computed and printed per-symbol but never rolled up here).
+        critic_summary = ", ".join(f"{verdict}={count}" for verdict, count in sorted(critic_verdicts.items()))
+        print(f"Critic verdicts: {critic_summary}.")
     if paper_orders_submitted or paper_orders_advanced:
         # Deliberately does NOT claim a specific resulting status (e.g. "still
         # PENDING") -- the advance step run earlier in THIS SAME invocation may
