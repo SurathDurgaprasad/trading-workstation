@@ -21,6 +21,7 @@ import pandas as pd
 
 from backtesting.execution import OpenPosition, check_exit
 from backtesting.trade import ExitReason
+from critic.models import CriticAssessment
 from decision_engine.models import Decision, DecisionLabel
 from market.data_provider import MarketDataError, MarketDataProvider
 from predictions.errors import PredictionUnavailableError
@@ -37,6 +38,7 @@ def create_prediction(
     interval: str = "1d",
     now: datetime | None = None,
     risk_decision: RiskDecision | None = None,
+    critic_assessment: CriticAssessment | None = None,
 ) -> PredictionRecord:
     """`risk_decision` is OPTIONAL (see PredictionRecord.risk_decision's
     own docstring) -- when the caller has capital/risk-config to size
@@ -46,7 +48,9 @@ def create_prediction(
     amount) alongside the prediction, not just print it and lose it.
     Never computed inside this function -- create_prediction stays a
     pure carry-forward of already-computed values, same posture as
-    entry/stop/target above."""
+    entry/stop/target above. `critic_assessment` is the same kind of
+    optional carry-forward, for critic.engine.evaluate()'s output when
+    the caller ran it (see PredictionRecord.critic_assessment)."""
     if decision.label != DecisionLabel.BUY:
         raise PredictionUnavailableError(
             f"Cannot record a trackable prediction for a {decision.label.value} decision -- "
@@ -70,6 +74,7 @@ def create_prediction(
         horizon_bars=horizon_bars,
         interval=interval,
         risk_decision=risk_decision,
+        critic_assessment=critic_assessment,
     )
 
 

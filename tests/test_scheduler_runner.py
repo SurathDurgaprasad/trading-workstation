@@ -79,6 +79,23 @@ def _wire_fakes(monkeypatch):
         "market.context.get_market_context",
         _make_fake_get_market_context(price=260.0, atr_14=5.0, as_of=entry_as_of),
     )
+
+    # Same fix as tests/test_shadow_run.py's own _wire_fakes: the critic's
+    # DATA_FRESHNESS/FUTURE_TIMESTAMP checks compare market_context.as_of
+    # against real wall-clock `now` by default -- correct for a genuine
+    # shadow-run, but this fixture's as_of is pinned to _START's 2023 date
+    # regardless of when the suite runs. Freeze critic.engine's own "now"
+    # to just after this fixture's own as_of.
+    import critic.engine as critic_engine_module
+
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            frozen = entry_as_of + timedelta(days=1)
+            return frozen.replace(tzinfo=tz) if tz else frozen
+
+    monkeypatch.setattr(critic_engine_module, "datetime", _FrozenDatetime)
+
     yield
 
 
@@ -416,3 +433,45 @@ def test_max_holding_bars_is_threaded_through_to_the_shadow_run_slot(tmp_path, r
 
     assert result.ran is True
     assert captured_args.get("max_holding_bars") == 7
+
+
+def test_skip_critic_is_threaded_through_to_the_shadow_run_slot(tmp_path, run_store, monkeypatch):
+    """--skip-critic passed to run_tick must reach the underlying
+    shadow_run slot's `shadow-run --skip-critic` invocation, exactly like
+    --paper-execute/--state-db/--max-holding-bars above."""
+    import main as main_module
+
+    captured_args = {}
+    real_run_shadow_run_command = main_module.run_shadow_run_command
+
+    def _capture(args):
+        captured_args["skip_critic"] = args.skip_critic
+        return real_run_shadow_run_command(args)
+
+    monkeypatch.setattr(main_module, "run_shadow_run_command", _capture)
+
+    result = run_tick(
+        schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", benchmark="",
+        skip_critic=True, now=_TRADING_TIME, **_db_paths(tmp_path),
+    )
+
+    assert result.ran is True
+    assert captured_args.get("skip_critic") is True
+
+
+def test_skip_critic_defaults_to_false(tmp_path, run_store, monkeypatch):
+    import main as main_module
+
+    captured_args = {}
+    real_run_shadow_run_command = main_module.run_shadow_run_command
+
+    def _capture(args):
+        captured_args["skip_critic"] = args.skip_critic
+        return real_run_shadow_run_command(args)
+
+    monkeypatch.setattr(main_module, "run_shadow_run_command", _capture)
+
+    result = run_tick(schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", benchmark="", now=_TRADING_TIME, **_db_paths(tmp_path))
+
+    assert result.ran is True
+    assert captured_args.get("skip_critic") is False

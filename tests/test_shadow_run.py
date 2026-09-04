@@ -93,6 +93,28 @@ def _wire_fakes(monkeypatch):
     entry_as_of = _START + timedelta(days=80)
     monkeypatch.setattr("market.context.get_market_context", _make_fake_get_market_context(price=260.0, atr_14=5.0, as_of=entry_as_of))
 
+    # The critic's DATA_FRESHNESS/FUTURE_TIMESTAMP checks compare
+    # market_context.as_of against REAL wall-clock `now` by default -- the
+    # correct behavior for a genuine shadow-run against real Yahoo data
+    # (whose as_of is naturally recent), but this fixture's as_of is fixed
+    # at _START's 2023 date regardless of when the test suite itself runs,
+    # which would make every such check fail on staleness alone and mask
+    # whatever the test actually intends to exercise. Freezing critic.engine's
+    # own "now" to just after this fixture's own as_of -- not disabling the
+    # checks -- keeps them meaningful (a genuinely future-dated context is
+    # still caught) while decoupling this file's fixture from real wall-clock
+    # drift, the same "pin now to the fixture's own timeline" approach
+    # test_scheduler_runner.py/test_cli_schedule.py already use via --now.
+    import critic.engine as critic_engine_module
+
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            frozen = entry_as_of + timedelta(days=1)
+            return frozen.replace(tzinfo=tz) if tz else frozen
+
+    monkeypatch.setattr(critic_engine_module, "datetime", _FrozenDatetime)
+
     yield {"bars": bars, "entry_as_of": entry_as_of}
 
 
@@ -111,6 +133,12 @@ def test_shadow_run_subcommand_defaults():
     assert args.paper_execute is False
     assert args.state_db is None
     assert args.max_holding_bars is None
+    assert args.skip_critic is False
+
+
+def test_shadow_run_skip_critic_flag_parses():
+    args = parse_args(["shadow-run", "--symbols", "AAPL", "--skip-critic"])
+    assert args.skip_critic is True
 
 
 def test_shadow_run_paper_execute_flag_parses():
@@ -277,6 +305,7 @@ def test_shadow_run_paper_execute_submits_a_real_pending_order(tmp_path, capsys)
 
     output = capsys.readouterr().out
     assert "paper: APPROVED_PENDING" in output  # true the MOMENT it was submitted
+    assert "critic=APPROVE" in output
     assert "Advancing existing PENDING paper orders" in output
     assert "new bar(s) processed" in output
 
@@ -291,6 +320,83 @@ def test_shadow_run_paper_execute_submits_a_real_pending_order(tmp_path, capsys)
     assert entries[0].outcome.value in ("APPROVED_FILLED_OPEN", "APPROVED_FILLED_CLOSED")
     assert entries[0].symbol == "AAPL"
     assert entries[0].strategy_name == "decision_engine_buy_bridge"
+
+    from critic.models import CriticVerdict
+    from predictions.store import PredictionStore
+
+    prediction_store = PredictionStore(tmp_path / "predictions.db")
+    predictions = prediction_store.list_predictions()
+    prediction_store.close()
+    assert len(predictions) == 1
+    assert predictions[0].critic_assessment is not None
+    assert predictions[0].critic_assessment.verdict == CriticVerdict.APPROVE
+
+
+def test_shadow_run_paper_execute_a_critic_reject_prevents_the_order_but_not_the_prediction(tmp_path, capsys):
+    """The critic's authority in practice: an active kill switch makes the
+    critic REJECT, which must prevent _bridge_to_paper_execution from
+    submitting a real paper order (no journal entry at all) while the
+    shadow prediction is still recorded, with the REJECT verdict itself
+    persisted on it -- predictions are tracked independent of trades, the
+    same principle risk_decision already establishes for a risk-rejected
+    signal."""
+    from live.state_store import LiveStateStore
+
+    state_store = LiveStateStore(tmp_path / "state.db")
+    state_store.activate_kill_switch(reason="test")
+    state_store.close()
+
+    run_shadow_run_command(_paper_execute_args(tmp_path, symbols="AAPL"))
+
+    from paper.store import PaperStore
+
+    store = PaperStore(tmp_path / "paper.db")
+    entries = store.list_journal_entries()
+    store.close()
+    assert entries == []  # no paper order was ever submitted
+
+    from critic.models import CriticVerdict
+    from predictions.store import PredictionStore
+
+    prediction_store = PredictionStore(tmp_path / "predictions.db")
+    predictions = prediction_store.list_predictions()
+    prediction_store.close()
+    assert len(predictions) == 1  # the prediction IS still recorded
+    assert predictions[0].critic_assessment is not None
+    assert predictions[0].critic_assessment.verdict == CriticVerdict.REJECT
+    assert "KILL_SWITCH" in predictions[0].critic_assessment.failed_checks
+
+
+def test_shadow_run_skip_critic_leaves_critic_assessment_none_even_when_it_would_reject(tmp_path, capsys):
+    """--skip-critic must bypass the critic entirely -- no verdict
+    persisted, and paper execution proceeds exactly as it did before the
+    critic existed, even in a scenario (active kill switch) that would
+    otherwise be a critic REJECT."""
+    from live.state_store import LiveStateStore
+
+    state_store = LiveStateStore(tmp_path / "state.db")
+    state_store.activate_kill_switch(reason="test")
+    state_store.close()
+
+    run_shadow_run_command(_paper_execute_args(tmp_path, symbols="AAPL", extra=["--skip-critic"]))
+
+    from predictions.store import PredictionStore
+
+    prediction_store = PredictionStore(tmp_path / "predictions.db")
+    predictions = prediction_store.list_predictions()
+    prediction_store.close()
+    assert len(predictions) == 1
+    assert predictions[0].critic_assessment is None
+
+    # _bridge_to_paper_execution's own, independent kill-switch check still
+    # correctly blocked the order (same assertion as the dedicated test
+    # above -- confirms this specific scenario end-to-end too).
+    from paper.store import PaperStore
+
+    store = PaperStore(tmp_path / "paper.db")
+    entries = store.list_journal_entries()
+    store.close()
+    assert entries == []
 
 
 def test_shadow_run_max_holding_bars_is_threaded_through_to_the_paper_engine(tmp_path, monkeypatch):
@@ -334,7 +440,11 @@ def test_shadow_run_paper_execute_respects_an_active_kill_switch(tmp_path, capsy
     """The kill switch must be respected by this bridge exactly as it
     already is by `paper-live` -- an active kill switch must skip paper
     execution for every symbol without blocking the shadow prediction
-    itself from being recorded."""
+    itself from being recorded. Now caught by the critic FIRST (its own
+    KILL_SWITCH check forces REJECT before _bridge_to_paper_execution is
+    even called) -- see the --skip-critic variant below for proof
+    _bridge_to_paper_execution's own, independent kill-switch check is
+    still there as a second layer when the critic is bypassed."""
     from live.state_store import LiveStateStore
 
     state_store = LiveStateStore(tmp_path / "state.db")
@@ -345,7 +455,8 @@ def test_shadow_run_paper_execute_respects_an_active_kill_switch(tmp_path, capsy
 
     output = capsys.readouterr().out
     assert "prediction recorded" in output  # the prediction itself is unaffected
-    assert "paper: SKIPPED (kill switch active)" in output
+    assert "paper: SKIPPED (critic REJECT)" in output
+    assert "critic=REJECT" in output
 
     from paper.store import PaperStore
 
@@ -353,6 +464,32 @@ def test_shadow_run_paper_execute_respects_an_active_kill_switch(tmp_path, capsy
     entries = store.list_journal_entries()
     store.close()
     assert entries == []  # no order was ever submitted
+
+
+def test_shadow_run_paper_execute_kill_switch_still_caught_with_skip_critic(tmp_path, capsys):
+    """Defense in depth: _bridge_to_paper_execution's OWN, independent
+    kill-switch check must still work when the critic is bypassed
+    entirely -- proves it is a real second layer, not dead code made
+    unreachable by the critic now catching this first in the default path."""
+    from live.state_store import LiveStateStore
+
+    state_store = LiveStateStore(tmp_path / "state.db")
+    state_store.activate_kill_switch(reason="test")
+    state_store.close()
+
+    run_shadow_run_command(_paper_execute_args(tmp_path, symbols="AAPL", extra=["--skip-critic"]))
+
+    output = capsys.readouterr().out
+    assert "prediction recorded" in output
+    assert "critic=" not in output
+    assert "paper: SKIPPED (kill switch active)" in output
+
+    from paper.store import PaperStore
+
+    store = PaperStore(tmp_path / "paper.db")
+    entries = store.list_journal_entries()
+    store.close()
+    assert entries == []
 
 
 def test_shadow_run_paper_execute_two_different_symbols_each_get_their_own_pending_order(tmp_path, capsys):

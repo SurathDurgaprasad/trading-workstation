@@ -65,6 +65,20 @@ def _wire_fakes(monkeypatch):
         "market.context.get_market_context",
         lambda symbol, **kwargs: MarketContext(symbol=symbol, as_of=entry_as_of, price=260.0, atr_14=5.0),
     )
+
+    # Same fix as tests/test_shadow_run.py's own _wire_fakes: freeze the
+    # critic's "now" near this fixture's own as_of, decoupling it from real
+    # wall-clock drift (see that file's fixture for the full rationale).
+    import critic.engine as critic_engine_module
+
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            frozen = entry_as_of + timedelta(days=1)
+            return frozen.replace(tzinfo=tz) if tz else frozen
+
+    monkeypatch.setattr(critic_engine_module, "datetime", _FrozenDatetime)
+
     yield
 
 
@@ -119,6 +133,16 @@ def test_schedule_max_holding_bars_defaults_to_none():
 def test_schedule_max_holding_bars_flag_parses():
     args = parse_args(["schedule", "tick", "--symbols", "AAPL", "--max-holding-bars", "5"])
     assert args.max_holding_bars == 5
+
+
+def test_schedule_skip_critic_defaults_to_false():
+    args = parse_args(["schedule", "tick", "--symbols", "AAPL"])
+    assert args.skip_critic is False
+
+
+def test_schedule_skip_critic_flag_parses():
+    args = parse_args(["schedule", "tick", "--symbols", "AAPL", "--skip-critic"])
+    assert args.skip_critic is True
 
 
 def test_schedule_loop_defaults():
@@ -331,12 +355,28 @@ def test_schedule_loop_paper_execute_on_prints_honest_warning_not_false_safety_c
     """Regression (self-audit finding): the loop header used to claim
     'No real or paper order is ever placed by this command' unconditionally
     -- false the moment --paper-execute submits a real paper order. Must
-    never claim that when --paper-execute is on; must say so plainly instead."""
+    never claim that when --paper-execute is on; must say so plainly instead.
+
+    Uses a custom always-due ScheduleConfig (see test_scheduler_runner.py's
+    own test_custom_schedule_config_is_honored for the same pattern) rather
+    than relying on the built-in schedule's real time-of-day windows --
+    found via self-audit: `schedule loop` has no `--now` override (by
+    design, for genuine unattended operation), so a test asserting a real
+    submission happened was silently dependent on whatever real wall-clock
+    time the suite happened to run at, and would spuriously fail outside
+    the built-in schedule's 09:15-15:30 IST shadow_run windows (reproduced:
+    this test genuinely failed, unrelated to critic wiring, once real time
+    crossed 15:30 IST during this session -- confirmed by running it
+    against the pre-critic-wiring commit at the same real time)."""
+    config_path = tmp_path / "always_due_schedule.yaml"
+    config_path.write_text("slots:\n  - name: always_due\n    after: \"00:00\"\n    before: null\n    frequency_minutes: null\n    action: shadow_run\n")
+
     paper_db = tmp_path / "paper.db"
     state_db = tmp_path / "state.db"
     args = parse_args([
         "schedule", "loop", "--symbols", "AAPL", "--benchmark", "", "--max-ticks", "1", "--interval-seconds", "0",
         "--initial-capital", "20000", "--paper-execute", "--paper-db", str(paper_db), "--state-db", str(state_db),
+        "--config", str(config_path),
         *_db_args(tmp_path),
     ])
     run_schedule_command(args)

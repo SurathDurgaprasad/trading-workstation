@@ -1582,6 +1582,7 @@ def run_experiment_command(args: argparse.Namespace) -> None:
 def run_shadow_run_command(args: argparse.Namespace) -> None:
     from pathlib import Path
 
+    from critic.models import CriticVerdict
     from decision_engine.engine import make_decision
     from decision_engine.models import RiskContext
     from decision_engine.store import DecisionStore
@@ -1708,14 +1709,35 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
                         prediction_note = f" -> no prediction recorded (already have one for entry bar {market_context.as_of.isoformat()})"
                     else:
                         signal = build_signal_for_buy(decision, market_context)
+
+                        critic_assessment = None
+                        if not args.skip_critic:
+                            from critic.engine import evaluate as critic_evaluate
+
+                            existing_pending = paper_engine.store.get_pending_order(symbol) is not None if paper_engine is not None else False
+                            existing_open = paper_engine.store.get_open_position(symbol) is not None if paper_engine is not None else False
+                            kill_switch_active = state_store.is_kill_switch_active() if state_store is not None else None
+                            critic_assessment = critic_evaluate(
+                                decision, signal, kill_switch_active=kill_switch_active,
+                                existing_pending_order=existing_pending, existing_open_position=existing_open,
+                            )
+
                         risk_decision = _size_if_requested(decision, market_context=market_context, args=args)
-                        prediction = create_prediction(decision, signal, horizon_bars=args.horizon_bars, interval=args.interval, risk_decision=risk_decision)
+                        prediction = create_prediction(
+                            decision, signal, horizon_bars=args.horizon_bars, interval=args.interval,
+                            risk_decision=risk_decision, critic_assessment=critic_assessment,
+                        )
                         prediction_store.save_prediction(prediction)
                         predictions_recorded += 1
                         sized_note = f", qty={risk_decision.position_size.quantity}" if (risk_decision is not None and risk_decision.position_size is not None) else ""
-                        prediction_note = f" -> prediction recorded ({prediction.prediction_id[:12]}{sized_note})"
+                        critic_note = f", critic={critic_assessment.verdict.value}" if critic_assessment is not None else ""
+                        prediction_note = f" -> prediction recorded ({prediction.prediction_id[:12]}{sized_note}{critic_note})"
                         if args.paper_execute:
-                            paper_outcome = _bridge_to_paper_execution(signal, risk_decision, engine=paper_engine, state_store=state_store)
+                            critic_blocks_execution = critic_assessment is not None and critic_assessment.verdict in (CriticVerdict.REJECT, CriticVerdict.INSUFFICIENT_EVIDENCE)
+                            if critic_blocks_execution:
+                                paper_outcome = f"SKIPPED (critic {critic_assessment.verdict.value})"
+                            else:
+                                paper_outcome = _bridge_to_paper_execution(signal, risk_decision, engine=paper_engine, state_store=state_store)
                             if paper_outcome is not None:
                                 prediction_note += f" | paper: {paper_outcome}"
                                 if paper_outcome == "APPROVED_PENDING":
@@ -1962,7 +1984,7 @@ def _run_tick_from_args(args: argparse.Namespace, schedule_config, store, *, now
         live_source=args.live_source, scanner_db=args.scanner_db, research_db=args.research_db,
         decision_db=args.decision_db, predictions_db=args.predictions_db, initial_capital=args.initial_capital,
         paper_execute=args.paper_execute, state_db=args.state_db, max_holding_bars=args.max_holding_bars,
-        staleness_seconds=args.staleness_seconds, now=now,
+        skip_critic=args.skip_critic, staleness_seconds=args.staleness_seconds, now=now,
     )
 
 
@@ -2531,6 +2553,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "unresolved shadow PREDICTION -- this is the equivalent for a real paper POSITION."
         ),
     )
+    shadow_run_parser.add_argument(
+        "--skip-critic", action="store_true",
+        help=(
+            "Explicit opt-OUT, default off: the deterministic critic (critic.engine.evaluate) runs by default for "
+            "every BUY once this flag is not passed -- it independently re-examines the proposed trade (data "
+            "freshness, trade structure, duplicate exposure, kill switch, indicator contradictions, regime, "
+            "risk/reward, evidence completeness) and its verdict is persisted on the prediction. A REJECT or "
+            "INSUFFICIENT_EVIDENCE verdict prevents --paper-execute from submitting a real paper order for that "
+            "symbol this run -- the shadow prediction itself is still recorded regardless, exactly like a rejected "
+            "risk_decision already is. Pass --skip-critic to preserve the exact prior behavior (no critic call at "
+            "all, no verdict persisted, --paper-execute unaffected by anything but risk/kill-switch as before)."
+        ),
+    )
 
     schedule_parser = subparsers.add_parser(
         "schedule",
@@ -2581,6 +2616,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                 "position after this many bars if neither stop nor target has been hit (default: None, unlimited "
                 "hold). Only meaningful together with --paper-execute."
             ),
+        )
+        p.add_argument(
+            "--skip-critic", action="store_true",
+            help="Forwarded to every shadow_run slot's `shadow-run --skip-critic` (default off -- the deterministic critic runs by default).",
         )
 
     tick_parser = schedule_subparsers.add_parser("tick", help="Check whether a configured slot is due right now; if so, run it exactly once, then exit. Never loops.")

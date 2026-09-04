@@ -30,6 +30,7 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from critic.models import CriticAssessment
 from decision_engine.models import DecisionLabel
 from risk.contracts import RiskDecision
 
@@ -92,6 +93,16 @@ class PredictionRecord(BaseModel):
     backfilled onto an existing row. Reuses risk.contracts.RiskDecision
     verbatim rather than inventing a second, competing "sizing record"
     shape."""
+
+    critic_assessment: CriticAssessment | None = None
+    """The deterministic critic.engine.evaluate() output computed at
+    prediction time, when the caller ran it (shadow-run's own
+    --skip-critic opts out). None for any prediction recorded without
+    it -- never fabricated, never backfilled onto an existing row. A
+    REJECT/INSUFFICIENT_EVIDENCE verdict here means paper execution was
+    withheld for this BUY even though the prediction itself was still
+    recorded (predictions are tracked independent of trades, the same
+    principle risk_decision above already establishes)."""
 
     @model_validator(mode="after")
     def _prices_must_be_sanely_ordered(self) -> "PredictionRecord":
