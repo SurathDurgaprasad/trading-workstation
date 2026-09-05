@@ -5,6 +5,7 @@ from main import (
     run_backtest_universe_command,
     run_decide_command,
     run_evaluate_command,
+    run_hypothesis_registry_command,
     run_learn_command,
     run_paper_command,
     run_paper_live_command,
@@ -1109,3 +1110,38 @@ def test_build_market_data_source_dhan_is_labeled_live(monkeypatch):
     source, source_label, status_label = _build_market_data_source(args)
     assert "DHAN" in source_label
     assert status_label == "LIVE"
+
+
+def test_hypothesis_registry_subcommand_defaults():
+    args = parse_args(["hypothesis-registry"])
+    assert args.command == "hypothesis-registry"
+    assert args.status is None
+
+
+def test_hypothesis_registry_subcommand_accepts_status_filter():
+    args = parse_args(["hypothesis-registry", "--status", "SUPPORTED"])
+    assert args.status == "SUPPORTED"
+
+
+def test_hypothesis_registry_subcommand_rejects_an_unknown_status():
+    with pytest.raises(SystemExit):
+        parse_args(["hypothesis-registry", "--status", "MADE_UP"])
+
+
+def test_hypothesis_registry_command_prints_every_hypothesis(capsys):
+    args = parse_args(["hypothesis-registry"])
+    run_hypothesis_registry_command(args)
+
+    output = capsys.readouterr().out
+    assert "H_ENTRY_001" in output
+    assert "H_EXIT_001" in output
+    assert "Summary:" in output
+
+
+def test_hypothesis_registry_command_filters_by_status(capsys):
+    args = parse_args(["hypothesis-registry", "--status", "SUPPORTED"])
+    run_hypothesis_registry_command(args)
+
+    output = capsys.readouterr().out
+    assert "H_ENTRY_001" in output  # the one SUPPORTED hypothesis
+    assert "H_EXIT_001" not in output  # OPEN, must be excluded

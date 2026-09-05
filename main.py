@@ -45,7 +45,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime", "experiment")
+_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime", "experiment", "hypothesis-registry")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -471,6 +471,44 @@ def run_backtest_universe_command(args: argparse.Namespace) -> None:
     print("This is historical simulation across a fixed universe, not evidence of future profitability.")
     print("A single pooled verdict does not account for cross-symbol correlation (many of these")
     print("symbols moved together in the same market regime) -- treat this as directional evidence only.")
+
+
+# --------------------------------------------------------------------------
+# `hypothesis-registry` -- strategy science Phase 4. Read-only listing of
+# strategy/hypothesis_registry.py's static, code-defined records. No
+# database, no configuration change -- see that module's own docstring.
+# --------------------------------------------------------------------------
+
+
+def run_hypothesis_registry_command(args: argparse.Namespace) -> None:
+    from strategy.hypothesis_registry import HypothesisStatus, build_hypothesis_registry
+
+    registry = build_hypothesis_registry()
+    if args.status is not None:
+        registry = tuple(h for h in registry if h.status == HypothesisStatus(args.status))
+
+    print("=" * 70)
+    print("HYPOTHESIS REGISTRY -- STRATEGY SCIENCE (entry + exit hypotheses)")
+    print("=" * 70)
+    if not registry:
+        print(f"\nNo hypotheses with status {args.status!r}.")
+        return
+
+    for h in registry:
+        print(f"\n{h.hypothesis_id}  [{h.status.value}]")
+        print(f"  Description:          {h.description}")
+        print(f"  Rationale:            {h.rationale}")
+        print(f"  Expected effect:      {h.expected_effect}")
+        print(f"  Dataset restrictions: {h.dataset_restrictions}")
+        print(f"  Experiment design:    {h.experiment_design}")
+        print(f"  Success criteria:     {h.success_criteria}")
+        print(f"  Failure criteria:     {h.failure_criteria}")
+        print(f"  Evidence:             {h.evidence}")
+
+    counts: dict[str, int] = {}
+    for h in registry:
+        counts[h.status.value] = counts.get(h.status.value, 0) + 1
+    print(f"\n{'-' * 70}\nSummary: " + ", ".join(f"{status}={count}" for status, count in sorted(counts.items())))
 
 
 # --------------------------------------------------------------------------
@@ -2897,6 +2935,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     experiment_recommend_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
     experiment_recommend_parser.add_argument("--decision-db", type=str, default=None, help=f"SQLite decision-history path (default: {DEFAULT_DECISION_DB_PATH}).")
 
+    hypothesis_registry_parser = subparsers.add_parser(
+        "hypothesis-registry",
+        help=(
+            "Strategy science Phase 4: read-only listing of every backtesting strategy hypothesis "
+            "considered (entry and exit), its status (OPEN/SUPPORTED/REJECTED/INCONCLUSIVE), and the "
+            "real evidence behind that status -- distinct from the existing `experiment` command, which "
+            "tracks LIVE decision_engine/scanner/risk config comparisons over real predictions, not "
+            "historical strategy-variant backtests."
+        ),
+    )
+    hypothesis_registry_parser.add_argument("--status", choices=["OPEN", "SUPPORTED", "REJECTED", "INCONCLUSIVE"], default=None, help="Filter to only this status (default: show all).")
+
     review_parser = subparsers.add_parser(
         "review",
         help=(
@@ -3052,6 +3102,8 @@ def main() -> None:
             run_backtest_command(args)
         elif args.command == "backtest-universe":
             run_backtest_universe_command(args)
+        elif args.command == "hypothesis-registry":
+            run_hypothesis_registry_command(args)
         elif args.command == "paper":
             run_paper_command(args)
         elif args.command == "live-sim":
