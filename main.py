@@ -355,6 +355,51 @@ def run_backtest_universe_command(args: argparse.Namespace) -> None:
             print("  -> A HIGH fraction means the real result is unremarkable vs. pure chance;")
             print("     a LOW fraction means entry timing itself carried real information.")
 
+    if args.regime_analysis:
+        from backtesting.regime import group_trade_returns_by_regime
+        from market_data.universe import exchange_for_symbol
+
+        regime_series_by_symbol: dict = {}
+        for symbol, backtest_result in result.per_symbol.items():
+            if not backtest_result.trades:
+                continue
+            try:
+                regime_series_by_symbol[symbol] = compute_indicator_series(
+                    provider.fetch_ohlcv(symbol, period=args.period, interval=args.interval)
+                )
+            except (ValueError, MarketDataError):
+                continue
+
+        def _print_regime_breakdown(label: str, trades: list) -> None:
+            trades_with_series = [(t, regime_series_by_symbol[t.symbol]) for t in trades if t.symbol in regime_series_by_symbol]
+            buckets = group_trade_returns_by_regime(trades_with_series)
+            print(f"\n{label} ({sum(len(v) for v in buckets.values())} classified trades)")
+            if not buckets:
+                print("  (no trades could be classified -- insufficient indicator history)")
+                return
+            for classification in sorted(buckets, key=lambda c: (c.trend.value, c.volatility.value)):
+                returns = buckets[classification]
+                bucket_report = compute_profitability_report_from_returns(returns)
+                win_rate_text = f"{bucket_report.win_rate:.1%}" if bucket_report.win_rate is not None else "N/A"
+                expectancy_text = f"{bucket_report.expectancy:+.2%}" if bucket_report.expectancy is not None else "N/A"
+                pf_text = f"{bucket_report.profit_factor:.2f}" if bucket_report.profit_factor is not None else "N/A"
+                print(
+                    f"  {classification.trend.value:<14} {classification.volatility.value:<17} "
+                    f"{bucket_report.sample_size:>4} trades, win rate {win_rate_text:>7}, "
+                    f"expectancy {expectancy_text:>8}, profit factor {pf_text:>5}, verdict {bucket_report.verdict.value}"
+                )
+
+        print("\n" + "-" * 50)
+        print("REGIME ANALYSIS (Phase 1 -- does the strategy fail everywhere, or only in specific conditions)")
+        print("-" * 50)
+        _print_regime_breakdown("OVERALL", result.pooled_trades)
+        nse_trades = [t for t in result.pooled_trades if exchange_for_symbol(t.symbol) == "NSE"]
+        us_trades = [t for t in result.pooled_trades if exchange_for_symbol(t.symbol) not in ("NSE", "BSE")]
+        _print_regime_breakdown("NSE ONLY", nse_trades)
+        _print_regime_breakdown("US/OTHER ONLY", us_trades)
+        print("\n  Sample sizes below 30 per bucket (learning.profitability's own established floor)")
+        print("  make any single-bucket verdict directional evidence only, not proof.")
+
     print("\n" + "-" * 50)
     print("\nIMPORTANT:")
     print("This is historical simulation across a fixed universe, not evidence of future profitability.")
@@ -2466,6 +2511,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "iterations performed at least as well as the real strategy. 0 (default) skips this -- "
             "opt-in because each iteration re-runs the full universe (~2-3s/iteration; 200-300 "
             "iterations is a reasonable range for a meaningful distribution)."
+        ),
+    )
+    backtest_universe_parser.add_argument(
+        "--regime-analysis", action="store_true",
+        help=(
+            "Strategy science Phase 1: classify every trade by (trend, volatility) regime at its "
+            "OWN entry time (backtesting.regime, look-ahead-safe by construction) and report pooled "
+            "profitability per regime bucket -- answers whether the strategy fails everywhere or "
+            "only under specific market conditions."
         ),
     )
     backtest_universe_parser.add_argument(
