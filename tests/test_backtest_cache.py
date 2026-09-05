@@ -160,3 +160,64 @@ def test_staleness_report_handles_malformed_meta_json_without_crashing(tmp_path)
 
     assert records[0].retrieved_at is None
     assert records[0].age_days is None
+
+
+# --- path-traversal protection (Phase 17, security review) ---------------
+
+
+@pytest.mark.parametrize(
+    "malicious_symbol",
+    [
+        "../../../etc/passwd",
+        "..\\..\\..\\Windows\\Temp\\evil",
+        "..",
+        "...",
+        "FOO/../../BAR",
+        "FOO/BAR",
+        "FOO\\BAR",
+        "",
+    ],
+)
+def test_fetch_ohlcv_rejects_a_path_unsafe_symbol(tmp_path, malicious_symbol):
+    # Real, exploitable gap found by a security audit: a crafted symbol
+    # (e.g. from a shared/downloaded watchlist YAML) previously joined
+    # straight into a filesystem path with no validation beyond
+    # strip()/upper(), letting it escape data/market/ entirely.
+    inner = _CountingProvider(_sample_ohlcv("TEST"))
+    cached = CachedMarketDataProvider(inner, cache_root=tmp_path)
+
+    with pytest.raises(ValueError):
+        cached.fetch_ohlcv(malicious_symbol, interval="1d")
+
+    assert inner.calls == 0  # never even reached the underlying provider
+
+
+@pytest.mark.parametrize("malicious_symbol", ["../../../etc/passwd", "..", "FOO/BAR"])
+def test_report_cache_staleness_rejects_a_path_unsafe_symbol(tmp_path, malicious_symbol):
+    with pytest.raises(ValueError):
+        report_cache_staleness([malicious_symbol], interval="1d", cache_root=tmp_path)
+
+
+def test_a_malicious_symbol_never_actually_escapes_the_cache_root(tmp_path):
+    # Belt-and-suspenders: even if the ValueError guard were ever
+    # bypassed, confirm no file actually lands outside cache_root for a
+    # realistic attack payload, by checking the directory tree stays empty.
+    inner = _CountingProvider(_sample_ohlcv("TEST"))
+    cached = CachedMarketDataProvider(inner, cache_root=tmp_path)
+
+    with pytest.raises(ValueError):
+        cached.fetch_ohlcv("../outside", interval="1d")
+
+    assert not (tmp_path.parent / "outside").exists()
+    assert list(tmp_path.iterdir()) == [] if tmp_path.exists() else True
+
+
+@pytest.mark.parametrize("legitimate_symbol", ["AAPL", "RELIANCE.NS", "^NSEI", "BRK-B", "TATASTEEL.NS"])
+def test_legitimate_real_world_symbols_are_never_rejected(tmp_path, legitimate_symbol):
+    inner = _CountingProvider(_sample_ohlcv(legitimate_symbol))
+    cached = CachedMarketDataProvider(inner, cache_root=tmp_path)
+
+    result = cached.fetch_ohlcv(legitimate_symbol, interval="1d")
+
+    assert result.symbol == legitimate_symbol
+    assert inner.calls == 1

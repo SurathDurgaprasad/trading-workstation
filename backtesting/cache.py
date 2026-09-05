@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +10,37 @@ from core.config import PROJECT_ROOT
 from market.data_provider import OHLCV, MarketDataProvider
 
 CACHE_ROOT = PROJECT_ROOT / "data" / "market"
+
+_SYMBOL_PATH_SAFE_PATTERN = re.compile(r"^[A-Z0-9^._-]+$")
+
+
+def _validate_symbol_for_path(symbol: str) -> str:
+    """Strategy science Phase 17 (security review) -- a real, exploitable
+    path-traversal gap found by the audit: a symbol string was joined
+    directly into a filesystem path here (and in report_cache_staleness)
+    with no validation beyond strip()/upper(). A crafted symbol (e.g.
+    from a shared/downloaded watchlist YAML -- market_data.universe's own
+    from_watchlist rejects commas/whitespace but not path separators)
+    containing '/', '\\', or a bare '..' component could escape
+    data/market/ entirely.
+
+    An ALLOWLIST, not a blocklist: real market symbols this project
+    actually uses (see data/market/'s own directory names) only ever
+    contain uppercase letters, digits, '.' (exchange suffix, e.g.
+    RELIANCE.NS), '^' (index prefix, e.g. ^NSEI), and '-' (share-class
+    tickers). Blocklisting specific bad characters is fragile against a
+    creative bypass this allowlist doesn't need to anticipate.
+
+    A symbol made ENTIRELY of dots (e.g. '..', '...') would pass that
+    character allowlist yet still act as a parent-directory navigation
+    token when used as a single path component (no '/' needed -- '..'
+    alone means "parent directory" to the OS) -- rejected explicitly."""
+    if not _SYMBOL_PATH_SAFE_PATTERN.match(symbol) or set(symbol) == {"."}:
+        raise ValueError(
+            f"Refusing to use symbol {symbol!r} to construct a filesystem path -- contains characters outside "
+            "the safe set [A-Z0-9^._-], or is a path-navigation token."
+        )
+    return symbol
 
 
 class CachedMarketDataProvider:
@@ -30,7 +62,7 @@ class CachedMarketDataProvider:
         self._cache_root = cache_root
 
     def fetch_ohlcv(self, symbol: str, *, period: str = "1y", interval: str = "1d") -> OHLCV:
-        normalized_symbol = symbol.strip().upper()
+        normalized_symbol = _validate_symbol_for_path(symbol.strip().upper())
         csv_path = self._csv_path(normalized_symbol, interval)
 
         if csv_path.exists():
@@ -103,7 +135,7 @@ def report_cache_staleness(
     now = datetime.now(timezone.utc)
     records = []
     for symbol in symbols:
-        normalized = symbol.strip().upper()
+        normalized = _validate_symbol_for_path(symbol.strip().upper())
         meta_path = (cache_root / normalized / f"{interval}.csv").with_suffix(".meta.json")
 
         retrieved_at = None

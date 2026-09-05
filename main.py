@@ -1053,6 +1053,22 @@ def run_dashboard_command(args: argparse.Namespace) -> None:
 
     from dashboard.app import app
 
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        # Strategy science Phase 17 (security review) finding: the
+        # dashboard's state-changing routes (/approve, /reject,
+        # /kill-switch/activate, /kill-switch/reset) have no CSRF
+        # protection and no authentication -- reasonable for the
+        # documented local-only, single-user threat model, but binding to
+        # a non-loopback address exposes them to any other host that can
+        # reach this one (e.g. a co-resident LAN device, or a malicious
+        # page in a browser on the SAME machine making a cross-site
+        # request). Never blocked outright (a user may have a real reason
+        # to reach this from another device on their own trusted network)
+        # -- just made visible instead of silent.
+        print(f"WARNING: binding the dashboard to {args.host!r}, not localhost-only.")
+        print("The kill-switch and approve/reject routes have no authentication or CSRF protection --")
+        print("anyone who can reach this address can activate/reset the kill switch or approve/reject a signal.")
+
     print(f"Starting the paper-live dashboard at http://{args.host}:{args.port} (SIMULATED, local-only).")
     print("This page reads/acts on the SAME state main.py's paper-live CLI writes to.")
     print("It does not advance the market itself -- run `python main.py paper-live ...` to process bars.")

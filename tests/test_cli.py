@@ -392,6 +392,36 @@ def test_dashboard_subcommand_overrides():
     assert args.port == 9000
 
 
+def test_dashboard_command_warns_on_non_loopback_host(monkeypatch, capsys):
+    import uvicorn
+
+    import main as main_module
+
+    # uvicorn is imported locally inside run_dashboard_command -- patch the real module directly.
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+
+    args = parse_args(["dashboard", "--host", "0.0.0.0", "--port", "9000"])
+    main_module.run_dashboard_command(args)
+
+    captured = capsys.readouterr()
+    assert "WARNING: binding the dashboard to '0.0.0.0'" in captured.out
+    assert "no authentication or CSRF protection" in captured.out
+
+
+def test_dashboard_command_does_not_warn_on_the_default_loopback_host(monkeypatch, capsys):
+    import uvicorn
+
+    import main as main_module
+
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+
+    args = parse_args(["dashboard"])
+    main_module.run_dashboard_command(args)
+
+    captured = capsys.readouterr()
+    assert "WARNING" not in captured.out
+
+
 def test_scan_subcommand_defaults():
     args = parse_args(["scan", "--symbols", "AAPL,MSFT"])
     assert args.command == "scan"
