@@ -220,6 +220,24 @@ def test_message_for_an_unsubscribed_security_id_is_ignored(instrument_map, cred
     assert source.next_bar() is NO_NEW_BAR
 
 
+def test_rejected_tick_counts_by_symbol_aggregates_across_the_real_wire_path(instrument_map, credentials):
+    # Strategy science Phase 16 (observability) -- end-to-end proof that a
+    # bad tick arriving over the REAL wire-parsing path (struct-packed
+    # binary, not a hand-built dict) still reaches CandleBuilder's
+    # rejection counters, and that DhanMarketDataSource aggregates them
+    # per symbol correctly.
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+
+    assert source.rejected_tick_counts_by_symbol() == {"RELIANCE.NS": {"non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0, "late_out_of_order": 0}}
+
+    factory.current.simulate_message(_ticker_packet(2885, 0.0, epoch=10))  # non-positive price, real wire encoding
+
+    counts = source.rejected_tick_counts_by_symbol()
+    assert counts["RELIANCE.NS"]["non_positive_price"] == 1
+    assert source.next_bar() is NO_NEW_BAR  # the bad tick never started/completed a bar
+
+
 def test_duplicate_ticks_at_the_same_timestamp_do_not_each_complete_a_bar(instrument_map, credentials):
     source, factory = _source(instrument_map, credentials)
     source.subscribe(["RELIANCE.NS"], "1m")

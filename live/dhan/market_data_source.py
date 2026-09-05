@@ -222,6 +222,17 @@ class DhanMarketDataSource:
         except queue.Empty:
             return NO_NEW_BAR
 
+    def rejected_tick_counts_by_symbol(self) -> dict[str, dict[str, int]]:
+        """Strategy science Phase 16 (observability) -- aggregates each
+        subscribed symbol's own CandleBuilder.rejected_tick_counts (see
+        that class's own docstring) into one queryable view across the
+        whole feed, so an operator can check "how many bad ticks has this
+        session seen, across every symbol" without grepping logs or
+        reaching into private per-symbol state directly. A snapshot at
+        call time -- counts only ever grow for the life of this source
+        instance, never reset here."""
+        return {symbol: dict(builder.rejected_tick_counts) for symbol, builder in self._candle_builders.items()}
+
     def is_connected(self) -> bool:
         return self.state == DhanConnectionState.CONNECTED
 

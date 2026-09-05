@@ -86,6 +86,18 @@ class CandleBuilder:
         independent of whether this specific tick's price is) -- see the
         price_is_valid handling inside on_tick."""
         self._last_known_price: float | None = None
+        self.rejected_tick_counts: dict[str, int] = {
+            "non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0, "late_out_of_order": 0,
+        }
+        """Strategy science Phase 16 (observability) -- each rejection is
+        already logged (see on_tick), but a log line alone isn't
+        queryable without grepping. Running counts by reason, visible for
+        the lifetime of this instance, so an operator (or
+        docs/MONDAY_LIVE_VALIDATION_PLAN.md's own Step 1 checklist item)
+        can check "how many ticks were rejected today" programmatically
+        instead of scanning logs by hand. Never reset automatically --
+        one CandleBuilder instance lives for one (symbol, interval) pair
+        for the life of the process."""
 
     def _bucket_start_for(self, timestamp: datetime) -> datetime:
         epoch = timestamp.timestamp()
@@ -124,12 +136,14 @@ class CandleBuilder:
         price_is_valid = True
         if price <= 0:
             price_is_valid = False
+            self.rejected_tick_counts["non_positive_price"] += 1
             logger.warning(
                 "CandleBuilder(%s, %s): rejecting a non-positive-price tick (price=%s, timestamp=%s) -- "
                 "never a real traded price.", self.symbol, self.interval, price, timestamp,
             )
         elif volume < 0:
             price_is_valid = False
+            self.rejected_tick_counts["negative_volume"] += 1
             logger.warning(
                 "CandleBuilder(%s, %s): rejecting a negative-volume tick (volume=%s, timestamp=%s).",
                 self.symbol, self.interval, volume, timestamp,
@@ -138,6 +152,7 @@ class CandleBuilder:
             deviation_pct = abs(price - self._last_known_price) / self._last_known_price * 100.0
             if deviation_pct > self._max_tick_deviation_pct:
                 price_is_valid = False
+                self.rejected_tick_counts["implausible_deviation"] += 1
                 logger.warning(
                     "CandleBuilder(%s, %s): rejecting an implausible tick (price=%s, last known real price=%s, "
                     "deviation=%.1f%% > %.1f%% threshold, timestamp=%s) -- likely corrupted/fat-finger data.",
@@ -163,6 +178,7 @@ class CandleBuilder:
             # what arrives on it. Dropped, never fabricated into either
             # bucket -- matches this module's own "do not manufacture a
             # price" posture applied to corruption, not just fabrication.
+            self.rejected_tick_counts["late_out_of_order"] += 1
             logger.warning(
                 "CandleBuilder(%s, %s): dropping a late/out-of-order tick (timestamp=%s, bucket=%s) -- "
                 "bucket %s is already in progress and must not be corrupted by it.",

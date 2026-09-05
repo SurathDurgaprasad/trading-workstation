@@ -243,6 +243,39 @@ def test_implausible_tick_crossing_a_bucket_boundary_still_completes_the_prior_b
     assert bar.open == 101.5  # NOT 10_000.0
 
 
+def test_rejected_tick_counts_starts_at_zero_for_every_known_reason():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    assert builder.rejected_tick_counts == {
+        "non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0, "late_out_of_order": 0,
+    }
+
+
+def test_rejected_tick_counts_increments_by_reason():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+
+    builder.on_tick(price=0.0, volume=5, timestamp=_ts(10), received_at=_ts(10))
+    assert builder.rejected_tick_counts["non_positive_price"] == 1
+
+    builder.on_tick(price=101.0, volume=-5, timestamp=_ts(11), received_at=_ts(11))
+    assert builder.rejected_tick_counts["negative_volume"] == 1
+
+    builder.on_tick(price=1000.0, volume=1, timestamp=_ts(12), received_at=_ts(12))
+    assert builder.rejected_tick_counts["implausible_deviation"] == 1
+
+    builder.on_tick(price=102.0, volume=1, timestamp=_ts(65), received_at=_ts(65))  # crosses into bucket 60, _last_known_price=102.0
+    # Price-plausible (within threshold of 102.0) but belongs to an EARLIER
+    # bucket than the one now in progress -- must hit the late-tick path,
+    # not the plausibility check.
+    builder.on_tick(price=101.0, volume=1, timestamp=_ts(5), received_at=_ts(5))
+    assert builder.rejected_tick_counts["late_out_of_order"] == 1
+
+    # A valid tick must never increment any counter.
+    assert builder.rejected_tick_counts["non_positive_price"] == 1
+    assert builder.rejected_tick_counts["negative_volume"] == 1
+    assert builder.rejected_tick_counts["implausible_deviation"] == 1
+
+
 def test_max_tick_deviation_pct_none_disables_the_plausibility_check():
     builder = CandleBuilder(symbol="RELIANCE", interval="1m", max_tick_deviation_pct=None)
     builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
