@@ -206,3 +206,29 @@ def test_comprehensive_evaluation_reproduces_this_missions_own_real_baseline_res
     )
     assert result.base_evaluation.verdict == PromotionVerdict.NEGATIVE
     assert result.comprehensive_verdict == PromotionVerdict.NEGATIVE
+
+
+def test_buy_and_hold_mean_return_pct_is_a_per_trade_not_total_period_quantity():
+    # Real trap found by this project's own brutal-self-critic audit
+    # (docs/BRUTAL_SELF_CRITIC.md item 8): backtesting.baselines.
+    # compute_buy_and_hold's own return_pct is a TOTAL period return
+    # (real result: +18.58% averaged across a 41-symbol universe over 5
+    # years) -- NOT the same quantity as candidate_mean_return_pct (a
+    # mean SINGLE-TRADE return). Passing a total-period return in here
+    # unconverted silently compares two different quantities. This test
+    # documents the correct usage: the caller must convert both sides to
+    # the same basis (e.g. the candidate's own average TOTAL return per
+    # symbol) before calling, never a raw compute_buy_and_hold figure.
+    real_candidate_total_return_pct = -0.68  # this project's own real average total return per symbol
+    real_buy_and_hold_total_return_pct = 18.58  # this project's own real average buy-and-hold return per symbol
+
+    # The CORRECT comparison (both sides are TOTAL returns, apples to apples).
+    result = evaluate_promotion_comprehensive(
+        "trend_momentum_baseline_total_return_basis",
+        development_returns=[real_candidate_total_return_pct / 100] * 30,
+        validation_returns=[real_candidate_total_return_pct / 100] * 30,
+        out_of_sample_returns=[real_candidate_total_return_pct / 100] * 30,
+        buy_and_hold_mean_return_pct=real_buy_and_hold_total_return_pct,
+    )
+    assert result.beats_buy_and_hold is False  # correctly loses on the apples-to-apples basis too
+    assert result.candidate_mean_return_pct == pytest.approx(real_candidate_total_return_pct)

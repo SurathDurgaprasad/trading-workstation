@@ -54,11 +54,18 @@ account of exactly what has and hasn't been verified, below.
 1. **Regime analysis** — CODE IMPLEMENTED, UNIT TEST VERIFIED, HISTORICAL
    DATA VERIFIED, STATISTICALLY VALIDATED. `backtesting/regime.py`
    classifies every trade by (trend, volatility) at its own entry time,
-   look-ahead-safe by construction. The one bucket with sufficient sample
-   size (TRENDING_UP + NORMAL_VOLATILITY, 283 of 368 pooled trades) is
-   itself NEGATIVE_PERFORMANCE, closely matching the overall pooled
-   result — the strategy does not merely fail in one regime; the regime
-   with enough data to measure fails too.
+   look-ahead-safe by construction. **Correction, made honestly rather
+   than silently, per `docs/BRUTAL_SELF_CRITIC.md`'s own audit**: this
+   entry originally said only ONE regime bucket clears the 30-trade
+   floor. Re-checked for real: TWO buckets actually do — TRENDING_UP +
+   NORMAL_VOLATILITY (283 of 368 pooled trades) is confidently
+   NEGATIVE_PERFORMANCE, closely matching the overall pooled result; but
+   SIDEWAYS + NORMAL_VOLATILITY (50 trades) is STATISTICALLY_MEANINGLESS,
+   not negative. The strategy's failure is not uniformly confirmed
+   across every regime with adequate data — it is confidently negative in
+   the dominant (trending) regime and merely inconclusive, not
+   confidently negative, in the sideways one. Both remain far from a
+   positive result.
 
 2. **Temporal robustness** — CODE IMPLEMENTED, UNIT TEST VERIFIED,
    HISTORICAL DATA VERIFIED, STATISTICALLY VALIDATED.

@@ -217,7 +217,28 @@ def evaluate_promotion_comprehensive(
     candidate that fails the underlying statistical bar. If the base
     verdict IS PROMOTED but a required comparison fails, the
     comprehensive verdict downgrades to REJECTED (clears the statistical
-    bar on its own trades, but loses to a real benchmark it must beat)."""
+    bar on its own trades, but loses to a real benchmark it must beat).
+
+    UNITS WARNING, found by this project's own brutal-self-critic audit
+    while registering a real experiment: every *_mean_return_pct
+    parameter here is compared directly against candidate_mean_return_pct
+    (the mean of a single trade's own return, e.g. -0.64%) -- it is NOT
+    a total-period return. backtesting.baselines.compute_buy_and_hold's
+    own return_pct is a TOTAL period return (e.g. +18.58% averaged
+    across a real 41-symbol universe over 5 years) and is NOT directly
+    comparable to a per-trade mean without conversion -- passing it in
+    as-is would silently compare two different quantities. A caller
+    wanting a genuine buy-and-hold comparison must first convert both
+    sides to the SAME basis -- e.g. compute the candidate's own average
+    TOTAL return per symbol (final equity / initial capital - 1, "
+    averaged the same way compute_buy_and_hold's own caller already
+    averages across symbols) and compare that, not the per-trade mean,
+    against buy-and-hold's total return. random_baseline_mean_return_pct
+    (from backtesting.random_baseline's own Monte Carlo, e.g. -0.06%) IS
+    already computed the same "mean per-trade return" way as
+    candidate_mean_return_pct and needs no such conversion -- see
+    docs/BRUTAL_SELF_CRITIC.md's own addendum for the real numbers this
+    was caught against."""
     base_evaluation = evaluate_promotion(
         candidate_name, development_returns=development_returns, validation_returns=validation_returns,
         out_of_sample_returns=out_of_sample_returns,

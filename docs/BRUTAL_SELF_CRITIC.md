@@ -116,11 +116,19 @@ multiple-testing correction partially, but not perfectly, addresses.
 
 ## 5. Insufficient sample sizes — explicitly enumerated, not glossed over
 
-- **Regime buckets**: only TRENDING_UP + NORMAL_VOLATILITY (283 of 368
-  pooled trades) has ≥30 trades. Every other (trend, volatility)
-  combination is genuinely under-sampled — `strategy/hypothesis_registry.
-  py`'s own H_ENTRY_005 record states this as INCONCLUSIVE, not falsely
-  negative, for exactly this reason.
+- **Regime buckets**: re-checked for real while registering experiments
+  this phase (correcting an earlier, slightly inaccurate claim that only
+  ONE bucket clears the 30-trade floor): TWO buckets actually do —
+  TRENDING_UP + NORMAL_VOLATILITY (283 of 368 pooled trades,
+  NEGATIVE_PERFORMANCE) and SIDEWAYS + NORMAL_VOLATILITY (50 trades,
+  STATISTICALLY_MEANINGLESS, not negative). This nuance matters: the
+  negative finding is not uniformly confirmed across every regime with
+  adequate data — the sideways regime is inconclusive rather than
+  negative, though still far from a confident positive result. Every
+  OTHER (trend, volatility) combination remains genuinely under-sampled
+  (<30 trades) — `strategy/hypothesis_registry.py`'s own H_ENTRY_005
+  record correctly labels this INCONCLUSIVE, not falsely negative, for
+  exactly this reason.
 - **Entry hypotheses**: H_ENTRY_002/003/004 remain OPEN — never
   implemented or tested at all this mission, not merely under-sampled.
 - **Walk-forward folds**: the smallest fold (Fold 0) has 33 trades, just
@@ -155,6 +163,38 @@ mutable state between them, and `backtesting/exit_experiments.py`'s own
 full-isolation design (see item 4) specifically prevents an exit-hypothesis
 experiment from letting its results leak back into the frozen baseline's
 own dev/val/oos numbers.
+
+## 8. Addendum, found while USING the new comprehensive gate for real:
+   a units mismatch that would have silently produced a misleading
+   buy-and-hold comparison
+
+While registering the frozen baseline's real experiment through
+`strategy.promotion_gate.evaluate_promotion_comprehensive`, computing a
+real buy-and-hold figure to pass as `buy_and_hold_mean_return_pct`
+surfaced a genuine bug-shaped trap, caught before it produced a wrong
+conclusion, not after: `backtesting.baselines.compute_buy_and_hold`'s
+own `return_pct` is a **total period return** (real result: averaging
++18.58% across the 41-symbol universe over 5 years), while
+`candidate_mean_return_pct` inside the gate is a **mean single-trade
+return** (real result: −0.64%). These are different quantities measured
+in the same "%" units, which is exactly what makes silently comparing
+them dangerous — the numbers LOOK comparable and are not. The gate's own
+docstring has been updated with an explicit UNITS WARNING (see
+`strategy/promotion_gate.py`) rather than left as a trap for the next
+caller.
+
+**The correct, apples-to-apples comparison, computed for real**: the
+strategy's own average TOTAL return per symbol over the same 5-year
+window (final equity vs. initial capital, averaged across all 41 symbols
+the same way `compute_buy_and_hold`'s own caller averages) is **−0.68%**,
+against buy-and-hold's real **+18.58%**. This is decisive on its own,
+independent of the per-trade-mean comparison already reported
+elsewhere: a passive investor holding the same 41 symbols would have
+gained about 18.6% over 5 years; running this strategy over the same
+symbols and period would have LOST about 0.7% on average. This
+comparison is intentionally reported here, in prose, rather than forced
+through the gate's own `buy_and_hold_mean_return_pct` parameter with
+mismatched units.
 
 ## Summary verdict of this audit
 
