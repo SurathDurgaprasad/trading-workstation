@@ -145,3 +145,109 @@ def test_flush_does_not_double_emit_after_natural_completion():
     second = builder.flush()
     assert second.timestamp != first_bar.timestamp
     assert second.open == 101.0
+
+
+# --- tick-level sanity validation (Phase 13, live data stress testing) ------
+
+
+def test_a_non_positive_price_tick_is_dropped_and_never_corrupts_the_bucket():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+
+    result = builder.on_tick(price=0.0, volume=5, timestamp=_ts(10), received_at=_ts(10))
+    assert result is None
+    result = builder.on_tick(price=-50.0, volume=5, timestamp=_ts(20), received_at=_ts(20))
+    assert result is None
+
+    bar = builder.flush()
+    assert bar.open == 100.0
+    assert bar.high == 100.0
+    assert bar.low == 100.0
+    assert bar.close == 100.0  # neither garbage tick ever touched the bucket
+
+
+def test_a_negative_volume_tick_is_dropped_and_never_corrupts_the_bucket():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+
+    result = builder.on_tick(price=101.0, volume=-5, timestamp=_ts(10), received_at=_ts(10))
+    assert result is None
+
+    bar = builder.flush()
+    assert bar.volume == 10.0  # the negative-volume tick's -5 must never have been summed in
+
+
+def test_an_implausible_price_spike_is_dropped_and_never_corrupts_the_bucket():
+    # Real, plausible cause: a corrupted-but-well-formed tick (still a
+    # positive float, so OHLCVBar's own gt=0 validation never catches
+    # it) -- e.g. a decimal-point/units error upstream. Default
+    # threshold is 20%; a 10x spike is unambiguously implausible for a
+    # single tick.
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+
+    result = builder.on_tick(price=1000.0, volume=5, timestamp=_ts(10), received_at=_ts(10))
+    assert result is None
+
+    bar = builder.flush()
+    assert bar.high == 100.0
+    assert bar.close == 100.0
+
+
+def test_a_reasonable_price_move_within_threshold_is_still_accepted():
+    # Proves the check isn't overly strict -- a genuine 5% intra-bucket
+    # move must still be accepted normally.
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+    result = builder.on_tick(price=105.0, volume=5, timestamp=_ts(10), received_at=_ts(10))
+    assert result is None  # still same bucket, not a completed bar
+
+    bar = builder.flush()
+    assert bar.high == 105.0
+    assert bar.close == 105.0
+
+
+def test_the_very_first_tick_ever_is_always_accepted_regardless_of_magnitude():
+    # No prior REAL price exists yet to compare against -- a known,
+    # documented scope limit (a garbage FIRST tick could still seed a
+    # bucket's open), not silently unaddressed.
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    result = builder.on_tick(price=999_999.0, volume=1, timestamp=_ts(0), received_at=_ts(0))
+    assert result is None  # not a completed bar (first tick), but NOT dropped either
+
+    bar = builder.flush()
+    assert bar.open == 999_999.0
+
+
+def test_implausible_tick_crossing_a_bucket_boundary_still_completes_the_prior_bucket():
+    # A bucket's completion is a question of ELAPSED EXCHANGE TIME, which
+    # a tick's own timestamp can still be trusted for even when its PRICE
+    # cannot be -- an implausible tick must not indefinitely delay
+    # finalizing an already-elapsed, otherwise-legitimate prior bar.
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+    builder.on_tick(price=102.0, volume=5, timestamp=_ts(30), received_at=_ts(30))
+
+    # Crosses into bucket 60 with an implausible price -- must still complete bucket 0.
+    result = builder.on_tick(price=10_000.0, volume=1, timestamp=_ts(65), received_at=_ts(65))
+    assert result is not None
+    assert result.open == 100.0
+    assert result.close == 102.0
+    assert result.high == 102.0  # the garbage 10,000.0 must never have touched this bucket's high
+
+    # The garbage tick must NOT have seeded bucket 60 either -- only a
+    # genuinely valid tick starts it, using the last REAL price (102.0)
+    # as its own comparison baseline, unaffected by the garbage tick.
+    builder.on_tick(price=101.5, volume=2, timestamp=_ts(70), received_at=_ts(70))
+    bar = builder.flush()
+    assert bar.open == 101.5  # NOT 10_000.0
+
+
+def test_max_tick_deviation_pct_none_disables_the_plausibility_check():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m", max_tick_deviation_pct=None)
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+    result = builder.on_tick(price=10_000.0, volume=1, timestamp=_ts(10), received_at=_ts(10))
+    assert result is None  # still same bucket, not completed -- but NOT dropped as implausible either
+
+    bar = builder.flush()
+    assert bar.high == 10_000.0

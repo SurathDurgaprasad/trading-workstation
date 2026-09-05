@@ -59,11 +59,33 @@ class CandleBuilder:
     given a sequence of ticks, and therefore trivially unit-testable
     without any real Dhan connection."""
 
-    def __init__(self, *, symbol: str, interval: str):
+    def __init__(self, *, symbol: str, interval: str, max_tick_deviation_pct: float = 20.0):
         self.symbol = symbol
         self.interval = interval
         self._bucket_seconds = interval_to_timedelta(interval).total_seconds()
         self._state: _BucketState | None = None
+        self._max_tick_deviation_pct = max_tick_deviation_pct
+        """Strategy science Phase 13 (live data stress testing) -- an
+        adversarial-audit finding: a single corrupted-but-well-formed
+        tick (still a positive float, so OHLCVBar's own gt=0 validation
+        never catches it) previously flowed straight into a bar's high/
+        low/close with zero resistance. A tick deviating more than this
+        percentage from the last REAL price accepted (tracked in
+        _last_known_price, persisting across bucket rollovers -- not
+        just within-bucket) is dropped as implausible, logged, never
+        silently corrupting a bar. A heuristic, not a guarantee: 20% is
+        conservative for equities (a genuine circuit-breaker-magnitude
+        move could rarely be flagged too) -- deliberately erring toward
+        dropping a rare genuine extreme tick over accepting garbage
+        data, consistent with this project's "never trade on bad data"
+        posture. Configurable per instance; None disables the check
+        entirely (e.g. for instruments with legitimately huge normal
+        swings). An invalid tick's PRICE never seeds or merges into any
+        bucket, but its TIMESTAMP can still legitimately complete an
+        already-elapsed prior bucket (elapsed exchange time is trustworthy
+        independent of whether this specific tick's price is) -- see the
+        price_is_valid handling inside on_tick."""
+        self._last_known_price: float | None = None
 
     def _bucket_start_for(self, timestamp: datetime) -> datetime:
         epoch = timestamp.timestamp()
@@ -99,6 +121,30 @@ class CandleBuilder:
         0.0). It would only matter for a real per-tick-volume feed, which
         this project does not have (the Quote/Full cumulative-to-incremental
         conversion above is explicitly not implemented either)."""
+        price_is_valid = True
+        if price <= 0:
+            price_is_valid = False
+            logger.warning(
+                "CandleBuilder(%s, %s): rejecting a non-positive-price tick (price=%s, timestamp=%s) -- "
+                "never a real traded price.", self.symbol, self.interval, price, timestamp,
+            )
+        elif volume < 0:
+            price_is_valid = False
+            logger.warning(
+                "CandleBuilder(%s, %s): rejecting a negative-volume tick (volume=%s, timestamp=%s).",
+                self.symbol, self.interval, volume, timestamp,
+            )
+        elif self._last_known_price is not None and self._max_tick_deviation_pct is not None:
+            deviation_pct = abs(price - self._last_known_price) / self._last_known_price * 100.0
+            if deviation_pct > self._max_tick_deviation_pct:
+                price_is_valid = False
+                logger.warning(
+                    "CandleBuilder(%s, %s): rejecting an implausible tick (price=%s, last known real price=%s, "
+                    "deviation=%.1f%% > %.1f%% threshold, timestamp=%s) -- likely corrupted/fat-finger data.",
+                    self.symbol, self.interval, price, self._last_known_price, deviation_pct,
+                    self._max_tick_deviation_pct, timestamp,
+                )
+
         bucket_start = self._bucket_start_for(timestamp)
         completed: OHLCVBar | None = None
 
@@ -128,6 +174,19 @@ class CandleBuilder:
             completed = self._finalize(self._state)
             self._state = None
 
+        if not price_is_valid:
+            # The bad tick's OWN price/volume must never seed or merge into
+            # ANY bucket -- but its timestamp may have legitimately
+            # completed the PREVIOUS bucket just above (bucket completion
+            # is a question of elapsed exchange time, which this tick's
+            # timestamp can still be trusted for, independent of whether
+            # its price can be). _last_known_price is deliberately NOT
+            # updated here, so the next tick is still checked against the
+            # last genuinely real price, and _state is deliberately left
+            # None (rather than seeded from garbage) -- the next bucket
+            # only starts once a genuinely valid tick actually arrives.
+            return completed
+
         if self._state is None:
             self._state = _BucketState(
                 bucket_start=bucket_start, open=price, high=price, low=price, close=price,
@@ -138,6 +197,7 @@ class CandleBuilder:
         self._state.low = min(self._state.low, price)
         self._state.close = price
         self._state.volume += volume
+        self._last_known_price = price
         self._state.last_received_at = received_at
         self._state.last_source_timestamp = timestamp
 
