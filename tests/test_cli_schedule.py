@@ -150,6 +150,38 @@ def test_schedule_loop_defaults():
     assert args.schedule_command == "loop"
     assert args.interval_seconds == 60.0
     assert args.max_ticks is None
+    assert args.now is None
+
+
+def test_schedule_loop_now_flag_reaches_every_tick(tmp_path, capsys):
+    """Real gap found via a genuine weekend regression-suite run (2026-09-05
+    -- a real Saturday): `loop` had no --now override at all, unlike
+    `tick`, so any test asserting a tick actually ran was silently
+    dependent on whatever real wall-clock day/time the suite happened to
+    execute on. Closed by adding the same --now `tick` already had. This
+    test proves the flag genuinely reaches run_tick (a known trading-hours
+    timestamp ticks and runs), independent of what day it is for real."""
+    args = parse_args([
+        "schedule", "loop", "--symbols", "AAPL", "--benchmark", "", "--max-ticks", "1", "--interval-seconds", "0",
+        "--now", _TRADING_TIME, *_db_args(tmp_path),
+    ])
+    run_schedule_command(args)
+
+    output = capsys.readouterr().out
+    assert "[RAN] Slot 'intraday' completed" in output
+
+
+def test_schedule_loop_now_flag_correctly_skips_on_a_real_weekend_timestamp(tmp_path, capsys):
+    weekend = "2026-09-05T11:00:00+05:30"  # Saturday
+    args = parse_args([
+        "schedule", "loop", "--symbols", "AAPL", "--max-ticks", "1", "--interval-seconds", "0",
+        "--now", weekend, *_db_args(tmp_path),
+    ])
+    run_schedule_command(args)
+
+    output = capsys.readouterr().out
+    assert "[SKIPPED]" in output
+    assert "trading day" in output
 
 
 def test_schedule_status_defaults():
@@ -223,9 +255,11 @@ def test_schedule_loop_stops_after_max_ticks_without_sleeping(tmp_path, capsys, 
     expected to SKIP, proving the loop really ticks more than once."""
     slept = []
     monkeypatch.setattr("main.time.sleep", lambda seconds: slept.append(seconds))
-    # Freeze "now" for every tick inside the loop by monkeypatching datetime.now via IST-aware fixed clock is
-    # not directly supported by the CLI (no --now for loop, by design -- loop uses the real clock every
-    # tick). Exercise it with the real clock instead; the assertion only needs "it ticked twice and slept once".
+    # `loop` now supports --now too (added alongside the fix for the
+    # weekend-flakiness gap this test file's own paper-execute test hit),
+    # but this test only needs "it ticked twice and slept once" -- the
+    # real clock is exercised here deliberately, not frozen, since that
+    # property holds regardless of what real time it is.
     args = parse_args(["schedule", "loop", "--symbols", "AAPL", "--benchmark", "", "--max-ticks", "2", "--interval-seconds", "5", *_db_args(tmp_path)])
     run_schedule_command(args)
 
@@ -360,14 +394,27 @@ def test_schedule_loop_paper_execute_on_prints_honest_warning_not_false_safety_c
     Uses a custom always-due ScheduleConfig (see test_scheduler_runner.py's
     own test_custom_schedule_config_is_honored for the same pattern) rather
     than relying on the built-in schedule's real time-of-day windows --
-    found via self-audit: `schedule loop` has no `--now` override (by
-    design, for genuine unattended operation), so a test asserting a real
-    submission happened was silently dependent on whatever real wall-clock
-    time the suite happened to run at, and would spuriously fail outside
-    the built-in schedule's 09:15-15:30 IST shadow_run windows (reproduced:
-    this test genuinely failed, unrelated to critic wiring, once real time
-    crossed 15:30 IST during this session -- confirmed by running it
-    against the pre-critic-wiring commit at the same real time)."""
+    found via self-audit: `schedule loop` used to have no `--now` override
+    (by design, for genuine unattended operation), so a test asserting a
+    real submission happened was silently dependent on whatever real
+    wall-clock time the suite happened to run at, and would spuriously
+    fail outside the built-in schedule's 09:15-15:30 IST shadow_run
+    windows (reproduced: this test genuinely failed, unrelated to critic
+    wiring, once real time crossed 15:30 IST during this session --
+    confirmed by running it against the pre-critic-wiring commit at the
+    same real time).
+
+    SECOND real gap found the same way (weekend hardening regression run,
+    2026-09-05 -- a genuine Saturday): the always-due schedule config
+    only bypasses the SLOT's own after/before window, not run_tick's
+    OWN separate, unconditional current_market_session(...).is_weekday
+    gate -- which `loop` had no way to override at all, so this test
+    would ALSO spuriously fail every real weekend regardless of the
+    config fix above. Closed by adding the same `--now` override `tick`
+    already had to `loop` too (main.py's loop_parser/`_run_tick_from_args`
+    call site) -- verified: --max-ticks 1 makes one tick's worth of
+    "now" sufficient, no time-advancement-across-ticks concern for this
+    test-only escape hatch."""
     config_path = tmp_path / "always_due_schedule.yaml"
     config_path.write_text("slots:\n  - name: always_due\n    after: \"00:00\"\n    before: null\n    frequency_minutes: null\n    action: shadow_run\n")
 
@@ -376,7 +423,7 @@ def test_schedule_loop_paper_execute_on_prints_honest_warning_not_false_safety_c
     args = parse_args([
         "schedule", "loop", "--symbols", "AAPL", "--benchmark", "", "--max-ticks", "1", "--interval-seconds", "0",
         "--initial-capital", "20000", "--paper-execute", "--paper-db", str(paper_db), "--state-db", str(state_db),
-        "--config", str(config_path),
+        "--config", str(config_path), "--now", _TRADING_TIME,
         *_db_args(tmp_path),
     ])
     run_schedule_command(args)

@@ -2171,6 +2171,7 @@ def run_schedule_command(args: argparse.Namespace) -> None:
         return
 
     if args.schedule_command == "loop":
+        now = datetime.fromisoformat(args.now) if args.now else None
         store = SchedulerRunStore(run_db_path)
         print("=" * 70)
         print("SCHEDULER LOOP -- CONTINUOUS, EXPLICIT MODE (Ctrl+C to stop cleanly)")
@@ -2187,7 +2188,7 @@ def run_schedule_command(args: argparse.Namespace) -> None:
         try:
             while args.max_ticks is None or ticks < args.max_ticks:
                 try:
-                    result = _run_tick_from_args(args, schedule_config, store)
+                    result = _run_tick_from_args(args, schedule_config, store, now=now)
                     _print_tick_result(result)
                 except KeyboardInterrupt:
                     raise
@@ -2775,6 +2776,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     _add_schedule_common_args(loop_parser)
     loop_parser.add_argument("--interval-seconds", type=float, default=60.0, help="Seconds to sleep between ticks (default: 60).")
     loop_parser.add_argument("--max-ticks", type=int, default=None, help="Stop after this many ticks (default: run until Ctrl+C).")
+    loop_parser.add_argument("--now", type=str, default=None, help="ISO 8601 datetime to evaluate EVERY tick against instead of the real current time -- for deterministic tests only (same purpose as `schedule tick`'s own --now). Never pass this for genuine unattended operation.")
 
     status_parser = schedule_subparsers.add_parser("status", help="Read-only: print recent scheduler run history (audit trail).")
     status_parser.add_argument("--run-db", type=str, default=None, help=f"SQLite scheduler-run-history path (default: {DEFAULT_SCHEDULER_DB_PATH}).")
