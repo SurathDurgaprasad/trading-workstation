@@ -45,7 +45,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime", "experiment", "hypothesis-registry", "cache-status")
+_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime", "experiment", "hypothesis-registry", "cache-status", "readiness-check")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -2488,6 +2488,70 @@ def run_cache_status_command(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+# `readiness-check` -- Strategy science Phase 14 (Monday live validation
+# plan). A STRUCTURAL pre-flight check only -- it verifies configuration
+# and leftover state, never the live feed itself (that requires an actual
+# market session; see docs/MONDAY_LIVE_VALIDATION_PLAN.md). Nothing this
+# command prints may be described as "LIVE MARKET VERIFIED" -- only as
+# "ready to attempt a live session," a narrower, honest claim.
+# --------------------------------------------------------------------------
+
+
+def run_readiness_check_command(args: argparse.Namespace) -> None:
+    import live.workstation as workstation
+    from live.dhan.config import DhanCredentialsMissingError, load_dhan_credentials
+    from live.dhan.market_session import current_market_session
+
+    print("=" * 70)
+    print("PRE-FLIGHT READINESS CHECK (structural only -- NOT a live-feed test)")
+    print("=" * 70)
+
+    exit_code = 0
+
+    try:
+        load_dhan_credentials()
+        print("[PASS] Dhan credentials (DHAN_CLIENT_ID / DHAN_ACCESS_TOKEN) are configured.")
+    except DhanCredentialsMissingError as exc:
+        print(f"[FAIL] {exc}")
+        exit_code = 1
+
+    session = current_market_session()
+    print(
+        f"[INFO] Market session right now: {session.state.value} (as of {session.as_of_ist.strftime('%Y-%m-%d %H:%M:%S %Z')}). "
+        "No exchange holiday calendar is integrated -- verify the target date isn't a market holiday yourself."
+    )
+
+    kill_status = workstation.get_kill_switch_status()
+    if kill_status["active"]:
+        print(f"[WARN] Kill switch is currently ACTIVE (reason: {kill_status['reason']!r}, since {kill_status['activated_at']}). Reset it first if that wasn't intentional.")
+    else:
+        print("[PASS] Kill switch is INACTIVE.")
+
+    pending = workstation.get_pending_approvals()  # already filtered to PENDING_HUMAN_APPROVAL only, see live/state_store.py's list_pending()
+    if pending:
+        print(f"[WARN] {len(pending)} pending approval(s) left over from a prior session -- review via the dashboard before starting a fresh one.")
+    else:
+        print("[PASS] No unresolved pending approvals left over from a prior session.")
+
+    if args.symbols:
+        from backtesting.cache import report_cache_staleness
+
+        symbols = [s for s in args.symbols.split(",") if s.strip()]
+        records = report_cache_staleness(symbols)
+        stale = [r for r in records if r.age_days is None or r.age_days > 7]
+        if stale:
+            print(f"[INFO] {len(stale)}/{len(records)} symbol(s) have historical cache data >7 days old or never cached -- irrelevant to the LIVE feed itself (which never reads this cache), but relevant if also running any backtest comparison the same day.")
+        else:
+            print(f"[PASS] Historical cache data for all {len(records)} given symbol(s) is <=7 days old.")
+
+    print()
+    print("This is a STRUCTURAL check only. It does NOT verify the live WebSocket feed, order")
+    print("routing, or fill behavior -- those can only be verified during an actual market session.")
+    if exit_code:
+        sys.exit(exit_code)
+
+
+# --------------------------------------------------------------------------
 # `schedule` -- Phase 28 operational scheduling: makes `shadow-run` (and
 # post-market evaluate/learn) capable of running unattended, without
 # reimplementing any of that orchestration -- see scheduler/runner.py's
@@ -3003,6 +3067,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     cache_status_parser.add_argument("--interval", type=str, default="1d", help="Bar interval to check (default: 1d).")
     cache_status_parser.add_argument("--stale-after-days", type=float, default=30.0, help="Age threshold (days) above which a symbol is flagged STALE (default: 30).")
 
+    readiness_check_parser = subparsers.add_parser(
+        "readiness-check",
+        help=(
+            "Strategy science Phase 14: STRUCTURAL pre-flight check (credentials configured, kill switch "
+            "state, leftover pending approvals, cache freshness) before attempting a live paper-live "
+            "session. Does NOT verify the live feed itself -- that requires an actual market session."
+        ),
+    )
+    readiness_check_parser.add_argument("--symbols", type=str, default=None, help="Optional comma-separated symbols to also check historical cache freshness for.")
+
     scan_parser = subparsers.add_parser(
         "scan",
         help=(
@@ -3367,6 +3441,8 @@ def main() -> None:
             run_universe_command(args)
         elif args.command == "cache-status":
             run_cache_status_command(args)
+        elif args.command == "readiness-check":
+            run_readiness_check_command(args)
         elif args.command == "regime":
             run_regime_command(args)
         elif args.command == "experiment":

@@ -11,6 +11,7 @@ from main import (
     run_paper_command,
     run_paper_live_command,
     run_predict_command,
+    run_readiness_check_command,
     run_research_command,
     run_review_command,
     run_scan_command,
@@ -161,6 +162,59 @@ def test_cache_status_command_reports_never_cached_for_an_unknown_symbol(capsys)
     run_cache_status_command(args)
     captured = capsys.readouterr()
     assert "never cached" in captured.out
+
+
+def test_readiness_check_subcommand_defaults():
+    args = parse_args(["readiness-check"])
+    assert args.command == "readiness-check"
+    assert args.symbols is None
+
+
+def test_readiness_check_command_fails_when_credentials_are_missing(monkeypatch, capsys):
+    monkeypatch.delenv("DHAN_CLIENT_ID", raising=False)
+    monkeypatch.delenv("DHAN_ACCESS_TOKEN", raising=False)
+    args = parse_args(["readiness-check"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_readiness_check_command(args)
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "[FAIL]" in captured.out
+
+
+def test_readiness_check_command_passes_credentials_check_when_configured(monkeypatch, capsys, tmp_path):
+    import live.workstation as workstation_module
+
+    monkeypatch.setenv("DHAN_CLIENT_ID", "fake-client-id")
+    monkeypatch.setenv("DHAN_ACCESS_TOKEN", "fake-access-token")
+    monkeypatch.setattr(workstation_module, "LIVE_STATE_DB_PATH", tmp_path / "live_state.db")
+    args = parse_args(["readiness-check"])
+
+    run_readiness_check_command(args)  # must not raise/exit
+
+    captured = capsys.readouterr()
+    assert "[PASS] Dhan credentials" in captured.out
+    assert "[PASS] Kill switch is INACTIVE." in captured.out
+    assert "[PASS] No unresolved pending approvals" in captured.out
+
+
+def test_readiness_check_command_warns_on_an_active_kill_switch(monkeypatch, capsys, tmp_path):
+    import live.workstation as workstation_module
+
+    monkeypatch.setenv("DHAN_CLIENT_ID", "fake-client-id")
+    monkeypatch.setenv("DHAN_ACCESS_TOKEN", "fake-access-token")
+    monkeypatch.setattr(workstation_module, "LIVE_STATE_DB_PATH", tmp_path / "live_state.db")
+    state_store = workstation_module.new_live_state_store()
+    state_store.activate_kill_switch(reason="left on from last session")
+    state_store.close()
+
+    args = parse_args(["readiness-check"])
+    run_readiness_check_command(args)  # must not raise -- an active kill switch is a WARN, not a FAIL
+
+    captured = capsys.readouterr()
+    assert "[WARN] Kill switch is currently ACTIVE" in captured.out
+    assert "left on from last session" in captured.out
 
 
 def test_backtest_subcommand_overrides():

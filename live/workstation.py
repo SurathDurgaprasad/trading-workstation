@@ -129,6 +129,21 @@ def get_pending_approvals() -> list:
         state_store.close()
 
 
+def get_kill_switch_status() -> dict:
+    """Strategy science Phase 14 (Monday live validation plan) — never
+    returns None: an absent/never-touched state store truthfully means
+    "never activated" (LiveStateStore's own schema creates an empty
+    kill_switch table with no row), so {"active": False, ...} is the
+    correct, non-fabricated answer even before any paper-live/live-sim
+    session has ever run. Read fresh on every call, no caching."""
+    state_store = new_live_state_store()
+    try:
+        active, activated_at, reason = state_store.kill_switch_state()
+    finally:
+        state_store.close()
+    return {"active": active, "activated_at": activated_at, "reason": reason}
+
+
 def get_positions() -> list:
     return [p for p in get_live_engine().store.list_positions() if p.status.value == "OPEN"]
 
