@@ -70,6 +70,32 @@ def _market_status_banner() -> str:
     )
 
 
+def _broker_connectivity_banner() -> str:
+    """Real gap found via news/market-intelligence architecture audit: the
+    page-wide banner used to be a HARDCODED static string ("NOT connected
+    to a live broker or feed"), unconditionally shown even while a genuine
+    `paper-live --source dhan` session has a real, on_open-verified
+    WebSocket connected -- the banner and the feed-status table just below
+    it could contradict each other. Reads live.state_store's own
+    feed_status rows (workstation.get_feed_status(), a LOCAL SQLite read,
+    not a network call -- consistent with _market_status_banner()'s own
+    "zero I/O to a live feed on page load" rule) to state the CURRENT
+    truth instead of a fixed claim.
+
+    "No real order can ever be placed here" stays unconditional -- that is
+    a structural guarantee (no execute_trade/place_order/broker-credential
+    path exists anywhere in this codebase, see this module's own
+    docstring), true regardless of feed source, and is never the part that
+    was wrong."""
+    feed_status = workstation.get_feed_status()
+    live_connected = any(r.status == "LIVE" and (r.connection_state or "").upper() == "CONNECTED" for r in feed_status)
+    if live_connected:
+        connectivity_text = "A LIVE broker feed IS connected (see the feed status table below)."
+    else:
+        connectivity_text = "NOT connected to a live broker or feed."
+    return f'<div class="banner">SIMULATED PAPER TRADING &mdash; {connectivity_text} No real order can ever be placed here.</div>'
+
+
 def _page(body: str) -> str:
     return f"""<!doctype html>
 <html>
@@ -102,7 +128,7 @@ def _page(body: str) -> str:
 </style>
 </head>
 <body>
-<div class="banner">SIMULATED PAPER TRADING &mdash; NOT connected to a live broker or feed. No real order can ever be placed here.</div>
+{_broker_connectivity_banner()}
 {_market_status_banner()}
 {body}
 <p class="muted">Auto-refreshes every {_REFRESH_SECONDS}s. This page does not advance the market itself &mdash;

@@ -124,6 +124,60 @@ def test_index_shows_real_feed_status_once_written(client):
     assert "CONNECTED" in response.text
 
 
+def test_banner_says_not_connected_when_no_feed_status_exists(client):
+    response = client.get("/")
+    assert "NOT connected to a live broker or feed" in response.text
+    assert "No real order can ever be placed here" in response.text
+
+
+def test_banner_says_not_connected_when_only_a_mock_feed_is_present(client):
+    import live.workstation as workstation_module
+    from datetime import datetime, timezone
+
+    state_store = workstation_module.new_live_state_store()
+    now = datetime.now(timezone.utc)
+    state_store.save_feed_status(symbol="AAPL", source="MOCK", status="SIMULATED", bar_timestamp=now, received_at=now, connection_state="CONNECTED")
+    state_store.close()
+
+    response = client.get("/")
+    assert "NOT connected to a live broker or feed" in response.text
+    assert "No real order can ever be placed here" in response.text
+
+
+def test_banner_reflects_a_genuinely_connected_live_dhan_feed(client):
+    # Real gap found via news/market-intelligence architecture audit: the
+    # banner used to be a hardcoded static string, contradicting the feed
+    # status table whenever a real Dhan WebSocket was actually connected.
+    import live.workstation as workstation_module
+    from datetime import datetime, timezone
+
+    state_store = workstation_module.new_live_state_store()
+    now = datetime.now(timezone.utc)
+    state_store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, connection_state="CONNECTED")
+    state_store.close()
+
+    response = client.get("/")
+    assert "A LIVE broker feed IS connected" in response.text
+    assert "NOT connected to a live broker or feed" not in response.text
+    # The one part of the claim that must NEVER change, regardless of feed state.
+    assert "No real order can ever be placed here" in response.text
+
+
+def test_banner_stays_not_connected_when_a_live_source_is_disconnected(client):
+    # A LIVE-status row whose connection has since dropped must not claim
+    # current connectivity -- connection_state, not just status, gates the claim.
+    import live.workstation as workstation_module
+    from datetime import datetime, timezone
+
+    state_store = workstation_module.new_live_state_store()
+    now = datetime.now(timezone.utc)
+    state_store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, connection_state="DISCONNECTED")
+    state_store.close()
+
+    response = client.get("/")
+    assert "NOT connected to a live broker or feed" in response.text
+
+
 def test_index_shows_a_pending_signal_with_approve_reject_buttons(client):
     signal_id = _drive_one_pending_approval()
     response = client.get("/")
