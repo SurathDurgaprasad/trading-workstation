@@ -3,7 +3,13 @@ from datetime import datetime, timedelta
 import pytest
 
 from backtesting.trade import ExitReason, Trade
-from backtesting.universe import UniverseBacktestResult, per_trade_returns, run_universe_backtest
+from backtesting.universe import (
+    UniverseBacktestResult,
+    UniverseTemporalResult,
+    per_trade_returns,
+    run_universe_backtest,
+    run_universe_backtest_by_period,
+)
 from market.data_provider import MarketDataError, OHLCV, OHLCVBar
 from strategy.signal import ReasonCode, Side, Signal
 
@@ -217,3 +223,86 @@ def test_backtest_universe_command_prints_forensics_sections(monkeypatch, capsys
     assert "MAXIMUM FAVORABLE/ADVERSE EXCURSION" in output
     assert "Trades analyzed:               1" in output
     assert "POOLED VERDICT" in output
+
+
+# --- run_universe_backtest_by_period (Phase 2, temporal robustness) ------------
+
+
+def _long_raw_bars(n: int = 200, *, start: float = 100.0, step: float = 0.3) -> list[OHLCVBar]:
+    """Enough bars for indicator warm-up AND a non-trivial 60/20/20
+    chronological split (backtesting.splits.split_periods) -- the short
+    5-bar _raw_bars() this file already uses for the full-period tests
+    is far too little for run_full_backtest's own split to do anything
+    meaningful."""
+    bars = []
+    t0 = datetime(2026, 1, 1)
+    for i in range(n):
+        close = start + step * i
+        bars.append(OHLCVBar(
+            timestamp=t0 + timedelta(days=i), open=close, high=close + 1.0, low=close - 1.0,
+            close=close, volume=1_000_000.0,
+        ))
+    return bars
+
+
+class _LongFakeProvider:
+    def __init__(self, good_symbols: set[str]):
+        self._good_symbols = good_symbols
+
+    def fetch_ohlcv(self, symbol, *, period="5y", interval="1d"):
+        if symbol not in self._good_symbols:
+            raise MarketDataError(f"no data for {symbol}")
+        return OHLCV(symbol=symbol, interval=interval, bars=_long_raw_bars())
+
+
+@pytest.fixture
+def _fake_runner_provider(monkeypatch):
+    """run_universe_backtest_by_period calls backtesting.runner.
+    run_full_backtest, which imports get_market_data_provider at ITS OWN
+    module top (a separate already-bound reference from backtesting.
+    universe's own, per that module's own established pattern) -- the
+    patch target here is deliberately backtesting.runner, not
+    backtesting.universe."""
+    import backtesting.runner as runner_module
+
+    def _apply(good_symbols: set[str]):
+        monkeypatch.setattr(runner_module, "get_market_data_provider", lambda: _LongFakeProvider(good_symbols))
+
+    return _apply
+
+
+def test_run_universe_backtest_by_period_pools_across_symbols(_fake_runner_provider):
+    _fake_runner_provider({"AAA", "BBB"})
+    strategy = _OneShotStrategy(at_index=5)
+
+    result = run_universe_backtest_by_period(["AAA", "BBB"], strategy=strategy, use_cache=False, initial_capital=1_000.0)
+
+    assert isinstance(result, UniverseTemporalResult)
+    assert result.failed_symbols == {}
+    # Wiring/pooling is what's under test -- the trade LISTS must exist
+    # (even if empty for this short-lived strategy) and never raise.
+    assert isinstance(result.development_trades, list)
+    assert isinstance(result.validation_trades, list)
+    assert isinstance(result.out_of_sample_trades, list)
+
+
+def test_run_universe_backtest_by_period_isolates_a_failing_symbol(_fake_runner_provider):
+    _fake_runner_provider({"AAA"})
+    strategy = _OneShotStrategy(at_index=5)
+
+    result = run_universe_backtest_by_period(["AAA", "BADSYMBOL"], strategy=strategy, use_cache=False, initial_capital=1_000.0)
+
+    assert "BADSYMBOL" in result.failed_symbols
+    assert "no data for BADSYMBOL" in result.failed_symbols["BADSYMBOL"]
+
+
+def test_run_universe_backtest_by_period_empty_universe_produces_empty_result(_fake_runner_provider):
+    _fake_runner_provider(set())
+    strategy = _OneShotStrategy(at_index=5)
+
+    result = run_universe_backtest_by_period([], strategy=strategy, use_cache=False)
+
+    assert result.development_trades == []
+    assert result.validation_trades == []
+    assert result.out_of_sample_trades == []
+    assert result.failed_symbols == {}

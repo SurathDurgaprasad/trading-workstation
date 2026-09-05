@@ -400,6 +400,47 @@ def run_backtest_universe_command(args: argparse.Namespace) -> None:
         print("\n  Sample sizes below 30 per bucket (learning.profitability's own established floor)")
         print("  make any single-bucket verdict directional evidence only, not proof.")
 
+    if args.temporal_robustness:
+        from backtesting.universe import run_universe_backtest_by_period
+
+        temporal_result = run_universe_backtest_by_period(
+            universe.symbols, strategy=strategy, period=args.period, interval=args.interval,
+            initial_capital=args.initial_capital, cost_model=cost_model,
+        )
+
+        print("\n" + "-" * 50)
+        print("TEMPORAL ROBUSTNESS (Phase 2 -- is performance consistent across time, or overfit)")
+        print("-" * 50 + "\n")
+        if temporal_result.failed_symbols:
+            print(f"({len(temporal_result.failed_symbols)} symbol(s) failed and were excluded, not silently dropped)")
+
+        period_reports = {}
+        for label, trades in (
+            ("Development", temporal_result.development_trades),
+            ("Validation", temporal_result.validation_trades),
+            ("Out-of-Sample", temporal_result.out_of_sample_trades),
+        ):
+            returns = per_trade_returns(trades)
+            period_report = compute_profitability_report_from_returns(returns)
+            period_reports[label] = period_report
+            win_rate_text = f"{period_report.win_rate:.1%} (95% CI {period_report.win_rate_ci_low:.1%}-{period_report.win_rate_ci_high:.1%})" if period_report.win_rate is not None else "N/A"
+            mean_ci_text = f"[{period_report.mean_return_ci_low:+.2%}, {period_report.mean_return_ci_high:+.2%}]" if period_report.mean_return_ci_low is not None else "N/A"
+            pf_text = f"{period_report.profit_factor:.2f}" if period_report.profit_factor is not None else "N/A"
+            print(f"{label}:")
+            print(f"  Trades: {period_report.sample_size}, win rate: {win_rate_text}")
+            print(f"  Expectancy: {f'{period_report.expectancy:+.2%}' if period_report.expectancy is not None else 'N/A'}, mean return 95% CI: {mean_ci_text}, profit factor: {pf_text}")
+            print(f"  Verdict: {period_report.verdict.value}\n")
+
+        dev_verdict = period_reports["Development"].verdict.value
+        val_verdict = period_reports["Validation"].verdict.value
+        oos_verdict = period_reports["Out-of-Sample"].verdict.value
+        if dev_verdict == "POSITIVE_PERFORMANCE" and oos_verdict in ("NEGATIVE_PERFORMANCE", "STATISTICALLY_MEANINGLESS"):
+            print("  INTERPRETATION: development is positive but validation/out-of-sample is not -- classic overfitting signature.")
+        elif dev_verdict == oos_verdict == val_verdict:
+            print(f"  INTERPRETATION: consistent verdict ({dev_verdict}) across all three periods.")
+        else:
+            print("  INTERPRETATION: verdicts differ across periods -- treat as temporally unstable, not proof of an edge in any one period.")
+
     print("\n" + "-" * 50)
     print("\nIMPORTANT:")
     print("This is historical simulation across a fixed universe, not evidence of future profitability.")
@@ -2520,6 +2561,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "OWN entry time (backtesting.regime, look-ahead-safe by construction) and report pooled "
             "profitability per regime bucket -- answers whether the strategy fails everywhere or "
             "only under specific market conditions."
+        ),
+    )
+    backtest_universe_parser.add_argument(
+        "--temporal-robustness", action="store_true",
+        help=(
+            "Strategy science Phase 2: pool each symbol's OWN development/validation/out-of-sample "
+            "trades (backtesting.runner's existing 60/20/20 chronological split, reused verbatim) "
+            "across the universe and report a verdict per period -- detects overfitting (development "
+            "positive, validation/OOS negative) and temporal instability."
         ),
     )
     backtest_universe_parser.add_argument(

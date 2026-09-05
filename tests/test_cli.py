@@ -55,11 +55,17 @@ def test_backtest_universe_subcommand_defaults():
     assert args.cost_model == "default"
     assert args.random_baseline_iterations == 0
     assert args.regime_analysis is False
+    assert args.temporal_robustness is False
 
 
 def test_backtest_universe_subcommand_accepts_regime_analysis_flag():
     args = parse_args(["backtest-universe", "--symbols", "AAPL", "--regime-analysis"])
     assert args.regime_analysis is True
+
+
+def test_backtest_universe_subcommand_accepts_temporal_robustness_flag():
+    args = parse_args(["backtest-universe", "--symbols", "AAPL", "--temporal-robustness"])
+    assert args.temporal_robustness is True
 
 
 def test_backtest_universe_subcommand_accepts_random_baseline_iterations():

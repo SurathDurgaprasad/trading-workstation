@@ -10,14 +10,16 @@ Wilson-CI/mean-CI statistical machinery already used for prediction
 evidence, so this project states one statistical standard for "is there
 an edge," not two competing ones in two different places.
 
-Deliberately runs each symbol's FULL period only (not the per-symbol
-train/development/validation/out-of-sample split backtesting.runner
-already provides) -- that split answers a different question ("is this
-specific symbol's forward performance still holding up"), tested and
-available via `backtest --symbol X`. This module answers "does this
-strategy show ANY edge anywhere, pooled across the whole available
-universe" -- a one-shot scientific question, not a per-symbol
-development-process check.
+run_universe_backtest runs each symbol's FULL period only, pooled --
+"does this strategy show ANY edge anywhere, pooled across the whole
+available universe", a one-shot scientific question. Strategy science
+Phase 2 (temporal robustness) added run_universe_backtest_by_period,
+which instead pools each symbol's OWN development/validation/out-of-
+sample split (reusing backtesting.runner.run_full_backtest's existing
+60/20/20 chronological split verbatim, never reimplemented) across the
+universe, one pooled list per period -- "is whatever edge exists
+CONSISTENT across time, or does it collapse from one period to the
+next" -- a different question from the full-period pooling above.
 
 One bad/missing symbol (a cache miss, an unparseable series) must never
 abort scoring the rest of the universe -- same per-symbol isolation
@@ -99,5 +101,56 @@ def run_universe_backtest(
             initial_capital=initial_capital,
             risk_config=risk_config,
         )
+
+    return result
+
+
+@dataclass
+class UniverseTemporalResult:
+    """Strategy science, Phase 2 (temporal robustness) -- pools each
+    symbol's OWN development/validation/out-of-sample trades (from
+    backtesting.runner.run_full_backtest's existing, already-tested
+    chronological 60/20/20 split -- reused verbatim, not reimplemented)
+    across the whole universe, one list per period. Answers a DIFFERENT
+    question than run_universe_backtest's own full-period pooling: not
+    "does any edge exist anywhere", but "is whatever edge (or lack of
+    one) exists CONSISTENT across time, or does it collapse/reverse from
+    one period to the next" -- the mission's own explicit overfitting
+    check (development positive + validation/OOS negative is the
+    textbook overfitting signature)."""
+
+    development_trades: list[Trade] = field(default_factory=list)
+    validation_trades: list[Trade] = field(default_factory=list)
+    out_of_sample_trades: list[Trade] = field(default_factory=list)
+    failed_symbols: dict[str, str] = field(default_factory=dict)
+
+
+def run_universe_backtest_by_period(
+    symbols: list[str],
+    *,
+    strategy: Strategy,
+    period: str = "5y",
+    interval: str = "1d",
+    initial_capital: float = 100_000.0,
+    cost_model: CostModel | None = None,
+    risk_config: RiskConfig | None = None,
+    use_cache: bool = True,
+) -> UniverseTemporalResult:
+    from backtesting.runner import run_full_backtest
+
+    result = UniverseTemporalResult()
+    for symbol in symbols:
+        try:
+            run_result = run_full_backtest(
+                symbol=symbol, strategy=strategy, period=period, interval=interval,
+                initial_capital=initial_capital, cost_model=cost_model, risk_config=risk_config, use_cache=use_cache,
+            )
+        except (MarketDataError, ValueError) as exc:
+            result.failed_symbols[symbol] = str(exc)
+            continue
+
+        result.development_trades.extend(run_result.development.trades)
+        result.validation_trades.extend(run_result.validation.trades)
+        result.out_of_sample_trades.extend(run_result.out_of_sample.trades)
 
     return result
