@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -64,3 +65,60 @@ class CachedMarketDataProvider:
             "bar_count": len(frame),
         }
         self._meta_path(csv_path).write_text(json.dumps(meta, indent=2))
+
+
+@dataclass(frozen=True)
+class CacheStalenessRecord:
+    """Strategy science Phase 12 (data source architecture review) --
+    CachedMarketDataProvider's own docstring already admits "there is no
+    freshness/invalidation logic here"; it WRITES retrieved_at into each
+    symbol's meta.json but nothing ever READS it back to answer "how old
+    is the data every backtest/experiment this session ran against."
+    This is a read-only diagnostic over that already-persisted metadata
+    -- it does not change caching behavior (still serves the cached range
+    as-is on a hit, unchanged) -- so a user or a future session can see
+    cache age at a glance instead of manually opening meta.json files."""
+
+    symbol: str
+    interval: str
+    retrieved_at: datetime | None
+    """None if the meta.json file is missing or unreadable -- never
+    fabricated as "now" or any other assumed value."""
+    data_end: datetime | None
+    """The last bar's own timestamp, from meta.json's "end" field --
+    None under the same conditions as retrieved_at."""
+    age_days: float | None
+    """Wall-clock days since retrieved_at, computed against the moment
+    this report was generated. None when retrieved_at is None."""
+
+
+def report_cache_staleness(
+    symbols: list[str], *, interval: str = "1d", cache_root: Path = CACHE_ROOT,
+) -> list[CacheStalenessRecord]:
+    """One record per requested symbol, in the SAME order given -- a
+    symbol with no cache entry at all (never fetched, or the file was
+    deleted) gets a record with every field None rather than being
+    silently skipped, so a caller always gets exactly len(symbols)
+    records back."""
+    now = datetime.now(timezone.utc)
+    records = []
+    for symbol in symbols:
+        normalized = symbol.strip().upper()
+        meta_path = (cache_root / normalized / f"{interval}.csv").with_suffix(".meta.json")
+
+        retrieved_at = None
+        data_end = None
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+                if meta.get("retrieved_at"):
+                    retrieved_at = datetime.fromisoformat(meta["retrieved_at"])
+                if meta.get("end"):
+                    data_end = datetime.fromisoformat(meta["end"])
+            except (json.JSONDecodeError, ValueError):
+                pass  # malformed meta.json -- report as unknown (None), never a fabricated age
+
+        age_days = (now - retrieved_at).total_seconds() / 86400 if retrieved_at is not None else None
+        records.append(CacheStalenessRecord(symbol=normalized, interval=interval, retrieved_at=retrieved_at, data_end=data_end, age_days=age_days))
+
+    return records

@@ -1,9 +1,11 @@
 import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from backtesting.cache import CachedMarketDataProvider
+from backtesting.cache import CachedMarketDataProvider, report_cache_staleness
 from market.data_provider import OHLCV
 
 
@@ -83,3 +85,78 @@ def test_symbols_are_cached_independently(tmp_path):
     assert inner_b.calls == 1
     assert (tmp_path / "AAA" / "1d.csv").exists()
     assert (tmp_path / "BBB" / "1d.csv").exists()
+
+
+# --- report_cache_staleness ---------------------------------------------
+
+
+def test_staleness_report_reflects_a_real_cached_entrys_actual_age(tmp_path):
+    inner = _CountingProvider(_sample_ohlcv("TEST"))
+    cached = CachedMarketDataProvider(inner, cache_root=tmp_path)
+    cached.fetch_ohlcv("TEST", interval="1d")
+
+    records = report_cache_staleness(["TEST"], interval="1d", cache_root=tmp_path)
+
+    assert len(records) == 1
+    record = records[0]
+    assert record.symbol == "TEST"
+    assert record.retrieved_at is not None
+    assert record.data_end is not None
+    assert record.age_days is not None
+    assert 0 <= record.age_days < 0.01  # just written, should be seconds old
+
+
+def test_staleness_report_backdates_correctly_for_an_older_entry(tmp_path):
+    inner = _CountingProvider(_sample_ohlcv("TEST"))
+    cached = CachedMarketDataProvider(inner, cache_root=tmp_path)
+    cached.fetch_ohlcv("TEST", interval="1d")
+
+    # Rewrite the meta.json's retrieved_at to simulate a cache entry
+    # fetched 45 days ago -- the report must reflect that real age, not
+    # "just now".
+    meta_path = tmp_path / "TEST" / "1d.meta.json"
+    meta = json.loads(meta_path.read_text())
+    meta["retrieved_at"] = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+    meta_path.write_text(json.dumps(meta))
+
+    records = report_cache_staleness(["TEST"], interval="1d", cache_root=tmp_path)
+
+    assert records[0].age_days == pytest.approx(45.0, abs=0.01)
+
+
+def test_staleness_report_returns_none_fields_for_a_symbol_never_cached():
+    records = report_cache_staleness(["NEVER_FETCHED"], interval="1d", cache_root=Path("/nonexistent-cache-root"))
+
+    assert len(records) == 1
+    record = records[0]
+    assert record.symbol == "NEVER_FETCHED"
+    assert record.retrieved_at is None
+    assert record.data_end is None
+    assert record.age_days is None
+
+
+def test_staleness_report_returns_one_record_per_symbol_in_the_same_order(tmp_path):
+    inner = _CountingProvider(_sample_ohlcv("AAA"))
+    cached = CachedMarketDataProvider(inner, cache_root=tmp_path)
+    cached.fetch_ohlcv("AAA", interval="1d")
+
+    records = report_cache_staleness(["AAA", "NEVER_FETCHED", "AAA"], interval="1d", cache_root=tmp_path)
+
+    assert [r.symbol for r in records] == ["AAA", "NEVER_FETCHED", "AAA"]
+    assert records[0].retrieved_at is not None
+    assert records[1].retrieved_at is None
+    assert records[2].retrieved_at is not None
+
+
+def test_staleness_report_handles_malformed_meta_json_without_crashing(tmp_path):
+    inner = _CountingProvider(_sample_ohlcv("TEST"))
+    cached = CachedMarketDataProvider(inner, cache_root=tmp_path)
+    cached.fetch_ohlcv("TEST", interval="1d")
+
+    meta_path = tmp_path / "TEST" / "1d.meta.json"
+    meta_path.write_text("{not valid json")
+
+    records = report_cache_staleness(["TEST"], interval="1d", cache_root=tmp_path)
+
+    assert records[0].retrieved_at is None
+    assert records[0].age_days is None

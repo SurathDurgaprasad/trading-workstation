@@ -45,7 +45,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime", "experiment", "hypothesis-registry")
+_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime", "experiment", "hypothesis-registry", "cache-status")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -2439,6 +2439,55 @@ def run_universe_command(args: argparse.Namespace) -> None:
 
 
 # --------------------------------------------------------------------------
+# `cache-status` -- Strategy science Phase 12 (data source architecture
+# review). backtesting.cache.CachedMarketDataProvider's own docstring
+# already admits "there is no freshness/invalidation logic here": a cache
+# hit serves the cached range as-is regardless of the requested period,
+# and nothing ever reads back the retrieved_at timestamp it writes. This
+# is a read-only diagnostic over that already-persisted metadata -- it
+# changes no caching behavior -- so a user can see at a glance how old the
+# data behind every backtest/experiment actually is.
+# --------------------------------------------------------------------------
+
+
+def run_cache_status_command(args: argparse.Namespace) -> None:
+    from backtesting.cache import CACHE_ROOT, report_cache_staleness
+
+    if args.symbols:
+        symbols = [s for s in args.symbols.split(",") if s.strip()]
+    elif CACHE_ROOT.exists():
+        symbols = sorted(d.name for d in CACHE_ROOT.iterdir() if d.is_dir())
+    else:
+        symbols = []
+
+    if not symbols:
+        print("cache-status: no symbols given and no cached symbols found under data/market/.")
+        return
+
+    records = report_cache_staleness(symbols, interval=args.interval)
+
+    print("=" * 78)
+    print(f"CACHE STALENESS (interval={args.interval}) -- {len(records)} symbol(s)")
+    print("=" * 78)
+    print(f"{'SYMBOL':16s} {'RETRIEVED (UTC)':26s} {'DATA END':26s} {'AGE (days)':10s} FLAG")
+    for r in sorted(records, key=lambda r: (r.age_days is None, -(r.age_days or 0))):
+        retrieved_text = r.retrieved_at.isoformat() if r.retrieved_at else "never cached"
+        end_text = r.data_end.isoformat() if r.data_end else "n/a"
+        if r.age_days is None:
+            age_text, flag = "n/a", ""
+        else:
+            age_text = f"{r.age_days:.1f}"
+            flag = "STALE (>30d)" if r.age_days > args.stale_after_days else ""
+        print(f"{r.symbol:16s} {retrieved_text:26s} {end_text:26s} {age_text:10s} {flag}")
+
+    stale_count = sum(1 for r in records if r.age_days is not None and r.age_days > args.stale_after_days)
+    never_cached_count = sum(1 for r in records if r.retrieved_at is None)
+    print()
+    print(f"{stale_count} symbol(s) stale (>{args.stale_after_days} days), {never_cached_count} never cached.")
+    print("Caching has NO automatic invalidation -- delete a symbol's data/market/<SYMBOL>/ files to force a refresh.")
+
+
+# --------------------------------------------------------------------------
 # `schedule` -- Phase 28 operational scheduling: makes `shadow-run` (and
 # post-market evaluate/learn) capable of running unattended, without
 # reimplementing any of that orchestration -- see scheduler/runner.py's
@@ -2942,6 +2991,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     universe_parser.add_argument("--with-dhan-ids", action="store_true", help="Also resolve each symbol's Dhan security ID via Dhan's public instrument master (one network download, no credentials required; default off).")
     universe_parser.add_argument("--refresh-instrument-map", action="store_true", help="Force a fresh download of Dhan's instrument master instead of reusing the local cache. Only used with --with-dhan-ids.")
 
+    cache_status_parser = subparsers.add_parser(
+        "cache-status",
+        help=(
+            "Strategy science Phase 12: report how old each symbol's cached market data is "
+            "(backtesting.cache.CachedMarketDataProvider has no freshness/invalidation logic -- a cache "
+            "hit is served as-is regardless of age). Read-only; changes no caching behavior."
+        ),
+    )
+    cache_status_parser.add_argument("--symbols", type=str, default=None, help="Comma-separated symbols to check. Default: every symbol currently cached under data/market/.")
+    cache_status_parser.add_argument("--interval", type=str, default="1d", help="Bar interval to check (default: 1d).")
+    cache_status_parser.add_argument("--stale-after-days", type=float, default=30.0, help="Age threshold (days) above which a symbol is flagged STALE (default: 30).")
+
     scan_parser = subparsers.add_parser(
         "scan",
         help=(
@@ -3304,6 +3365,8 @@ def main() -> None:
             run_schedule_command(args)
         elif args.command == "universe":
             run_universe_command(args)
+        elif args.command == "cache-status":
+            run_cache_status_command(args)
         elif args.command == "regime":
             run_regime_command(args)
         elif args.command == "experiment":

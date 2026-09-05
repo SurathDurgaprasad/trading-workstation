@@ -3,6 +3,7 @@ import pytest
 from main import (
     parse_args,
     run_backtest_universe_command,
+    run_cache_status_command,
     run_decide_command,
     run_evaluate_command,
     run_hypothesis_registry_command,
@@ -130,6 +131,36 @@ def test_backtest_universe_command_requires_symbols_or_watchlist_file():
     args = parse_args(["backtest-universe"])
     with pytest.raises(SystemExit):
         run_backtest_universe_command(args)
+
+
+def test_cache_status_subcommand_defaults():
+    args = parse_args(["cache-status"])
+    assert args.command == "cache-status"
+    assert args.symbols is None
+    assert args.interval == "1d"
+    assert args.stale_after_days == 30.0
+
+
+def test_cache_status_subcommand_accepts_symbols_and_overrides():
+    args = parse_args(["cache-status", "--symbols", "AAPL,RELIANCE.NS", "--interval", "1h", "--stale-after-days", "7"])
+    assert args.symbols == "AAPL,RELIANCE.NS"
+    assert args.interval == "1h"
+    assert args.stale_after_days == 7.0
+
+
+def test_cache_status_command_reports_a_real_cached_symbols_age(capsys):
+    args = parse_args(["cache-status", "--symbols", "AAPL"])
+    run_cache_status_command(args)
+    captured = capsys.readouterr()
+    assert "AAPL" in captured.out
+    assert "CACHE STALENESS" in captured.out
+
+
+def test_cache_status_command_reports_never_cached_for_an_unknown_symbol(capsys):
+    args = parse_args(["cache-status", "--symbols", "TOTALLY_MADE_UP_SYMBOL"])
+    run_cache_status_command(args)
+    captured = capsys.readouterr()
+    assert "never cached" in captured.out
 
 
 def test_backtest_subcommand_overrides():
