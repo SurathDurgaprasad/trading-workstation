@@ -355,6 +355,41 @@ def run_backtest_universe_command(args: argparse.Namespace) -> None:
             print("  -> A HIGH fraction means the real result is unremarkable vs. pure chance;")
             print("     a LOW fraction means entry timing itself carried real information.")
 
+    if args.execution_robustness_iterations > 0:
+        from backtesting.execution_robustness import run_execution_robustness_monte_carlo
+
+        exec_indicator_series_by_symbol: dict = {}
+        for symbol in result.per_symbol:
+            try:
+                exec_indicator_series_by_symbol[symbol] = compute_indicator_series(
+                    provider.fetch_ohlcv(symbol, period=args.period, interval=args.interval)
+                )
+            except (ValueError, MarketDataError):
+                continue
+
+        import dataclasses
+
+        exec_mc_result = run_execution_robustness_monte_carlo(
+            exec_indicator_series_by_symbol, strategy=strategy, iterations=args.execution_robustness_iterations,
+            initial_capital=args.initial_capital, cost_model=cost_model,
+        )
+        baseline_mean_return_pct = (sum(pooled_returns) / len(pooled_returns) * 100.0) if pooled_returns else None
+        exec_mc_result = dataclasses.replace(exec_mc_result, baseline_mean_return_pct=baseline_mean_return_pct)
+
+        print("\n" + "-" * 50)
+        print(f"MONTE CARLO EXECUTION ROBUSTNESS (Phase 8 -- {len(exec_mc_result.iterations)} iterations, randomized fills/slippage)")
+        print("-" * 50 + "\n")
+        exec_means = [it.mean_return_pct for it in exec_mc_result.iterations]
+        print(f"Baseline (unperturbed) pooled mean return: {baseline_mean_return_pct:+.2f}%" if baseline_mean_return_pct is not None else "Baseline pooled mean return: N/A")
+        if exec_means:
+            print(f"Iteration mean return range: [{min(exec_means):+.2f}%, {max(exec_means):+.2f}%], average {sum(exec_means) / len(exec_means):+.2f}%")
+        flip_fraction = exec_mc_result.fraction_flipping_sign_from_baseline
+        if flip_fraction is not None:
+            print(f"Fraction of iterations flipping sign from the baseline: {flip_fraction:.1%}")
+            print("  -> A HIGH fraction means the verdict is fragile to execution assumptions (missed fills,")
+            print("     delayed fills, slippage magnitude); a LOW fraction means it is robust to realistic")
+            print("     execution friction, with the SAME real signals and SAME real exit rule.")
+
     if args.regime_analysis:
         from backtesting.regime import group_trade_returns_by_regime
         from market_data.universe import exchange_for_symbol
@@ -2680,6 +2715,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "iterations performed at least as well as the real strategy. 0 (default) skips this -- "
             "opt-in because each iteration re-runs the full universe (~2-3s/iteration; 200-300 "
             "iterations is a reasonable range for a meaningful distribution)."
+        ),
+    )
+    backtest_universe_parser.add_argument(
+        "--execution-robustness-iterations", type=int, default=0,
+        help=(
+            "Strategy science Phase 8: run N Monte Carlo iterations with the REAL strategy's real "
+            "signals and real exit rule, but randomized entry-fill execution (missed fills, one-bar-"
+            "delayed fills, randomized slippage magnitude) -- distinct from --random-baseline-"
+            "iterations' entry-TIMING Monte Carlo. Answers whether the strategy's own verdict is an "
+            "artifact of the backtest's own idealized execution assumptions, or robust to realistic "
+            "execution friction. 0 (default) skips this."
         ),
     )
     backtest_universe_parser.add_argument(

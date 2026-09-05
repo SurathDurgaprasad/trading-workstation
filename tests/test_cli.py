@@ -61,6 +61,12 @@ def test_backtest_universe_subcommand_defaults():
     assert args.promotion_gate is False
     assert args.promotion_gate_db is None
     assert args.walk_forward_folds == 0
+    assert args.execution_robustness_iterations == 0
+
+
+def test_backtest_universe_subcommand_accepts_execution_robustness_iterations():
+    args = parse_args(["backtest-universe", "--symbols", "AAPL", "--execution-robustness-iterations", "50"])
+    assert args.execution_robustness_iterations == 50
 
 
 def test_backtest_universe_subcommand_accepts_promotion_gate_flag():
