@@ -4,7 +4,7 @@ import pytest
 
 from backtesting.costs import CostModel
 from backtesting.engine import run_backtest
-from backtesting.exit_experiments import run_breakeven_stop_backtest, run_partial_profit_backtest
+from backtesting.exit_experiments import run_breakeven_stop_backtest, run_partial_profit_backtest, run_trailing_stop_backtest
 from backtesting.trade import ExitReason
 from strategy.signal import ReasonCode, Side, Signal
 from tests.conftest import make_bar, make_indicator_series
@@ -524,5 +524,163 @@ def test_run_universe_partial_profit_experiment_isolates_a_failing_symbol(_fake_
     from backtesting.exit_experiments import run_universe_partial_profit_experiment
 
     result = run_universe_partial_profit_experiment(["AAA", "BADSYMBOL"], strategy=_LongOneShotStrategy(), initial_capital=1_000.0)
+
+    assert "BADSYMBOL" in result.failed_symbols
+
+
+# ==========================================================================
+# H_EXIT_003: ATR-based trailing stop replaces the fixed target entirely
+# ==========================================================================
+
+
+def test_trailing_stop_falls_back_to_the_original_stop_when_price_never_advances():
+    # Entry 100, atr_14=2.0 (make_bar's default) -> original stop =
+    # 100 - 1.5*2 = 97. Every subsequent bar's high stays AT OR BELOW the
+    # entry price (100), so the trailing level never has room to ratchet
+    # up -- the position must eventually exit at exactly the ORIGINAL
+    # stop, unmoved, once price finally declines through it.
+    bars = [
+        make_bar(close=100.0),
+        make_bar(open=100.0, high=100.0, low=99.0, close=99.5),
+        make_bar(open=99.5, high=99.8, low=97.5, close=98.0),
+        make_bar(open=98.0, high=98.5, low=96.0, close=96.5),
+    ]
+    series = make_indicator_series(bars)
+
+    result = run_trailing_stop_backtest(
+        symbol="TEST", indicator_series=series, strategy=_OneShotStrategy(at_index=0, stop_price=97.0, target_price=100_000.0),
+        cost_model=_ZERO_COST, initial_capital=100_000.0,
+    )
+
+    assert len(result.trades) == 1
+    assert result.trades[0].exit_reason == ExitReason.TRAILING_STOP
+    assert result.trades[0].exit_price == pytest.approx(97.0)
+
+
+def test_trailing_stop_ratchets_up_and_locks_in_a_profit_on_reversal():
+    # Entry 100, original stop 97 (risk=3, atr=2.0, 1.5x multiplier).
+    # Bar 1's high (110) pushes the trail up to 110-3=107 for bar 2's own
+    # check; bar 2's high (112) pushes it further to 112-3=109 for bar 3's
+    # check; bar 3's low (105) finally breaches the (by-then) 109 level.
+    # Exits at 109 -- a real, locked-in profit well above both the
+    # original stop (97) and the entry price (100), despite the reversal.
+    bars = [
+        make_bar(close=100.0),
+        make_bar(open=100.0, high=110.0, low=99.0, close=108.0),
+        make_bar(open=108.0, high=112.0, low=109.0, close=111.0),
+        make_bar(open=111.0, high=113.0, low=105.0, close=106.0),
+    ]
+    series = make_indicator_series(bars)
+
+    result = run_trailing_stop_backtest(
+        symbol="TEST", indicator_series=series, strategy=_OneShotStrategy(at_index=0, stop_price=97.0, target_price=100_000.0),
+        cost_model=_ZERO_COST, initial_capital=100_000.0,
+    )
+
+    assert len(result.trades) == 1
+    trade = result.trades[0]
+    assert trade.exit_reason == ExitReason.TRAILING_STOP
+    assert trade.exit_price == pytest.approx(109.0)
+    assert trade.net_pnl > 0
+    # r_multiple must use the ORIGINAL risk distance (3.0), not the
+    # ratcheted stop's (much smaller) distance from the exit price.
+    assert trade.r_multiple == pytest.approx((109.0 - 100.0) / 3.0)
+
+
+def test_trailing_stop_checks_the_pre_existing_level_before_ratcheting_same_bar():
+    # A single bar whose high would newly justify a ratchet ABOVE that
+    # same bar's own low must NOT exit on that level within the same bar
+    # -- the stop used to check THIS bar is always the level established
+    # as of the END of the PREVIOUS bar, never a level only just computed
+    # from this bar's own high. Bar 1: high=110 would (if applied
+    # same-bar) ratchet to 107, and low=99 is below that -- but the
+    # PRE-existing stop is still 97, and 99 > 97, so no exit here; the
+    # ratchet to 107 only takes effect starting bar 2.
+    bars = [
+        make_bar(close=100.0),
+        make_bar(open=100.0, high=110.0, low=99.0, close=105.0),
+        make_bar(open=105.0, high=108.0, low=107.5, close=107.8),  # stays above the newly-ratcheted 107, never stops
+    ]
+    series = make_indicator_series(bars)
+
+    result = run_trailing_stop_backtest(
+        symbol="TEST", indicator_series=series, strategy=_OneShotStrategy(at_index=0, stop_price=97.0, target_price=100_000.0),
+        cost_model=_ZERO_COST, initial_capital=100_000.0,
+    )
+
+    assert len(result.trades) == 1
+    assert result.trades[0].exit_reason == ExitReason.END_OF_DATA
+
+
+def test_trailing_stop_end_of_data_force_close_while_still_open():
+    bars = [
+        make_bar(close=100.0),
+        make_bar(open=100.0, high=105.0, low=99.0, close=103.0),
+        make_bar(open=103.0, high=107.0, low=102.5, close=106.0),
+    ]
+    series = make_indicator_series(bars)
+
+    result = run_trailing_stop_backtest(
+        symbol="TEST", indicator_series=series, strategy=_OneShotStrategy(at_index=0, stop_price=97.0, target_price=100_000.0),
+        cost_model=_ZERO_COST, initial_capital=100_000.0,
+    )
+
+    assert len(result.trades) == 1
+    assert result.trades[0].exit_reason == ExitReason.END_OF_DATA
+
+
+def test_trailing_stop_raises_on_empty_series():
+    import pandas as pd
+
+    with pytest.raises(ValueError):
+        run_trailing_stop_backtest(symbol="TEST", indicator_series=pd.DataFrame(), strategy=_OneShotStrategy(at_index=0, stop_price=90.0, target_price=100.0))
+
+
+@pytest.fixture
+def _fake_trailing_universe_provider(monkeypatch):
+    """Same shape as _fake_universe_provider (H_EXIT_001) / _fake_partial_universe_provider (H_EXIT_002)."""
+    from market.data_provider import MarketDataError, OHLCV
+
+    class _Provider:
+        def __init__(self, good_symbols):
+            self._good = good_symbols
+
+        def fetch_ohlcv(self, symbol, *, period="5y", interval="1d"):
+            if symbol not in self._good:
+                raise MarketDataError(f"no data for {symbol}")
+            return OHLCV(symbol=symbol, interval=interval, bars=_long_bars())
+
+    def _apply(good_symbols):
+        import market.data_provider as market_data_provider_module
+
+        monkeypatch.setattr(market_data_provider_module, "get_market_data_provider", lambda: _Provider(good_symbols))
+
+        import backtesting.cache as cache_module
+
+        monkeypatch.setattr(cache_module, "CachedMarketDataProvider", lambda inner: inner)
+
+    return _apply
+
+
+def test_run_universe_trailing_stop_experiment_pools_across_symbols(_fake_trailing_universe_provider):
+    _fake_trailing_universe_provider({"AAA", "BBB"})
+
+    from backtesting.exit_experiments import UniverseTrailingStopExperimentResult, run_universe_trailing_stop_experiment
+
+    result = run_universe_trailing_stop_experiment(["AAA", "BBB"], strategy=_LongOneShotStrategy(), initial_capital=1_000.0)
+
+    assert isinstance(result, UniverseTrailingStopExperimentResult)
+    assert result.failed_symbols == {}
+    assert isinstance(result.development_trades, list)
+    assert isinstance(result.validation_trades, list)
+    assert isinstance(result.out_of_sample_trades, list)
+
+
+def test_run_universe_trailing_stop_experiment_isolates_a_failing_symbol(_fake_trailing_universe_provider):
+    _fake_trailing_universe_provider({"AAA"})
+
+    from backtesting.exit_experiments import run_universe_trailing_stop_experiment
+
+    result = run_universe_trailing_stop_experiment(["AAA", "BADSYMBOL"], strategy=_LongOneShotStrategy(), initial_capital=1_000.0)
 
     assert "BADSYMBOL" in result.failed_symbols

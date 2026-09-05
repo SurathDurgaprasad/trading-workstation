@@ -228,11 +228,36 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
             rationale="Same forensics finding as H_EXIT_001/002 -- a trailing mechanism could realize more of the mean MFE (3.33%) than the current TARGET-or-STOP-only structure.",
             expected_effect="Improved expectancy, likely at the cost of a lower raw win rate (more trades trail out for a smaller gain than the current fixed 2:1 target would have captured).",
             dataset_restrictions="Same as H_EXIT_001.",
-            experiment_design="Not yet implemented.",
+            experiment_design=(
+                "Implemented in backtesting/exit_experiments.py (run_trailing_stop_backtest / "
+                "run_universe_trailing_stop_experiment), same full-isolation posture as H_EXIT_001/002. Removes the "
+                "fixed target entirely; the stop ratchets up using the SAME 1.5x-ATR14 multiplier strategy/"
+                "baseline.py already uses for the original stop distance, recomputed from each bar's own current "
+                "ATR. A bar's low is always checked against the level established by PRIOR bars, never a level "
+                "just computed from that same bar's own high (see the module's own docstring for the ordering "
+                "rationale)."
+            ),
             success_criteria="Same as H_EXIT_001.",
             failure_criteria="Same as H_EXIT_001.",
-            status=HypothesisStatus.OPEN,
-            evidence="Not yet implemented or tested this session.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Run against the real 41-symbol universe with the same development/validation/out-of-sample splits "
+                "as H_EXIT_001/002. Standard (unmodified) exit vs ATR-trailing-stop exit: "
+                "Development 216->221 trades, win rate 30.56%->30.77%, expectancy -0.78%->-0.48%, profit factor "
+                "0.666->0.647 (stays NEGATIVE_PERFORMANCE; expectancy a bit less negative but profit factor still "
+                "slipped). "
+                "Validation 108->127 trades, win rate 31.48%->24.41%, expectancy -0.70%->-0.67%, profit factor "
+                "0.700->0.530 (verdict WORSENS from STATISTICALLY_MEANINGLESS to NEGATIVE_PERFORMANCE -- a clear "
+                "degradation, not an improvement). "
+                "Out-of-sample 117->130 trades, win rate 38.46%->33.08%, expectancy -0.26%->-0.19%, profit factor "
+                "0.873->0.850 (stays STATISTICALLY_MEANINGLESS; small expectancy gain, profit factor still slipped "
+                "slightly). "
+                "Results are mixed rather than consistently improved, and validation clearly degrades (both its "
+                "verdict and its profit factor worsen materially) -- this fails the promotion rule's requirement "
+                "that ALL three splits show non-degraded expectancy. REJECTED: unlike H_EXIT_002's consistent, "
+                "growing improvement across all three splits, this trailing-stop variant does not reliably help and "
+                "actively hurts the validation split."
+            ),
         ),
         HypothesisRecord(
             hypothesis_id="H_EXIT_004",

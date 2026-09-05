@@ -1,8 +1,9 @@
 """Strategy science, Phase 5 (exit hypothesis experiments) -- H_EXIT_001:
 move the stop to breakeven once a position reaches +1R unrealized
 profit; H_EXIT_002: close half the position at +1R while the remainder
-keeps running unmodified (see strategy/hypothesis_registry.py's own
-records for the rationale and success/failure criteria).
+keeps running unmodified; H_EXIT_003: replace the fixed target entirely
+with an ATR-based trailing stop (see strategy/hypothesis_registry.py's
+own records for the rationale and success/failure criteria).
 
 CRITICAL DESIGN CONSTRAINT: this module is DELIBERATELY a fully
 independent, self-contained bar-processing loop -- it does NOT inject
@@ -552,6 +553,240 @@ def run_universe_partial_profit_experiment(
             if sliced.empty:
                 continue
             period_result = run_partial_profit_backtest(
+                symbol=symbol, indicator_series=sliced, strategy=strategy, cost_model=cost_model,
+                initial_capital=initial_capital, risk_config=risk_config, period_label=label,
+            )
+            bucket.extend(period_result.trades)
+
+    return result
+
+
+# ==========================================================================
+# H_EXIT_003: ATR-based trailing stop replaces the fixed target entirely
+# ==========================================================================
+
+
+@dataclass
+class _TrailingStopOpenPosition:
+    """No target_price at all -- the trailing stop is the ONLY exit
+    mechanism (besides end-of-data). current_stop_price only ever
+    ratchets UP (never down), and the level used to check a given bar's
+    low is always the level established as of the END of the PREVIOUS
+    bar -- never one computed from that same bar's own high -- so a
+    single bar can never both justify a higher trail AND exit on that
+    newly-justified level (see _check_exit_with_trailing_stop's own
+    docstring)."""
+
+    signal: object
+    entry_time: datetime
+    entry_price: float
+    quantity: int
+    original_stop_price: float
+    current_stop_price: float
+    highest_high_seen: float
+
+
+def _check_exit_with_trailing_stop(position: _TrailingStopOpenPosition, bar: pd.Series) -> tuple[float, ExitReason] | None:
+    """Checks THIS bar's low against the stop level already established
+    by PRIOR bars first; only afterward does it use THIS bar's own high
+    to (possibly) ratchet the level up for the NEXT bar's check. This
+    ordering means a bar whose high would justify a higher trail can
+    never also exit on that same newly-justified level within the same
+    bar -- deliberately more conservative than the target/stop
+    same-bar-ambiguity rule used elsewhere (which assumes the worst
+    case), since here the ambiguity is about a level the market hasn't
+    actually confirmed as touched yet."""
+    high, low = float(bar["high"]), float(bar["low"])
+
+    if low <= position.current_stop_price:
+        return position.current_stop_price, ExitReason.TRAILING_STOP
+
+    from strategy.baseline import STOP_ATR_MULTIPLIER
+
+    position.highest_high_seen = max(position.highest_high_seen, high)
+    atr = bar.get("atr_14")
+    if atr is not None and not pd.isna(atr) and float(atr) > 0:
+        candidate_stop = position.highest_high_seen - STOP_ATR_MULTIPLIER * float(atr)
+        if candidate_stop > position.current_stop_price:
+            position.current_stop_price = candidate_stop
+
+    return None
+
+
+def _close_trailing_trade(
+    position: _TrailingStopOpenPosition, *, exit_price: float, exit_time: datetime, exit_reason: ExitReason,
+    symbol: str, cost_model: CostModel,
+) -> Trade:
+    entry_notional = position.entry_price * position.quantity
+    exit_notional = exit_price * position.quantity
+
+    gross_pnl = (exit_price - position.entry_price) * position.quantity
+    costs = cost_model.cost_for_fill(notional=entry_notional) + cost_model.cost_for_fill(notional=exit_notional)
+    net_pnl = gross_pnl - costs
+
+    initial_risk = (position.entry_price - position.original_stop_price) * position.quantity
+    r_multiple = net_pnl / initial_risk if initial_risk > 0 else 0.0
+
+    return Trade(
+        symbol=symbol, side=position.signal.side, strategy_name=position.signal.strategy_name,
+        signal_generated_at=position.signal.generated_at, entry_time=position.entry_time,
+        entry_price=position.entry_price, quantity=position.quantity, stop_price=position.original_stop_price,
+        target_price=position.entry_price,  # no fixed target in this experiment; recorded as entry_price (N/A placeholder)
+        exit_time=exit_time, exit_price=exit_price, exit_reason=exit_reason,
+        gross_pnl=gross_pnl, costs=costs, net_pnl=net_pnl, r_multiple=r_multiple,
+    )
+
+
+class TrailingStopExperimentResult(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    symbol: str
+    period_label: str
+    trades: list[Trade]
+    equity_curve: list[EquityPoint]
+    metrics: PerformanceMetrics
+
+
+def run_trailing_stop_backtest(
+    *,
+    symbol: str,
+    indicator_series: pd.DataFrame,
+    strategy: Strategy,
+    cost_model: CostModel | None = None,
+    initial_capital: float = 100_000.0,
+    risk_config: RiskConfig | None = None,
+    period_label: str = "full",
+) -> TrailingStopExperimentResult:
+    """H_EXIT_003: identical entry mechanics to backtesting.engine.
+    run_backtest -- the strategy's OWN fixed target_price is never used
+    to exit; the ONLY exit mechanisms are the ATR-based trailing stop
+    (ratchets up, using the SAME 1.5x-ATR multiplier strategy/baseline.py
+    already uses for the original stop distance, recomputed from each
+    bar's own current atr_14) and end-of-data force-close."""
+    cost_model = cost_model or CostModel()
+    risk_engine = RiskEngine(risk_config)
+
+    if indicator_series.empty:
+        raise ValueError(f"No indicator data for {symbol}; cannot backtest an empty series.")
+
+    account = new_account(initial_capital)
+    trades: list[Trade] = []
+    trade_equities: list[tuple[datetime, float]] = []
+    open_position: _TrailingStopOpenPosition | None = None
+
+    n = len(indicator_series)
+    for i in range(n):
+        bar = indicator_series.iloc[i]
+        timestamp = indicator_series.index[i]
+
+        account.roll_to_day(bar_day(timestamp))
+
+        if open_position is not None:
+            account.mark_to_market(float(bar["close"]))
+            exit_outcome = _check_exit_with_trailing_stop(open_position, bar)
+            if exit_outcome is not None:
+                exit_price, exit_reason = exit_outcome
+                trade = _close_trailing_trade(
+                    open_position, exit_price=exit_price, exit_time=timestamp, exit_reason=exit_reason,
+                    symbol=symbol, cost_model=cost_model,
+                )
+                exit_cost = cost_model.cost_for_fill(notional=exit_price * open_position.quantity)
+                account.close_position(exit_price=exit_price, exit_cost=exit_cost, net_pnl=trade.net_pnl)
+
+                trades.append(trade)
+                trade_equities.append((timestamp, account.equity))
+                open_position = None
+
+        if open_position is None and i + 1 < n:
+            signal = strategy.generate_signal(indicator_series, i, symbol)
+            if signal is not None and signal.side == Side.LONG:
+                decision = risk_engine.evaluate(signal, account)
+
+                if decision.approved and decision.position_size is not None:
+                    next_bar = indicator_series.iloc[i + 1]
+                    raw_entry_price = float(next_bar["open"])
+                    entry_price = cost_model.slippage_adjusted_price(price=raw_entry_price, side=signal.side, is_entry=True)
+
+                    quantity = decision.position_size.quantity
+                    if quantity * entry_price > account.cash:
+                        quantity = int(account.cash // entry_price) if entry_price > 0 else 0
+
+                    if quantity >= 1:
+                        entry_cost = cost_model.cost_for_fill(notional=entry_price * quantity)
+                        account.open_position(quantity=quantity, entry_price=entry_price, entry_cost=entry_cost)
+                        open_position = _TrailingStopOpenPosition(
+                            signal=signal, entry_time=indicator_series.index[i + 1], entry_price=entry_price,
+                            quantity=quantity, original_stop_price=signal.stop_price, current_stop_price=signal.stop_price,
+                            highest_high_seen=entry_price,
+                        )
+
+    if open_position is not None:
+        last_bar = indicator_series.iloc[-1]
+        exit_price = cost_model.slippage_adjusted_price(price=float(last_bar["close"]), side=open_position.signal.side, is_entry=False)
+        trade = _close_trailing_trade(
+            open_position, exit_price=exit_price, exit_time=indicator_series.index[-1], exit_reason=ExitReason.END_OF_DATA,
+            symbol=symbol, cost_model=cost_model,
+        )
+        exit_cost = cost_model.cost_for_fill(notional=exit_price * open_position.quantity)
+        account.close_position(exit_price=exit_price, exit_cost=exit_cost, net_pnl=trade.net_pnl)
+        trades.append(trade)
+        trade_equities.append((indicator_series.index[-1], account.equity))
+
+    equity_curve = build_equity_curve(start_time=indicator_series.index[0], initial_capital=initial_capital, trade_equities=trade_equities)
+    metrics = compute_performance_metrics(trades, equity_curve)
+
+    return TrailingStopExperimentResult(symbol=symbol, period_label=period_label, trades=trades, equity_curve=equity_curve, metrics=metrics)
+
+
+@dataclass
+class UniverseTrailingStopExperimentResult:
+    development_trades: list[Trade] = field(default_factory=list)
+    validation_trades: list[Trade] = field(default_factory=list)
+    out_of_sample_trades: list[Trade] = field(default_factory=list)
+    failed_symbols: dict[str, str] = field(default_factory=dict)
+
+
+def run_universe_trailing_stop_experiment(
+    symbols: list[str],
+    *,
+    strategy: Strategy,
+    period: str = "5y",
+    interval: str = "1d",
+    initial_capital: float = 100_000.0,
+    cost_model: CostModel | None = None,
+    risk_config: RiskConfig | None = None,
+) -> UniverseTrailingStopExperimentResult:
+    """Mirrors run_universe_breakeven_experiment's/run_universe_partial_profit_experiment's
+    own structure exactly, driving run_trailing_stop_backtest instead, so
+    H_EXIT_003 gets the SAME development/validation/out-of-sample
+    promotion discipline as every other candidate."""
+    from backtesting.cache import CachedMarketDataProvider
+    from backtesting.splits import split_periods
+    from market.data_provider import MarketDataError, get_market_data_provider
+    from market.indicators import compute_indicator_series
+
+    provider = CachedMarketDataProvider(get_market_data_provider())
+    result = UniverseTrailingStopExperimentResult()
+
+    for symbol in symbols:
+        try:
+            ohlcv = provider.fetch_ohlcv(symbol, period=period, interval=interval)
+            indicator_series = compute_indicator_series(ohlcv)
+        except (MarketDataError, ValueError) as exc:
+            result.failed_symbols[symbol] = str(exc)
+            continue
+
+        split = split_periods(indicator_series.index[0], indicator_series.index[-1])
+
+        for label, start, end, bucket in (
+            ("development", split.development_start, split.development_end, result.development_trades),
+            ("validation", split.validation_start, split.validation_end, result.validation_trades),
+            ("out_of_sample", split.out_of_sample_start, split.out_of_sample_end, result.out_of_sample_trades),
+        ):
+            sliced = _slice_period(indicator_series, start, end)
+            if sliced.empty:
+                continue
+            period_result = run_trailing_stop_backtest(
                 symbol=symbol, indicator_series=sliced, strategy=strategy, cost_model=cost_model,
                 initial_capital=initial_capital, risk_config=risk_config, period_label=label,
             )

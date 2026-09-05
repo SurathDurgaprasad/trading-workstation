@@ -24,6 +24,11 @@ class ExitReason(str, Enum):
     # position is closed at +1R while the remainder keeps running. Never
     # assigned by check_exit() or the standard backtester/paper engine.
     PARTIAL_TARGET = "PARTIAL_TARGET"
+    # H_EXIT_003 (backtesting/exit_experiments.py) -- ONLY ever assigned by
+    # that module's own isolated ATR-trailing-stop logic (no fixed target
+    # at all; the stop ratchets up as new highs are made). Never assigned
+    # by check_exit() or the standard backtester/paper engine.
+    TRAILING_STOP = "TRAILING_STOP"
 
 
 class Trade(BaseModel):

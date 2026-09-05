@@ -60,14 +60,14 @@ def test_h_entry_005_is_inconclusive_not_falsely_rejected_or_supported():
 
 
 def test_exit_hypotheses_not_yet_run_remain_open():
-    """H_EXIT_001 and H_EXIT_002 have now been implemented and tested (see
-    the dedicated tests below); H_EXIT_003/004 remain untested."""
+    """H_EXIT_001/002/003 have now been implemented and tested (see the
+    dedicated tests below); only H_EXIT_004 remains untested."""
     registry = build_hypothesis_registry()
     exit_hypotheses = [h for h in registry if h.hypothesis_id.startswith("H_EXIT_")]
 
     assert len(exit_hypotheses) == 4
-    still_open = [h for h in exit_hypotheses if h.hypothesis_id not in ("H_EXIT_001", "H_EXIT_002")]
-    assert len(still_open) == 2
+    still_open = [h for h in exit_hypotheses if h.hypothesis_id not in ("H_EXIT_001", "H_EXIT_002", "H_EXIT_003")]
+    assert len(still_open) == 1
     assert all(h.status == HypothesisStatus.OPEN for h in still_open)
 
 
@@ -108,6 +108,23 @@ def test_h_exit_002_is_inconclusive_with_the_real_dev_val_oos_evidence():
     assert "1.078" in h.evidence
     assert "1.131" in h.evidence
     assert "1.330" in h.evidence
+
+
+def test_h_exit_003_is_rejected_with_the_real_dev_val_oos_evidence():
+    """The ATR-trailing-stop experiment was run against the same real
+    41-symbol universe with the same three splits. Results were mixed
+    rather than consistently improved, and validation clearly degraded
+    (its verdict worsened from STATISTICALLY_MEANINGLESS to
+    NEGATIVE_PERFORMANCE, profit factor dropped from 0.700 to 0.530) --
+    failing the promotion rule's requirement that ALL three splits show
+    non-degraded expectancy."""
+    registry = build_hypothesis_registry()
+    h = next(h for h in registry if h.hypothesis_id == "H_EXIT_003")
+
+    assert h.status == HypothesisStatus.REJECTED
+    assert "REJECTED" in h.evidence
+    assert "0.530" in h.evidence
+    assert "WORSENS" in h.evidence
 
 
 def test_build_hypothesis_registry_returns_a_fresh_tuple_each_call():
