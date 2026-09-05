@@ -163,8 +163,25 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
             ),
             success_criteria="Development AND validation AND out-of-sample all show improved (or at least non-degraded) expectancy with sufficient sample size, and the effect is not explained by a handful of outlier trades.",
             failure_criteria="No improvement, improvement only in development (overfitting), or improvement driven by a small number of outliers.",
-            status=HypothesisStatus.OPEN,
-            evidence="Not yet implemented or tested this session -- the forensics finding is real and well-evidenced, but it is evidence of a PROBLEM, not proof that this SPECIFIC remedy fixes it.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Implemented in backtesting/exit_experiments.py (fully isolated from the frozen "
+                "backtesting/execution.py path) and run against the real 41-symbol universe with the same "
+                "development/validation/out-of-sample splits as the standard engine. Standard (unmodified) exit vs "
+                "breakeven-at-+1R exit, same entry logic: "
+                "Development 216->179 trades, win rate 30.56%->17.88%, expectancy -0.78%->-1.07%, profit factor "
+                "0.666->0.445 (verdict stays NEGATIVE_PERFORMANCE, materially worse). "
+                "Validation 108->114 trades, win rate 31.48%->27.19%, expectancy -0.70%->-0.56%, profit factor "
+                "0.700->0.706 (verdict stays STATISTICALLY_MEANINGLESS; the only split with a marginal expectancy "
+                "improvement, but win rate still drops). "
+                "Out-of-sample 117->123 trades, win rate 38.46%->24.39%, expectancy -0.26%->-0.65%, profit factor "
+                "0.873->0.640 (verdict WORSENS from STATISTICALLY_MEANINGLESS to NEGATIVE_PERFORMANCE). "
+                "Two of three splits (development, out-of-sample) show clear degradation, not improvement -- moving "
+                "the stop to breakeven at +1R cuts off trades that would have gone on to hit the 2:1 target, "
+                "collapsing win rate far more than it rescues reversal-prone losers. REJECTED: fails the success "
+                "criteria (all three splits must show non-degraded expectancy) and matches the stated failure "
+                "criteria."
+            ),
         ),
         HypothesisRecord(
             hypothesis_id="H_EXIT_002",

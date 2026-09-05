@@ -59,12 +59,36 @@ def test_h_entry_005_is_inconclusive_not_falsely_rejected_or_supported():
     assert "283" in h.evidence  # the real dominant-bucket trade count
 
 
-def test_exit_hypotheses_are_all_open_pending_actual_implementation():
+def test_exit_hypotheses_not_yet_run_remain_open():
+    """H_EXIT_001 has now been implemented and tested (see the dedicated
+    test below); the other three exit hypotheses remain untested."""
     registry = build_hypothesis_registry()
     exit_hypotheses = [h for h in registry if h.hypothesis_id.startswith("H_EXIT_")]
 
     assert len(exit_hypotheses) == 4
-    assert all(h.status == HypothesisStatus.OPEN for h in exit_hypotheses)
+    still_open = [h for h in exit_hypotheses if h.hypothesis_id != "H_EXIT_001"]
+    assert len(still_open) == 3
+    assert all(h.status == HypothesisStatus.OPEN for h in still_open)
+
+
+def test_h_exit_001_is_rejected_with_the_real_dev_val_oos_evidence():
+    """The breakeven-at-+1R experiment was actually run against the real
+    41-symbol universe (backtesting/exit_experiments.py) with the same
+    development/validation/out-of-sample splits as the standard engine.
+    Development and out-of-sample both degraded (win rate collapsed,
+    profit factor dropped); only validation showed a marginal expectancy
+    improvement. Per the hypothesis's own promotion rule (ALL three
+    splits must show non-degraded expectancy), this is REJECTED, not
+    SUPPORTED and not swept under INCONCLUSIVE."""
+    registry = build_hypothesis_registry()
+    h = next(h for h in registry if h.hypothesis_id == "H_EXIT_001")
+
+    assert h.status == HypothesisStatus.REJECTED
+    assert "REJECTED" in h.evidence
+    # Spot-check the real, actually-measured figures are present verbatim.
+    assert "30.56%" in h.evidence
+    assert "17.88%" in h.evidence
+    assert "24.39%" in h.evidence
 
 
 def test_build_hypothesis_registry_returns_a_fresh_tuple_each_call():
