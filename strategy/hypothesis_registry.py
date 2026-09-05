@@ -189,11 +189,38 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
             rationale="Same forensics finding as H_EXIT_001 -- a partial exit locks in some gain from trades that later reverse, without fully capping upside on trades that continue favorably.",
             expected_effect="Reduced variance and improved expectancy relative to the current all-or-nothing stop/target structure.",
             dataset_restrictions="Same as H_EXIT_001.",
-            experiment_design="Not yet implemented -- requires position-sizing-aware partial-exit logic, a larger change than H_EXIT_001's single-stop-adjustment.",
+            experiment_design=(
+                "Implemented in backtesting/exit_experiments.py (run_partial_profit_backtest / "
+                "run_universe_partial_profit_experiment), same full-isolation posture as H_EXIT_001: closes floor(qty/2) "
+                "of the original quantity at the +1R price level, remainder keeps the ORIGINAL, unmodified stop/target. "
+                "Each split position produces two Trade records (a PARTIAL_TARGET leg and a final STOP/TARGET/"
+                "END_OF_DATA leg); the single real entry fee is pro-rated across both legs rather than charged twice "
+                "(dedicated test proves no double-counting)."
+            ),
             success_criteria="Same as H_EXIT_001.",
             failure_criteria="Same as H_EXIT_001.",
-            status=HypothesisStatus.OPEN,
-            evidence="Not yet implemented or tested this session.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "Run against the real 41-symbol universe with the same development/validation/out-of-sample splits as "
+                "H_EXIT_001 and the standard engine. Standard (unmodified) exit vs partial-profit-at-+1R exit: "
+                "Development 216->343 trade-records, expectancy -0.78%->+0.13% (mean CI [-0.27%,+0.52%]), profit "
+                "factor 0.666->1.078 (verdict STATISTICALLY_MEANINGLESS). "
+                "Validation 108->149 trade-records, expectancy -0.70%->+0.22% (mean CI [-0.41%,+0.85%]), profit "
+                "factor 0.700->1.131 (STATISTICALLY_MEANINGLESS). "
+                "Out-of-sample 117->160 trade-records, expectancy -0.26%->+0.49% (mean CI [-0.09%,+1.08%]), profit "
+                "factor 0.873->1.330 (STATISTICALLY_MEANINGLESS). "
+                "Every split flips from negative to positive point-estimate expectancy and profit factor climbs above "
+                "1.0 in all three, with the effect size INCREASING out-of-sample rather than decaying -- the opposite "
+                "of the textbook overfitting signature. However, every split's confidence interval still touches "
+                "zero, so none reaches a POSITIVE_PERFORMANCE verdict -- this is a real, consistent, non-degraded "
+                "directional improvement with adequate sample size, but not yet statistically decisive proof of an "
+                "edge. Caveat: because a partial-take splits one logical position into two Trade records, the raw "
+                "trade COUNT and any win-rate comparison are not directly apples-to-apples with the standard engine's "
+                "one-record-per-position convention; profit factor and mean per-record return (dollar-weighted, not "
+                "record-count-weighted) are the sound comparison points, and both improve consistently. INCONCLUSIVE: "
+                "directionally supports the hypothesis, but the promotion bar (a confident positive verdict) has not "
+                "been met -- must not be promoted on this evidence alone."
+            ),
         ),
         HypothesisRecord(
             hypothesis_id="H_EXIT_003",

@@ -1,7 +1,8 @@
 """Strategy science, Phase 5 (exit hypothesis experiments) -- H_EXIT_001:
 move the stop to breakeven once a position reaches +1R unrealized
-profit (see strategy/hypothesis_registry.py's own record for the
-rationale and success/failure criteria).
+profit; H_EXIT_002: close half the position at +1R while the remainder
+keeps running unmodified (see strategy/hypothesis_registry.py's own
+records for the rationale and success/failure criteria).
 
 CRITICAL DESIGN CONSTRAINT: this module is DELIBERATELY a fully
 independent, self-contained bar-processing loop -- it does NOT inject
@@ -23,7 +24,7 @@ UNMODIFIED from their existing modules -- only the entry-fill mechanics
 breakeven-tracking exit logic are specific to this module.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 import pandas as pd
@@ -281,6 +282,276 @@ def run_universe_breakeven_experiment(
             if sliced.empty:
                 continue
             period_result = run_breakeven_stop_backtest(
+                symbol=symbol, indicator_series=sliced, strategy=strategy, cost_model=cost_model,
+                initial_capital=initial_capital, risk_config=risk_config, period_label=label,
+            )
+            bucket.extend(period_result.trades)
+
+    return result
+
+
+# =================================================================
+# H_EXIT_002: partial profit-take at +1R, remainder runs unmodified
+# =================================================================
+
+
+@dataclass
+class _PartialExitOpenPosition:
+    """Tracks a position that may be split into two Trade legs: a
+    partial-take at +1R (half the ORIGINAL quantity, floor-divided) and
+    a remainder that keeps the original stop/target unchanged. Same
+    isolation rationale as _BreakevenOpenPosition -- this is NOT
+    backtesting.execution.OpenPosition, which has no notion of a
+    quantity that shrinks mid-position or of a single entry fee that
+    must be pro-rated across two exit legs rather than charged twice."""
+
+    signal: object
+    entry_time: datetime
+    entry_price: float
+    original_quantity: int
+    remaining_quantity: int
+    stop_price: float
+    target_price: float
+    partial_exit_price: float
+    partial_quantity: int
+    """floor(original_quantity / 2); 0 means the position is too small to
+    split, so the partial-take check never fires and this behaves
+    exactly like the standard engine."""
+    entry_cost_total: float
+    """The ONE real entry fill's cost, charged in full to account.cash at
+    open_position() time -- each leg's own Trade.costs later gets only a
+    pro-rata SHARE of this figure, never the full amount twice."""
+    partial_taken: bool = False
+
+
+def _check_exit_with_partial(position: _PartialExitOpenPosition, bar: pd.Series) -> tuple[float, ExitReason, int] | None:
+    """Same conservative same-bar-ambiguity rule as backtesting.execution.
+    check_exit: STOP takes priority over TARGET, and both take priority
+    over a partial-take -- if a single bar could have hit the stop (or
+    the real target) AND crossed the +1R partial level, assume the
+    worse-case ordering (stop/target already closes the WHOLE remaining
+    quantity, so there is nothing left to give partial credit for)."""
+    high, low = float(bar["high"]), float(bar["low"])
+    hit_stop = low <= position.stop_price
+    hit_target = high >= position.target_price
+
+    if hit_stop:
+        return position.stop_price, ExitReason.STOP, position.remaining_quantity
+    if hit_target:
+        return position.target_price, ExitReason.TARGET, position.remaining_quantity
+    if not position.partial_taken and position.partial_quantity > 0 and high >= position.partial_exit_price:
+        return position.partial_exit_price, ExitReason.PARTIAL_TARGET, position.partial_quantity
+    return None
+
+
+def _close_partial_leg(
+    position: _PartialExitOpenPosition, *, exit_price: float, exit_time: datetime, exit_reason: ExitReason,
+    quantity_closed: int, symbol: str, cost_model: CostModel,
+) -> Trade:
+    gross_pnl = (exit_price - position.entry_price) * quantity_closed
+    entry_cost_portion = position.entry_cost_total * (quantity_closed / position.original_quantity)
+    exit_cost = cost_model.cost_for_fill(notional=exit_price * quantity_closed)
+    costs = entry_cost_portion + exit_cost
+    net_pnl = gross_pnl - costs
+
+    initial_risk = (position.entry_price - position.stop_price) * quantity_closed
+    r_multiple = net_pnl / initial_risk if initial_risk > 0 else 0.0
+
+    return Trade(
+        symbol=symbol, side=position.signal.side, strategy_name=position.signal.strategy_name,
+        signal_generated_at=position.signal.generated_at, entry_time=position.entry_time,
+        entry_price=position.entry_price, quantity=quantity_closed, stop_price=position.stop_price,
+        target_price=position.target_price, exit_time=exit_time, exit_price=exit_price, exit_reason=exit_reason,
+        gross_pnl=gross_pnl, costs=costs, net_pnl=net_pnl, r_multiple=r_multiple,
+    )
+
+
+def _partial_close_account(account, *, quantity_closed: int, exit_price: float, exit_cost: float, net_pnl: float) -> None:
+    """risk.account.Account.close_position() always fully closes (single-
+    position, all-or-nothing accounting -- see its own docstring), so a
+    partial close needs this bespoke helper instead of modifying
+    risk/account.py itself (same isolation posture as this module's
+    H_EXIT_001 code). Mirrors close_position()'s own bookkeeping exactly,
+    scoped to only the closed portion; the entry fee was already
+    deducted in full at open_position() time, so only the (real,
+    separate) exit fee for THIS leg is deducted here -- never a second
+    entry deduction."""
+    proceeds = quantity_closed * exit_price
+    account.cash += proceeds - exit_cost
+    account.realized_pnl += net_pnl
+    account.total_trades += 1
+    account.consecutive_losses = account.consecutive_losses + 1 if net_pnl < 0 else 0
+    account.open_position_quantity -= quantity_closed
+    account.open_position_cost_basis -= quantity_closed * account.open_position_entry_price
+    account.mark_to_market(exit_price)
+
+
+class PartialProfitExperimentResult(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    symbol: str
+    period_label: str
+    trades: list[Trade]
+    equity_curve: list[EquityPoint]
+    metrics: PerformanceMetrics
+
+
+def run_partial_profit_backtest(
+    *,
+    symbol: str,
+    indicator_series: pd.DataFrame,
+    strategy: Strategy,
+    cost_model: CostModel | None = None,
+    initial_capital: float = 100_000.0,
+    risk_config: RiskConfig | None = None,
+    period_label: str = "full",
+) -> PartialProfitExperimentResult:
+    """H_EXIT_002: identical entry mechanics to backtesting.engine.
+    run_backtest -- the ONLY behavioral difference is that once a
+    position reaches +1R unrealized profit, HALF the original quantity
+    (floor-divided) is closed at that exact price, and the remainder
+    keeps running with the ORIGINAL, unmodified stop/target. When a
+    position never reaches +1R, or is too small to split (quantity < 2),
+    this produces BYTE-IDENTICAL results to run_backtest (proven by
+    tests/test_backtest_exit_experiments.py's own control-case tests)."""
+    cost_model = cost_model or CostModel()
+    risk_engine = RiskEngine(risk_config)
+
+    if indicator_series.empty:
+        raise ValueError(f"No indicator data for {symbol}; cannot backtest an empty series.")
+
+    account = new_account(initial_capital)
+    trades: list[Trade] = []
+    trade_equities: list[tuple[datetime, float]] = []
+    open_position: _PartialExitOpenPosition | None = None
+
+    n = len(indicator_series)
+    for i in range(n):
+        bar = indicator_series.iloc[i]
+        timestamp = indicator_series.index[i]
+
+        account.roll_to_day(bar_day(timestamp))
+
+        if open_position is not None:
+            account.mark_to_market(float(bar["close"]))
+            exit_outcome = _check_exit_with_partial(open_position, bar)
+            if exit_outcome is not None:
+                exit_price, exit_reason, quantity_closed = exit_outcome
+                trade = _close_partial_leg(
+                    open_position, exit_price=exit_price, exit_time=timestamp, exit_reason=exit_reason,
+                    quantity_closed=quantity_closed, symbol=symbol, cost_model=cost_model,
+                )
+                exit_cost = cost_model.cost_for_fill(notional=exit_price * quantity_closed)
+
+                if exit_reason == ExitReason.PARTIAL_TARGET:
+                    _partial_close_account(account, quantity_closed=quantity_closed, exit_price=exit_price, exit_cost=exit_cost, net_pnl=trade.net_pnl)
+                    trades.append(trade)
+                    trade_equities.append((timestamp, account.equity))
+                    open_position.remaining_quantity -= quantity_closed
+                    open_position.partial_taken = True
+                else:
+                    account.close_position(exit_price=exit_price, exit_cost=exit_cost, net_pnl=trade.net_pnl)
+                    trades.append(trade)
+                    trade_equities.append((timestamp, account.equity))
+                    open_position = None
+
+        if open_position is None and i + 1 < n:
+            signal = strategy.generate_signal(indicator_series, i, symbol)
+            if signal is not None and signal.side == Side.LONG:
+                decision = risk_engine.evaluate(signal, account)
+
+                if decision.approved and decision.position_size is not None:
+                    next_bar = indicator_series.iloc[i + 1]
+                    raw_entry_price = float(next_bar["open"])
+                    entry_price = cost_model.slippage_adjusted_price(price=raw_entry_price, side=signal.side, is_entry=True)
+
+                    quantity = decision.position_size.quantity
+                    if quantity * entry_price > account.cash:
+                        quantity = int(account.cash // entry_price) if entry_price > 0 else 0
+
+                    if quantity >= 1:
+                        entry_cost = cost_model.cost_for_fill(notional=entry_price * quantity)
+                        account.open_position(quantity=quantity, entry_price=entry_price, entry_cost=entry_cost)
+
+                        risk_per_share = entry_price - signal.stop_price
+                        partial_quantity = quantity // 2 if quantity >= 2 else 0
+
+                        open_position = _PartialExitOpenPosition(
+                            signal=signal, entry_time=indicator_series.index[i + 1], entry_price=entry_price,
+                            original_quantity=quantity, remaining_quantity=quantity, stop_price=signal.stop_price,
+                            target_price=signal.target_price, partial_exit_price=entry_price + risk_per_share,
+                            partial_quantity=partial_quantity, entry_cost_total=entry_cost,
+                        )
+
+    if open_position is not None:
+        last_bar = indicator_series.iloc[-1]
+        exit_price = cost_model.slippage_adjusted_price(price=float(last_bar["close"]), side=open_position.signal.side, is_entry=False)
+        trade = _close_partial_leg(
+            open_position, exit_price=exit_price, exit_time=indicator_series.index[-1], exit_reason=ExitReason.END_OF_DATA,
+            quantity_closed=open_position.remaining_quantity, symbol=symbol, cost_model=cost_model,
+        )
+        exit_cost = cost_model.cost_for_fill(notional=exit_price * open_position.remaining_quantity)
+        account.close_position(exit_price=exit_price, exit_cost=exit_cost, net_pnl=trade.net_pnl)
+        trades.append(trade)
+        trade_equities.append((indicator_series.index[-1], account.equity))
+
+    equity_curve = build_equity_curve(start_time=indicator_series.index[0], initial_capital=initial_capital, trade_equities=trade_equities)
+    metrics = compute_performance_metrics(trades, equity_curve)
+
+    return PartialProfitExperimentResult(symbol=symbol, period_label=period_label, trades=trades, equity_curve=equity_curve, metrics=metrics)
+
+
+@dataclass
+class UniversePartialProfitExperimentResult:
+    development_trades: list[Trade] = field(default_factory=list)
+    validation_trades: list[Trade] = field(default_factory=list)
+    out_of_sample_trades: list[Trade] = field(default_factory=list)
+    failed_symbols: dict[str, str] = field(default_factory=dict)
+
+
+def run_universe_partial_profit_experiment(
+    symbols: list[str],
+    *,
+    strategy: Strategy,
+    period: str = "5y",
+    interval: str = "1d",
+    initial_capital: float = 100_000.0,
+    cost_model: CostModel | None = None,
+    risk_config: RiskConfig | None = None,
+) -> UniversePartialProfitExperimentResult:
+    """Mirrors run_universe_breakeven_experiment's own structure exactly
+    (fetch, split via backtesting.splits.split_periods, pool each
+    period's trades across the universe, isolate one failing symbol from
+    the rest) but drives run_partial_profit_backtest instead, so
+    H_EXIT_002 gets the SAME development/validation/out-of-sample
+    promotion discipline as every other candidate."""
+    from backtesting.cache import CachedMarketDataProvider
+    from backtesting.splits import split_periods
+    from market.data_provider import MarketDataError, get_market_data_provider
+    from market.indicators import compute_indicator_series
+
+    provider = CachedMarketDataProvider(get_market_data_provider())
+    result = UniversePartialProfitExperimentResult()
+
+    for symbol in symbols:
+        try:
+            ohlcv = provider.fetch_ohlcv(symbol, period=period, interval=interval)
+            indicator_series = compute_indicator_series(ohlcv)
+        except (MarketDataError, ValueError) as exc:
+            result.failed_symbols[symbol] = str(exc)
+            continue
+
+        split = split_periods(indicator_series.index[0], indicator_series.index[-1])
+
+        for label, start, end, bucket in (
+            ("development", split.development_start, split.development_end, result.development_trades),
+            ("validation", split.validation_start, split.validation_end, result.validation_trades),
+            ("out_of_sample", split.out_of_sample_start, split.out_of_sample_end, result.out_of_sample_trades),
+        ):
+            sliced = _slice_period(indicator_series, start, end)
+            if sliced.empty:
+                continue
+            period_result = run_partial_profit_backtest(
                 symbol=symbol, indicator_series=sliced, strategy=strategy, cost_model=cost_model,
                 initial_capital=initial_capital, risk_config=risk_config, period_label=label,
             )

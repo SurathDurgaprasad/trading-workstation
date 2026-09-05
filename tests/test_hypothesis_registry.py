@@ -60,14 +60,14 @@ def test_h_entry_005_is_inconclusive_not_falsely_rejected_or_supported():
 
 
 def test_exit_hypotheses_not_yet_run_remain_open():
-    """H_EXIT_001 has now been implemented and tested (see the dedicated
-    test below); the other three exit hypotheses remain untested."""
+    """H_EXIT_001 and H_EXIT_002 have now been implemented and tested (see
+    the dedicated tests below); H_EXIT_003/004 remain untested."""
     registry = build_hypothesis_registry()
     exit_hypotheses = [h for h in registry if h.hypothesis_id.startswith("H_EXIT_")]
 
     assert len(exit_hypotheses) == 4
-    still_open = [h for h in exit_hypotheses if h.hypothesis_id != "H_EXIT_001"]
-    assert len(still_open) == 3
+    still_open = [h for h in exit_hypotheses if h.hypothesis_id not in ("H_EXIT_001", "H_EXIT_002")]
+    assert len(still_open) == 2
     assert all(h.status == HypothesisStatus.OPEN for h in still_open)
 
 
@@ -89,6 +89,25 @@ def test_h_exit_001_is_rejected_with_the_real_dev_val_oos_evidence():
     assert "30.56%" in h.evidence
     assert "17.88%" in h.evidence
     assert "24.39%" in h.evidence
+
+
+def test_h_exit_002_is_inconclusive_with_the_real_dev_val_oos_evidence():
+    """The partial-profit-at-+1R experiment was run against the same real
+    41-symbol universe with the same three splits. Every split flipped
+    from negative to positive point-estimate expectancy and profit
+    factor climbed above 1.0 -- a real, consistent, non-degraded
+    directional improvement -- but every confidence interval still
+    touches zero, so this falls short of a confident positive verdict.
+    INCONCLUSIVE is the honest label: not REJECTED (nothing degraded)
+    and not SUPPORTED (no split reached statistical significance)."""
+    registry = build_hypothesis_registry()
+    h = next(h for h in registry if h.hypothesis_id == "H_EXIT_002")
+
+    assert h.status == HypothesisStatus.INCONCLUSIVE
+    assert "INCONCLUSIVE" in h.evidence
+    assert "1.078" in h.evidence
+    assert "1.131" in h.evidence
+    assert "1.330" in h.evidence
 
 
 def test_build_hypothesis_registry_returns_a_fresh_tuple_each_call():

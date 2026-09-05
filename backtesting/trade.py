@@ -19,6 +19,11 @@ class ExitReason(str, Enum):
     # check is unaffected -- it only ever sees check_exit()'s own STOP/
     # TARGET return value directly, never a caller-assigned override.
     EXPIRED = "EXPIRED"
+    # H_EXIT_002 (backtesting/exit_experiments.py) -- ONLY ever assigned by
+    # that module's own isolated partial-profit-take logic when part of a
+    # position is closed at +1R while the remainder keeps running. Never
+    # assigned by check_exit() or the standard backtester/paper engine.
+    PARTIAL_TARGET = "PARTIAL_TARGET"
 
 
 class Trade(BaseModel):
