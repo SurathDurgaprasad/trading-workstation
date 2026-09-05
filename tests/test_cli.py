@@ -52,6 +52,17 @@ def test_backtest_universe_subcommand_defaults():
     assert args.interval == "1d"
     assert args.initial_capital == 100_000.0
     assert args.strategy == "trend_momentum_baseline"
+    assert args.cost_model == "default"
+
+
+def test_backtest_universe_subcommand_accepts_nse_cost_model():
+    args = parse_args(["backtest-universe", "--symbols", "RELIANCE.NS", "--cost-model", "india_nse_intraday_2026"])
+    assert args.cost_model == "india_nse_intraday_2026"
+
+
+def test_backtest_universe_subcommand_rejects_an_unknown_cost_model():
+    with pytest.raises(SystemExit):
+        parse_args(["backtest-universe", "--symbols", "AAPL", "--cost-model", "made_up"])
 
 
 def test_backtest_universe_subcommand_accepts_watchlist_file():

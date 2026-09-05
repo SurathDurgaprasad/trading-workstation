@@ -220,16 +220,21 @@ def run_backtest_universe_command(args: argparse.Namespace) -> None:
         print("backtest-universe: one of --symbols or --watchlist-file is required.", file=sys.stderr)
         sys.exit(2)
 
+    from backtesting.costs import CostModel
+
+    cost_model = CostModel.india_nse_intraday_2026() if args.cost_model == "india_nse_intraday_2026" else CostModel()
+
     strategy = get_strategy(args.strategy)
     result: UniverseBacktestResult = run_universe_backtest(
         universe.symbols, strategy=strategy, period=args.period, interval=args.interval,
-        initial_capital=args.initial_capital,
+        initial_capital=args.initial_capital, cost_model=cost_model,
     )
 
     print("=" * 50)
     print("BACKTEST-UNIVERSE -- POOLED STATISTICAL EDGE VALIDATION")
     print("=" * 50)
     print(f"\nStrategy: {strategy.name}")
+    print(f"Cost model: {args.cost_model}{' -- APPROXIMATE (GST/stamp duty not included, see CostModel.india_nse_intraday_2026 docstring)' if args.cost_model == 'india_nse_intraday_2026' else ' -- generic placeholder, not market-specific'}")
     print(f"Universe: {len(universe.symbols)} symbols requested, {len(result.per_symbol)} backtested, {len(result.failed_symbols)} failed")
     if result.failed_symbols:
         print("\nFailed symbols (excluded, not silently dropped):")
@@ -2416,6 +2421,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     backtest_universe_parser.add_argument("--interval", default="1d", help="Bar interval (default: 1d).")
     backtest_universe_parser.add_argument("--initial-capital", type=float, default=100_000.0, help="Starting capital per symbol's own independent backtest (default: 100000).")
     backtest_universe_parser.add_argument("--strategy", default="trend_momentum_baseline", help="Registered strategy name (default: trend_momentum_baseline).")
+    backtest_universe_parser.add_argument(
+        "--cost-model", choices=["default", "india_nse_intraday_2026"], default="default",
+        help=(
+            "Which backtesting.costs.CostModel preset to use (default: default -- a generic, "
+            "not-market-specific placeholder). 'india_nse_intraday_2026' is the documented "
+            "APPROXIMATE cost model for NSE (STT/exchange charges/brokerage; GST and stamp duty "
+            "are NOT included -- see CostModel.india_nse_intraday_2026's own docstring). Applying "
+            "an NSE-specific model to non-NSE symbols in a mixed universe is not meaningful -- "
+            "run NSE-only and non-NSE-only universes separately when comparing cost models."
+        ),
+    )
 
     paper_parser = subparsers.add_parser(
         "paper",
