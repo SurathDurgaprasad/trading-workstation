@@ -441,6 +441,40 @@ def run_backtest_universe_command(args: argparse.Namespace) -> None:
         else:
             print("  INTERPRETATION: verdicts differ across periods -- treat as temporally unstable, not proof of an edge in any one period.")
 
+    if args.promotion_gate:
+        from backtesting.universe import run_universe_backtest_by_period
+        from strategy.promotion_gate import evaluate_promotion
+        from strategy.promotion_store import PromotionGateStore
+
+        gate_temporal_result = run_universe_backtest_by_period(
+            universe.symbols, strategy=strategy, period=args.period, interval=args.interval,
+            initial_capital=args.initial_capital, cost_model=cost_model,
+        )
+        evaluation = evaluate_promotion(
+            strategy.name,
+            development_returns=per_trade_returns(gate_temporal_result.development_trades),
+            validation_returns=per_trade_returns(gate_temporal_result.validation_trades),
+            out_of_sample_returns=per_trade_returns(gate_temporal_result.out_of_sample_trades),
+        )
+
+        print("\n" + "-" * 50)
+        print("PROMOTION GATE (Phase 6 -- does this candidate earn the right to become the live paper-trading strategy)")
+        print("-" * 50 + "\n")
+        print(f"Candidate: {evaluation.candidate_name}")
+        for label, split_report in (
+            ("Development", evaluation.development), ("Validation", evaluation.validation), ("Out-of-Sample", evaluation.out_of_sample),
+        ):
+            print(f"  {label:<14} {split_report.sample_size:>4} trades, verdict {split_report.verdict.value}")
+        print(f"\n  GATE VERDICT: {evaluation.verdict.value}")
+        print(f"  {evaluation.rationale}")
+
+        db_path = args.promotion_gate_db or str(DEFAULT_PROMOTION_GATE_DB_PATH)
+        gate_store = PromotionGateStore(db_path)
+        evaluation_id = gate_store.record_evaluation(evaluation)
+        gate_store.close()
+        print(f"\n  Recorded to {db_path} (evaluation_id={evaluation_id}) -- an append-only audit trail; this")
+        print("  evaluation is never overwritten by a later, more favorable re-evaluation of the same candidate.")
+
     if args.compare_baselines:
         from strategy.simple_baselines import SimpleMomentumBaseline, SimpleTrendBaseline
 
@@ -684,6 +718,7 @@ def run_live_sim_command(args: argparse.Namespace) -> None:
 # --------------------------------------------------------------------------
 
 DEFAULT_LIVE_STATE_DB_PATH = PROJECT_ROOT / "data" / "live_state.db"
+DEFAULT_PROMOTION_GATE_DB_PATH = PROJECT_ROOT / "data" / "promotion_gate.db"
 
 
 def _print_account_block(account) -> None:
@@ -2655,6 +2690,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "an NSE-specific model to non-NSE symbols in a mixed universe is not meaningful -- "
             "run NSE-only and non-NSE-only universes separately when comparing cost models."
         ),
+    )
+    backtest_universe_parser.add_argument(
+        "--promotion-gate", action="store_true",
+        help=(
+            "Strategy science Phase 6: apply this project's own promotion rule (strategy."
+            "promotion_gate.evaluate_promotion) to the selected --strategy's own development/"
+            "validation/out-of-sample split and report ONE of PROMOTED/NEGATIVE/INCONCLUSIVE/"
+            "REJECTED/INSUFFICIENT_DATA -- the SAME bar every H_EXIT_*/H_ENTRY_* experiment this "
+            "project has run was held to by hand. Persists every evaluation to an append-only "
+            "SQLite audit trail (see --promotion-gate-db); a past negative result is never "
+            "overwritten by a later, more favorable re-evaluation."
+        ),
+    )
+    backtest_universe_parser.add_argument(
+        "--promotion-gate-db", type=str, default=None,
+        help="Override the promotion-gate audit trail's SQLite file path (default: data/promotion_gate.db).",
     )
 
     paper_parser = subparsers.add_parser(

@@ -58,6 +58,18 @@ def test_backtest_universe_subcommand_defaults():
     assert args.regime_analysis is False
     assert args.temporal_robustness is False
     assert args.compare_baselines is False
+    assert args.promotion_gate is False
+    assert args.promotion_gate_db is None
+
+
+def test_backtest_universe_subcommand_accepts_promotion_gate_flag():
+    args = parse_args(["backtest-universe", "--symbols", "AAPL", "--promotion-gate"])
+    assert args.promotion_gate is True
+
+
+def test_backtest_universe_subcommand_accepts_promotion_gate_db_override():
+    args = parse_args(["backtest-universe", "--symbols", "AAPL", "--promotion-gate-db", "custom.db"])
+    assert args.promotion_gate_db == "custom.db"
 
 
 def test_backtest_universe_subcommand_accepts_compare_baselines_flag():
