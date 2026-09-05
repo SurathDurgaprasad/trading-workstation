@@ -9,7 +9,10 @@ SPECIFIC ProfitabilityVerdict (verified empirically, not guessed):
   _TOO_FEW   = [0.05]*10            -> INSUFFICIENT_DATA (below the 30-trade floor)
 """
 
-from strategy.promotion_gate import PromotionVerdict, evaluate_promotion
+import pytest
+
+from learning.profitability import ProfitabilityVerdict
+from strategy.promotion_gate import PromotionVerdict, evaluate_promotion, evaluate_promotion_comprehensive
 
 _POSITIVE = [0.05] * 30
 _NEGATIVE = [-0.05] * 30
@@ -101,3 +104,105 @@ def test_evaluation_reproduces_this_sessions_own_h_exit_002_shape():
     assert result.verdict == PromotionVerdict.INCONCLUSIVE
     assert result.development.sample_size == 30
     assert result.candidate_name == "H_EXIT_002_shape"
+
+
+# --- evaluate_promotion_comprehensive ----------------------------------
+
+
+def test_comprehensive_promoted_when_base_is_promoted_and_no_comparisons_given():
+    result = evaluate_promotion_comprehensive(
+        "candidate", development_returns=_POSITIVE, validation_returns=_POSITIVE, out_of_sample_returns=_POSITIVE,
+    )
+    assert result.base_evaluation.verdict == PromotionVerdict.PROMOTED
+    assert result.comprehensive_verdict == PromotionVerdict.PROMOTED
+    assert result.beats_buy_and_hold is None
+    assert result.beats_random_baseline is None
+    assert result.beats_previous_baseline is None
+    assert result.walk_forward_consistent is None
+    assert result.regime_consistent is None
+    assert "not checked" in result.comprehensive_rationale
+
+
+def test_comprehensive_promoted_when_base_is_promoted_and_all_comparisons_pass():
+    result = evaluate_promotion_comprehensive(
+        "candidate", development_returns=_POSITIVE, validation_returns=_POSITIVE, out_of_sample_returns=_POSITIVE,
+        buy_and_hold_mean_return_pct=1.0, random_baseline_mean_return_pct=0.5, previous_baseline_mean_return_pct=-0.64,
+        walk_forward_fold_verdicts=[ProfitabilityVerdict.POSITIVE_PERFORMANCE, ProfitabilityVerdict.STATISTICALLY_MEANINGLESS],
+        regime_verdicts={"TRENDING_UP": ProfitabilityVerdict.POSITIVE_PERFORMANCE},
+    )
+    assert result.candidate_mean_return_pct == pytest.approx(5.0)  # _POSITIVE is 0.05 -> 5%
+    assert result.beats_buy_and_hold is True
+    assert result.beats_random_baseline is True
+    assert result.beats_previous_baseline is True
+    assert result.walk_forward_consistent is True
+    assert result.regime_consistent is True
+    assert result.comprehensive_verdict == PromotionVerdict.PROMOTED
+
+
+def test_comprehensive_rejected_when_base_promoted_but_loses_to_buy_and_hold():
+    result = evaluate_promotion_comprehensive(
+        "candidate", development_returns=_POSITIVE, validation_returns=_POSITIVE, out_of_sample_returns=_POSITIVE,
+        buy_and_hold_mean_return_pct=50.0,  # far above the candidate's own 5%
+    )
+    assert result.base_evaluation.verdict == PromotionVerdict.PROMOTED
+    assert result.beats_buy_and_hold is False
+    assert result.comprehensive_verdict == PromotionVerdict.REJECTED
+    assert "beats_buy_and_hold" in result.comprehensive_rationale
+
+
+def test_comprehensive_rejected_when_a_walk_forward_fold_is_negative():
+    result = evaluate_promotion_comprehensive(
+        "candidate", development_returns=_POSITIVE, validation_returns=_POSITIVE, out_of_sample_returns=_POSITIVE,
+        walk_forward_fold_verdicts=[ProfitabilityVerdict.POSITIVE_PERFORMANCE, ProfitabilityVerdict.NEGATIVE_PERFORMANCE],
+    )
+    assert result.walk_forward_consistent is False
+    assert result.comprehensive_verdict == PromotionVerdict.REJECTED
+
+
+def test_comprehensive_rejected_when_a_regime_bucket_is_negative():
+    result = evaluate_promotion_comprehensive(
+        "candidate", development_returns=_POSITIVE, validation_returns=_POSITIVE, out_of_sample_returns=_POSITIVE,
+        regime_verdicts={"TRENDING_UP": ProfitabilityVerdict.POSITIVE_PERFORMANCE, "SIDEWAYS": ProfitabilityVerdict.NEGATIVE_PERFORMANCE},
+    )
+    assert result.regime_consistent is False
+    assert result.comprehensive_verdict == PromotionVerdict.REJECTED
+
+
+def test_comprehensive_verdict_inherits_negative_base_regardless_of_comparisons():
+    # Even beating every benchmark cannot rescue a candidate that fails
+    # its own underlying statistical bar -- comparisons are moot.
+    result = evaluate_promotion_comprehensive(
+        "candidate", development_returns=_NEGATIVE, validation_returns=_NEGATIVE, out_of_sample_returns=_NEGATIVE,
+        buy_and_hold_mean_return_pct=-99.0, random_baseline_mean_return_pct=-99.0,
+    )
+    assert result.base_evaluation.verdict == PromotionVerdict.NEGATIVE
+    assert result.comprehensive_verdict == PromotionVerdict.NEGATIVE
+    assert "moot" in result.comprehensive_rationale
+
+
+def test_comprehensive_verdict_inherits_inconclusive_base():
+    result = evaluate_promotion_comprehensive(
+        "candidate",
+        development_returns=_MEANINGLESS_POSITIVE_MEAN,
+        validation_returns=_MEANINGLESS_POSITIVE_MEAN,
+        out_of_sample_returns=_MEANINGLESS_POSITIVE_MEAN,
+    )
+    assert result.base_evaluation.verdict == PromotionVerdict.INCONCLUSIVE
+    assert result.comprehensive_verdict == PromotionVerdict.INCONCLUSIVE
+
+
+def test_comprehensive_evaluation_reproduces_this_missions_own_real_baseline_result():
+    # Real figures from this project's own scientific final report: the
+    # frozen TrendMomentumBaseline's pooled mean return is -0.64%, and it
+    # underperformed 96% of random-entry Monte Carlo iterations (whose
+    # own average was -0.06%). A comprehensive evaluation using these
+    # real numbers must land on the same NEGATIVE verdict already
+    # reported -- a direct sanity check that this new gate agrees with
+    # the mission's own already-published conclusion.
+    baseline_returns = [-0.0064] * 30  # stand-in for the real pooled -0.64% mean (base verdict only needs the mean/CI shape)
+    result = evaluate_promotion_comprehensive(
+        "trend_momentum_baseline", development_returns=baseline_returns, validation_returns=baseline_returns,
+        out_of_sample_returns=baseline_returns, random_baseline_mean_return_pct=-0.06,
+    )
+    assert result.base_evaluation.verdict == PromotionVerdict.NEGATIVE
+    assert result.comprehensive_verdict == PromotionVerdict.NEGATIVE

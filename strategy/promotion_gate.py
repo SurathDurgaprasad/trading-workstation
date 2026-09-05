@@ -151,3 +151,128 @@ def evaluate_promotion(
         candidate_name=candidate_name, development=development, validation=validation,
         out_of_sample=out_of_sample, verdict=verdict, rationale=rationale,
     )
+
+
+class ComprehensivePromotionEvaluation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    base_evaluation: PromotionEvaluation
+    """The unchanged, existing dev/val/oos verdict -- a comprehensive
+    PROMOTED verdict can never be more permissive than this; it can only
+    add MORE required conditions on top."""
+    candidate_mean_return_pct: float
+    """Simple mean of every development+validation+out_of_sample return
+    combined, expressed as a percentage -- the ONE number every optional
+    comparison below is measured against. Not itself a substitute for
+    base_evaluation's own split-by-split statistical rigor; a single
+    summary figure for comparison purposes only."""
+    beats_buy_and_hold: bool | None
+    """None means "not checked" (no buy_and_hold_mean_return_pct was
+    given) -- NEVER treated as "passed". See comprehensive_rationale for
+    which comparisons were actually evaluated."""
+    beats_random_baseline: bool | None
+    beats_previous_baseline: bool | None
+    walk_forward_consistent: bool | None
+    """None means "not checked". True means NO walk-forward fold in the
+    list provided reached a confident NEGATIVE_PERFORMANCE verdict."""
+    regime_consistent: bool | None
+    """None means "not checked". True means NO regime bucket in the
+    mapping provided (already filtered by the caller to buckets with
+    sufficient sample size) reached a confident NEGATIVE_PERFORMANCE
+    verdict."""
+    comprehensive_verdict: PromotionVerdict
+    comprehensive_rationale: str
+
+
+def evaluate_promotion_comprehensive(
+    candidate_name: str,
+    *,
+    development_returns: list[float],
+    validation_returns: list[float],
+    out_of_sample_returns: list[float],
+    buy_and_hold_mean_return_pct: float | None = None,
+    random_baseline_mean_return_pct: float | None = None,
+    previous_baseline_mean_return_pct: float | None = None,
+    walk_forward_fold_verdicts: list[ProfitabilityVerdict] | None = None,
+    regime_verdicts: dict[str, ProfitabilityVerdict] | None = None,
+) -> ComprehensivePromotionEvaluation:
+    """Extends evaluate_promotion() (reused unchanged, never re-
+    implemented) with the mission's own required comparisons: buy-and-
+    hold, random-entry Monte Carlo, the previous (frozen) baseline,
+    walk-forward consistency across independent rolling windows, and
+    regime consistency across market conditions. Every comparison is
+    OPTIONAL to call with -- a caller doing a partial check need not
+    have all five ready -- but a comparison that IS provided becomes a
+    REQUIRED condition for a PROMOTED verdict; nothing is ever silently
+    treated as "passed" just because it wasn't checked.
+
+    A candidate can only reach comprehensive PROMOTED if:
+      1. evaluate_promotion()'s own base verdict is PROMOTED (all three
+         splits confidently POSITIVE_PERFORMANCE), AND
+      2. every comparison the caller DID provide evaluates to True.
+
+    If the base verdict is not PROMOTED, the comprehensive verdict
+    inherits it directly (NEGATIVE/INCONCLUSIVE/REJECTED/
+    INSUFFICIENT_DATA) -- no amount of beating a benchmark rescues a
+    candidate that fails the underlying statistical bar. If the base
+    verdict IS PROMOTED but a required comparison fails, the
+    comprehensive verdict downgrades to REJECTED (clears the statistical
+    bar on its own trades, but loses to a real benchmark it must beat)."""
+    base_evaluation = evaluate_promotion(
+        candidate_name, development_returns=development_returns, validation_returns=validation_returns,
+        out_of_sample_returns=out_of_sample_returns,
+    )
+
+    all_returns = development_returns + validation_returns + out_of_sample_returns
+    candidate_mean_return_pct = (sum(all_returns) / len(all_returns) * 100.0) if all_returns else 0.0
+
+    beats_buy_and_hold = candidate_mean_return_pct > buy_and_hold_mean_return_pct if buy_and_hold_mean_return_pct is not None else None
+    beats_random_baseline = candidate_mean_return_pct > random_baseline_mean_return_pct if random_baseline_mean_return_pct is not None else None
+    beats_previous_baseline = candidate_mean_return_pct > previous_baseline_mean_return_pct if previous_baseline_mean_return_pct is not None else None
+    walk_forward_consistent = (
+        not any(v == ProfitabilityVerdict.NEGATIVE_PERFORMANCE for v in walk_forward_fold_verdicts)
+        if walk_forward_fold_verdicts is not None else None
+    )
+    regime_consistent = (
+        not any(v == ProfitabilityVerdict.NEGATIVE_PERFORMANCE for v in regime_verdicts.values())
+        if regime_verdicts is not None else None
+    )
+
+    checks = {
+        "beats_buy_and_hold": beats_buy_and_hold, "beats_random_baseline": beats_random_baseline,
+        "beats_previous_baseline": beats_previous_baseline, "walk_forward_consistent": walk_forward_consistent,
+        "regime_consistent": regime_consistent,
+    }
+    checked = {name: value for name, value in checks.items() if value is not None}
+    skipped = [name for name, value in checks.items() if value is None]
+    failed = [name for name, value in checked.items() if value is False]
+
+    if base_evaluation.verdict != PromotionVerdict.PROMOTED:
+        comprehensive_verdict = base_evaluation.verdict
+        comprehensive_rationale = (
+            f"{comprehensive_verdict.value}: inherited directly from the base dev/val/oos evaluation "
+            f"({base_evaluation.rationale}) -- comparisons against benchmarks are moot until the underlying "
+            "statistical bar is cleared."
+        )
+    elif failed:
+        comprehensive_verdict = PromotionVerdict.REJECTED
+        comprehensive_rationale = (
+            f"REJECTED: the base dev/val/oos evaluation is PROMOTED, but the candidate fails required "
+            f"comparison(s): {', '.join(failed)}. Clearing its own statistical bar is not sufficient -- it "
+            "must also beat every real benchmark it was compared against."
+        )
+    else:
+        comprehensive_verdict = PromotionVerdict.PROMOTED
+        skipped_note = f" (not checked: {', '.join(skipped)})" if skipped else ""
+        comprehensive_rationale = (
+            f"PROMOTED: the base dev/val/oos evaluation is PROMOTED and every provided comparison "
+            f"({', '.join(checked) or 'none'}) passed{skipped_note}."
+        )
+
+    return ComprehensivePromotionEvaluation(
+        base_evaluation=base_evaluation, candidate_mean_return_pct=candidate_mean_return_pct,
+        beats_buy_and_hold=beats_buy_and_hold, beats_random_baseline=beats_random_baseline,
+        beats_previous_baseline=beats_previous_baseline, walk_forward_consistent=walk_forward_consistent,
+        regime_consistent=regime_consistent, comprehensive_verdict=comprehensive_verdict,
+        comprehensive_rationale=comprehensive_rationale,
+    )
