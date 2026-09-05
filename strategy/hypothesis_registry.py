@@ -266,13 +266,35 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
             expected_effect="Capping holding time could reduce exposure to slow-bleed trades and free capital for new signals sooner.",
             dataset_restrictions="Same as H_EXIT_001.",
             experiment_design=(
-                "Not yet implemented for the BACKTEST path -- paper/engine.py already has an unrelated "
-                "max_holding_bars force-close mechanism for LIVE paper trading (built earlier this session), which "
-                "could inform this experiment's design, but has not been ported or tested against historical data."
+                "Implemented in backtesting/exit_experiments.py (run_time_based_exit_backtest / "
+                "run_universe_time_based_exit_experiment) -- reuses backtesting.execution's own OpenPosition/"
+                "check_exit/close_trade UNMODIFIED (this experiment does not touch the stop/target mechanic at "
+                "all), adding only a bars-held counter that force-closes at ExitReason.EXPIRED (the same reason "
+                "paper/engine.py's own live max_holding_bars mechanism uses) after DEFAULT_MAX_HOLDING_BARS=20 bars "
+                "if neither stop nor target has been hit. The cap (20) was chosen from the real universe's own "
+                "pooled holding-period distribution (median 7 / p75 19 / p90 29 calendar days across 441 standard-"
+                "engine trades), not an arbitrary guess -- but that SAME analysis found winning trades hold LONGER "
+                "than losing trades (winners' median 13 days vs losers' median 6 days), the opposite of the 'cut "
+                "losers short' intuition the hypothesis assumes."
             ),
             success_criteria="Same as H_EXIT_001.",
             failure_criteria="Same as H_EXIT_001.",
-            status=HypothesisStatus.OPEN,
-            evidence="Not yet implemented or tested this session.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Run against the real 41-symbol universe with the same development/validation/out-of-sample splits "
+                "as H_EXIT_001/002/003. Standard (unmodified) exit vs 20-bar time-capped exit: "
+                "Development 216->216 trades (identical count -- the cap almost never triggers here), win rate "
+                "30.56%->31.02%, expectancy -0.78%->-0.75%, profit factor 0.666->0.657 (stays NEGATIVE_PERFORMANCE, "
+                "no meaningful change). "
+                "Validation 108->112 trades, win rate 31.48%->34.82%, expectancy -0.70%->-0.54%, profit factor "
+                "0.700->0.734 (stays STATISTICALLY_MEANINGLESS; a small improvement, not decisive). "
+                "Out-of-sample 117->118 trades, win rate 38.46%->38.14%, expectancy -0.26%->-0.36%, profit factor "
+                "0.873->0.817 (stays STATISTICALLY_MEANINGLESS; a small DEGRADATION, not an improvement). "
+                "Trade counts barely move in any split, confirming the cap rarely triggers at this threshold -- "
+                "consistent with the a-priori concern that a cutoff near the overall p75 sits close to where "
+                "genuine winners are still developing, offsetting whatever benefit it has against slow-bleeding "
+                "losers. Net effect across all three splits is negligible-to-mixed, not a consistent improvement: "
+                "REJECTED. Does not meet even H_EXIT_002's lower bar of a directionally consistent, growing signal."
+            ),
         ),
     )

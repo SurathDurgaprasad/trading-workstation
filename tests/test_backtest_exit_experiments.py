@@ -4,7 +4,12 @@ import pytest
 
 from backtesting.costs import CostModel
 from backtesting.engine import run_backtest
-from backtesting.exit_experiments import run_breakeven_stop_backtest, run_partial_profit_backtest, run_trailing_stop_backtest
+from backtesting.exit_experiments import (
+    run_breakeven_stop_backtest,
+    run_partial_profit_backtest,
+    run_time_based_exit_backtest,
+    run_trailing_stop_backtest,
+)
 from backtesting.trade import ExitReason
 from strategy.signal import ReasonCode, Side, Signal
 from tests.conftest import make_bar, make_indicator_series
@@ -682,5 +687,158 @@ def test_run_universe_trailing_stop_experiment_isolates_a_failing_symbol(_fake_t
     from backtesting.exit_experiments import run_universe_trailing_stop_experiment
 
     result = run_universe_trailing_stop_experiment(["AAA", "BADSYMBOL"], strategy=_LongOneShotStrategy(), initial_capital=1_000.0)
+
+    assert "BADSYMBOL" in result.failed_symbols
+
+
+# ==========================================================================
+# H_EXIT_004: time-based exit (force-close after N bars if neither stop
+# nor target has been hit)
+# ==========================================================================
+
+
+def test_time_based_exit_matches_standard_engine_when_target_hits_before_the_cap():
+    # The cap (10 bars) is never reached -- target hits on bar 2, well
+    # before that -- so results must be BYTE-IDENTICAL to the standard,
+    # unmodified engine (this module reuses backtesting.execution's own
+    # OpenPosition/check_exit/close_trade UNMODIFIED; the only new
+    # behavior is the bars-held force-close branch, which never fires
+    # here).
+    bars = [
+        make_bar(close=100.0),
+        make_bar(open=100.0, high=101.0, low=99.0, close=100.2),
+        make_bar(open=100.2, high=112.0, low=99.5, close=110.0),
+    ]
+    series = make_indicator_series(bars)
+
+    standard_result = run_backtest(
+        symbol="TEST", indicator_series=series, strategy=_OneShotStrategy(at_index=0, stop_price=90.0, target_price=110.0),
+        cost_model=_ZERO_COST, initial_capital=100_000.0,
+    )
+    experimental_result = run_time_based_exit_backtest(
+        symbol="TEST", indicator_series=series, strategy=_OneShotStrategy(at_index=0, stop_price=90.0, target_price=110.0),
+        cost_model=_ZERO_COST, initial_capital=100_000.0, max_holding_bars=10,
+    )
+
+    assert len(standard_result.trades) == len(experimental_result.trades) == 1
+    assert _fields(standard_result.trades) == _fields(experimental_result.trades)
+    assert standard_result.trades[0].exit_reason == ExitReason.TARGET
+
+
+def test_time_based_exit_force_closes_after_the_bar_cap_is_reached():
+    # stop/target are set far away from price so neither is ever hit;
+    # with max_holding_bars=2, the position must force-close at the 2nd
+    # bar held (the fill bar itself counts as bar 1), at THAT bar's own
+    # close price -- matching paper/engine.py's own max_holding_bars
+    # convention (exit_price_override=bar.close, no extra slippage).
+    bars = [
+        make_bar(close=100.0),
+        make_bar(open=100.0, high=101.0, low=99.0, close=100.2),   # bar held #1
+        make_bar(open=100.2, high=101.0, low=99.5, close=100.5),   # bar held #2 -> force-close here
+    ]
+    series = make_indicator_series(bars)
+
+    result = run_time_based_exit_backtest(
+        symbol="TEST", indicator_series=series, strategy=_OneShotStrategy(at_index=0, stop_price=90.0, target_price=100_000.0),
+        cost_model=_ZERO_COST, initial_capital=100_000.0, max_holding_bars=2,
+    )
+
+    assert len(result.trades) == 1
+    assert result.trades[0].exit_reason == ExitReason.EXPIRED
+    assert result.trades[0].exit_price == pytest.approx(100.5)
+
+
+def test_time_based_exit_target_still_wins_over_the_cap_on_the_same_bar():
+    # The bar that would trigger the time-cap ALSO hits the real target
+    # -- the real target must win (same "resolve the real market outcome
+    # before an artificial time limit" priority used everywhere else in
+    # this codebase).
+    bars = [
+        make_bar(close=100.0),
+        make_bar(open=100.0, high=101.0, low=99.0, close=100.2),    # bar held #1
+        make_bar(open=100.2, high=101.0, low=99.5, close=100.5),    # bar held #2, ALSO hits target=100.4
+    ]
+    series = make_indicator_series(bars)
+
+    result = run_time_based_exit_backtest(
+        symbol="TEST", indicator_series=series, strategy=_OneShotStrategy(at_index=0, stop_price=90.0, target_price=100.4),
+        cost_model=_ZERO_COST, initial_capital=100_000.0, max_holding_bars=2,
+    )
+
+    assert len(result.trades) == 1
+    assert result.trades[0].exit_reason == ExitReason.TARGET
+    assert result.trades[0].exit_price == pytest.approx(100.4)
+
+
+def test_time_based_exit_end_of_data_force_close_still_works_when_cap_never_reached():
+    bars = [
+        make_bar(close=100.0),
+        make_bar(open=100.0, high=101.0, low=99.0, close=100.2),
+        make_bar(open=100.2, high=101.0, low=99.5, close=100.5),
+    ]
+    series = make_indicator_series(bars)
+
+    result = run_time_based_exit_backtest(
+        symbol="TEST", indicator_series=series, strategy=_OneShotStrategy(at_index=0, stop_price=90.0, target_price=100_000.0),
+        cost_model=_ZERO_COST, initial_capital=100_000.0, max_holding_bars=100,
+    )
+
+    assert len(result.trades) == 1
+    assert result.trades[0].exit_reason == ExitReason.END_OF_DATA
+
+
+def test_time_based_exit_raises_on_empty_series():
+    import pandas as pd
+
+    with pytest.raises(ValueError):
+        run_time_based_exit_backtest(symbol="TEST", indicator_series=pd.DataFrame(), strategy=_OneShotStrategy(at_index=0, stop_price=90.0, target_price=100.0))
+
+
+@pytest.fixture
+def _fake_time_based_universe_provider(monkeypatch):
+    """Same shape as the other H_EXIT_* universe-provider fixtures."""
+    from market.data_provider import MarketDataError, OHLCV
+
+    class _Provider:
+        def __init__(self, good_symbols):
+            self._good = good_symbols
+
+        def fetch_ohlcv(self, symbol, *, period="5y", interval="1d"):
+            if symbol not in self._good:
+                raise MarketDataError(f"no data for {symbol}")
+            return OHLCV(symbol=symbol, interval=interval, bars=_long_bars())
+
+    def _apply(good_symbols):
+        import market.data_provider as market_data_provider_module
+
+        monkeypatch.setattr(market_data_provider_module, "get_market_data_provider", lambda: _Provider(good_symbols))
+
+        import backtesting.cache as cache_module
+
+        monkeypatch.setattr(cache_module, "CachedMarketDataProvider", lambda inner: inner)
+
+    return _apply
+
+
+def test_run_universe_time_based_exit_experiment_pools_across_symbols(_fake_time_based_universe_provider):
+    _fake_time_based_universe_provider({"AAA", "BBB"})
+
+    from backtesting.exit_experiments import UniverseTimeBasedExitExperimentResult, run_universe_time_based_exit_experiment
+
+    result = run_universe_time_based_exit_experiment(["AAA", "BBB"], strategy=_LongOneShotStrategy(), initial_capital=1_000.0)
+
+    assert isinstance(result, UniverseTimeBasedExitExperimentResult)
+    assert result.failed_symbols == {}
+    assert isinstance(result.development_trades, list)
+    assert isinstance(result.validation_trades, list)
+    assert isinstance(result.out_of_sample_trades, list)
+
+
+def test_run_universe_time_based_exit_experiment_isolates_a_failing_symbol(_fake_time_based_universe_provider):
+    _fake_time_based_universe_provider({"AAA"})
+
+    from backtesting.exit_experiments import run_universe_time_based_exit_experiment
+
+    result = run_universe_time_based_exit_experiment(["AAA", "BADSYMBOL"], strategy=_LongOneShotStrategy(), initial_capital=1_000.0)
 
     assert "BADSYMBOL" in result.failed_symbols

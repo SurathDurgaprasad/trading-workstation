@@ -12,12 +12,14 @@ class ExitReason(str, Enum):
     END_OF_DATA = "END_OF_DATA"
     # Phase (paper order fill lifecycle hardening) -- ONLY ever assigned by
     # PaperTradingEngine's own optional max_holding_bars force-close (see
-    # paper/engine.py's _process_open_position), never by check_exit()
-    # itself (backtesting/execution.py's check_exit only ever returns STOP
-    # or TARGET) and never by the backtester (which only ever assigns
-    # END_OF_DATA). predictions/tracker.py's own exit_reason == TARGET
-    # check is unaffected -- it only ever sees check_exit()'s own STOP/
-    # TARGET return value directly, never a caller-assigned override.
+    # paper/engine.py's _process_open_position) and, since H_EXIT_004, by
+    # backtesting/exit_experiments.py's own isolated time-based-exit
+    # logic. Never by check_exit() itself (backtesting/execution.py's
+    # check_exit only ever returns STOP or TARGET) and never by the
+    # STANDARD backtester (backtesting/engine.py's run_backtest only ever
+    # assigns END_OF_DATA). predictions/tracker.py's own exit_reason ==
+    # TARGET check is unaffected -- it only ever sees check_exit()'s own
+    # STOP/TARGET return value directly, never a caller-assigned override.
     EXPIRED = "EXPIRED"
     # H_EXIT_002 (backtesting/exit_experiments.py) -- ONLY ever assigned by
     # that module's own isolated partial-profit-take logic when part of a

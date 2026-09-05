@@ -59,16 +59,15 @@ def test_h_entry_005_is_inconclusive_not_falsely_rejected_or_supported():
     assert "283" in h.evidence  # the real dominant-bucket trade count
 
 
-def test_exit_hypotheses_not_yet_run_remain_open():
-    """H_EXIT_001/002/003 have now been implemented and tested (see the
-    dedicated tests below); only H_EXIT_004 remains untested."""
+def test_all_exit_hypotheses_have_now_been_implemented_and_tested():
+    """H_EXIT_001 through H_EXIT_004 have all been implemented and run
+    against the real 41-symbol universe this session (see the dedicated
+    tests below) -- none remain OPEN."""
     registry = build_hypothesis_registry()
     exit_hypotheses = [h for h in registry if h.hypothesis_id.startswith("H_EXIT_")]
 
     assert len(exit_hypotheses) == 4
-    still_open = [h for h in exit_hypotheses if h.hypothesis_id not in ("H_EXIT_001", "H_EXIT_002", "H_EXIT_003")]
-    assert len(still_open) == 1
-    assert all(h.status == HypothesisStatus.OPEN for h in still_open)
+    assert all(h.status != HypothesisStatus.OPEN for h in exit_hypotheses)
 
 
 def test_h_exit_001_is_rejected_with_the_real_dev_val_oos_evidence():
@@ -125,6 +124,21 @@ def test_h_exit_003_is_rejected_with_the_real_dev_val_oos_evidence():
     assert "REJECTED" in h.evidence
     assert "0.530" in h.evidence
     assert "WORSENS" in h.evidence
+
+
+def test_h_exit_004_is_rejected_with_the_real_dev_val_oos_evidence():
+    """The 20-bar time-based-exit experiment was run against the same
+    real 41-symbol universe. Trade counts barely moved in any split
+    (the cap rarely triggers at this threshold), and the net effect was
+    negligible-to-mixed -- one split marginally better, one marginally
+    worse, none decisively improved. REJECTED: does not meet even
+    H_EXIT_002's lower bar of a directionally consistent signal."""
+    registry = build_hypothesis_registry()
+    h = next(h for h in registry if h.hypothesis_id == "H_EXIT_004")
+
+    assert h.status == HypothesisStatus.REJECTED
+    assert "REJECTED" in h.evidence
+    assert "216->216" in h.evidence
 
 
 def test_build_hypothesis_registry_returns_a_fresh_tuple_each_call():
