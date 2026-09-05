@@ -475,6 +475,36 @@ def run_backtest_universe_command(args: argparse.Namespace) -> None:
         print(f"\n  Recorded to {db_path} (evaluation_id={evaluation_id}) -- an append-only audit trail; this")
         print("  evaluation is never overwritten by a later, more favorable re-evaluation of the same candidate.")
 
+    if args.walk_forward_folds:
+        from backtesting.walk_forward import run_walk_forward_validation
+
+        walk_forward_result = run_walk_forward_validation(
+            universe.symbols, strategy=strategy, n_folds=args.walk_forward_folds, period=args.period,
+            interval=args.interval, initial_capital=args.initial_capital, cost_model=cost_model,
+        )
+
+        print("\n" + "-" * 50)
+        print(f"WALK-FORWARD VALIDATION (Phase 7 -- {args.walk_forward_folds} sequential rolling windows, pooled per fold)")
+        print("-" * 50 + "\n")
+        if walk_forward_result.failed_symbols:
+            print(f"({len(walk_forward_result.failed_symbols)} symbol(s) failed and were excluded, not silently dropped)\n")
+
+        fold_verdicts = []
+        for fold in walk_forward_result.folds:
+            r = fold.report
+            fold_verdicts.append(r.verdict.value)
+            win_rate_text = f"{r.win_rate:.1%}" if r.win_rate is not None else "N/A"
+            expectancy_text = f"{r.expectancy:+.2%}" if r.expectancy is not None else "N/A"
+            pf_text = f"{r.profit_factor:.2f}" if r.profit_factor is not None else "N/A"
+            print(f"  Fold {fold.fold_index}: {r.sample_size:>4} trades, win rate {win_rate_text:>7}, expectancy {expectancy_text:>8}, profit factor {pf_text:>5}, verdict {r.verdict.value}")
+
+        negative_folds = fold_verdicts.count("NEGATIVE_PERFORMANCE")
+        positive_folds = fold_verdicts.count("POSITIVE_PERFORMANCE")
+        print(f"\n  {negative_folds}/{len(fold_verdicts)} folds NEGATIVE_PERFORMANCE, {positive_folds}/{len(fold_verdicts)} folds POSITIVE_PERFORMANCE.")
+        print("  Each fold is an INDEPENDENT rolling window (not a single cherry-picked split) -- a strategy with a")
+        print("  real edge should show POSITIVE_PERFORMANCE (or at least non-negative) consistently across folds,")
+        print("  not just in one or two out of many.")
+
     if args.compare_baselines:
         from strategy.simple_baselines import SimpleMomentumBaseline, SimpleTrendBaseline
 
@@ -2706,6 +2736,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     backtest_universe_parser.add_argument(
         "--promotion-gate-db", type=str, default=None,
         help="Override the promotion-gate audit trail's SQLite file path (default: data/promotion_gate.db).",
+    )
+    backtest_universe_parser.add_argument(
+        "--walk-forward-folds", type=int, default=0,
+        help=(
+            "Strategy science Phase 7: split each symbol's own available history into N equal, "
+            "sequential, non-overlapping windows (proportional per symbol, pooled by fold index "
+            "across the universe -- the same convention --temporal-robustness already uses for its "
+            "3-way split, generalized to N) and report a profitability verdict per fold. Answers "
+            "whether an edge (or lack of one) is stable across MANY independent rolling windows, not "
+            "just one particular split. 0 (default) skips this."
+        ),
     )
 
     paper_parser = subparsers.add_parser(

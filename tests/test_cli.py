@@ -60,6 +60,7 @@ def test_backtest_universe_subcommand_defaults():
     assert args.compare_baselines is False
     assert args.promotion_gate is False
     assert args.promotion_gate_db is None
+    assert args.walk_forward_folds == 0
 
 
 def test_backtest_universe_subcommand_accepts_promotion_gate_flag():
@@ -70,6 +71,11 @@ def test_backtest_universe_subcommand_accepts_promotion_gate_flag():
 def test_backtest_universe_subcommand_accepts_promotion_gate_db_override():
     args = parse_args(["backtest-universe", "--symbols", "AAPL", "--promotion-gate-db", "custom.db"])
     assert args.promotion_gate_db == "custom.db"
+
+
+def test_backtest_universe_subcommand_accepts_walk_forward_folds():
+    args = parse_args(["backtest-universe", "--symbols", "AAPL", "--walk-forward-folds", "6"])
+    assert args.walk_forward_folds == 6
 
 
 def test_backtest_universe_subcommand_accepts_compare_baselines_flag():
