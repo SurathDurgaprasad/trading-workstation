@@ -243,6 +243,61 @@ def run_backtest_universe_command(args: argparse.Namespace) -> None:
         m = backtest_result.metrics
         print(f"{symbol:<16} {m.total_trades:>3} trades, win rate {m.win_rate_pct:>6.2f}%, net PnL {m.net_pnl:>12,.2f}, expectancy {('%.2fR' % m.expectancy) if m.expectancy is not None else 'N/A':>8}")
 
+    # Weekend hardening, Phase 7B/7C (strategy forensics): WHERE does the
+    # negative expectancy come from -- see backtesting/forensics.py's own
+    # module docstring. Re-fetches each symbol's (cached) indicator series
+    # purely to reconstruct MFE/MAE after the fact; does not affect how a
+    # trade was actually generated or filled.
+    from backtesting.cache import CachedMarketDataProvider
+    from backtesting.forensics import (
+        TradeExcursion,
+        breakdown_by_exit_reason,
+        compute_trade_excursion,
+        summarize_excursions,
+    )
+    from market.data_provider import MarketDataError, get_market_data_provider
+    from market.indicators import compute_indicator_series
+
+    print("\n" + "-" * 50)
+    print("EXIT-REASON ATTRIBUTION (Phase 7B -- where does the negative expectancy come from)")
+    print("-" * 50 + "\n")
+    exit_buckets = breakdown_by_exit_reason(result.pooled_trades)
+    for bucket in exit_buckets:
+        print(f"{bucket.exit_reason.value:<14} {bucket.count:>4} trades, win rate {bucket.win_rate_pct:>6.2f}%, mean net PnL {bucket.mean_net_pnl:>10,.2f}, mean R {bucket.mean_r_multiple:>+6.2f}")
+
+    provider = CachedMarketDataProvider(get_market_data_provider())
+    excursions: list[TradeExcursion] = []
+    for symbol, backtest_result in result.per_symbol.items():
+        if not backtest_result.trades:
+            continue
+        try:
+            series = compute_indicator_series(provider.fetch_ohlcv(symbol, period=args.period, interval=args.interval))
+        except (ValueError, MarketDataError) as exc:
+            print(f"\n  (skipped excursion analysis for {symbol}: {exc})")
+            continue
+        for trade in backtest_result.trades:
+            excursion = compute_trade_excursion(trade, series)
+            if excursion is not None:
+                excursions.append(excursion)
+
+    excursion_summary = summarize_excursions(excursions)
+    print("\n" + "-" * 50)
+    print("MAXIMUM FAVORABLE/ADVERSE EXCURSION (Phase 7C -- entry vs exit attribution)")
+    print("-" * 50 + "\n")
+    if excursion_summary is None:
+        print("(no trades to analyze)")
+    else:
+        print(f"Trades analyzed:               {excursion_summary.trade_count}")
+        print(f"Mean MFE (best unrealized gain): {excursion_summary.mean_mfe_pct:.2%}")
+        print(f"Mean MAE (worst unrealized loss): {excursion_summary.mean_mae_pct:.2%}")
+        print(
+            f"Losing trades with a large favorable excursion first "
+            f"(>=50% of the trade's own initial risk): {excursion_summary.losers_with_large_mfe_count} "
+            f"({excursion_summary.losers_with_large_mfe_pct_of_losers:.1f}% of all losers)"
+        )
+        print("  -> A high percentage here means many losing trades WERE profitable at some point")
+        print("     before reversing -- evidence pointing at exit logic, not entry logic.")
+
     pooled_returns = per_trade_returns(result.pooled_trades)
     report = compute_profitability_report_from_returns(pooled_returns)
 

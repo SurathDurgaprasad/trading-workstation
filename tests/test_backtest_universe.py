@@ -140,3 +140,80 @@ def test_run_universe_backtest_isolates_a_failing_symbol_from_the_rest():
 
 def test_universe_backtest_result_pooled_trades_property_is_empty_by_default():
     assert UniverseBacktestResult().pooled_trades == []
+
+
+# --- run_backtest_universe_command (CLI, forensics section) --------------------
+
+
+def test_backtest_universe_command_prints_forensics_sections(monkeypatch, capsys):
+    """Smoke test for the Phase 7B/7C forensics section added to the CLI
+    command: proves it runs end-to-end and prints every new section
+    without crashing, given a real completed trade to analyze. The
+    underlying math (exit-reason buckets, MFE/MAE) is already covered in
+    isolation by tests/test_backtest_forensics.py -- this only proves the
+    CLI wiring reaches it."""
+    import backtesting.universe as universe_module
+    import strategy.registry as registry_module
+    from main import parse_args, run_backtest_universe_command
+    from market.data_provider import OHLCV, OHLCVBar
+
+    class _StopHitStrategy:
+        name = "stop_hit_test_strategy"
+
+        def __init__(self):
+            self._fired = False
+
+        def generate_signal(self, indicator_series, index, symbol):
+            if index != 0 or self._fired:
+                return None
+            self._fired = True
+            row = indicator_series.iloc[index]
+            return Signal(
+                symbol=symbol, generated_at=indicator_series.index[index], side=Side.LONG,
+                reference_price=float(row["close"]), stop_price=90.0, target_price=200.0,
+                risk_reward=2.0, strategy_name=self.name, reason_codes=[ReasonCode.TREND_CONFIRMED],
+            )
+
+    def _stop_hit_bars() -> list[OHLCVBar]:
+        t0 = datetime(2026, 1, 1)
+        return [
+            OHLCVBar(timestamp=t0, open=100.0, high=101.0, low=99.0, close=100.0, volume=1_000_000.0),
+            OHLCVBar(timestamp=t0 + timedelta(days=1), open=100.0, high=105.0, low=99.0, close=104.0, volume=1_000_000.0),
+            OHLCVBar(timestamp=t0 + timedelta(days=2), open=104.0, high=106.0, low=80.0, close=82.0, volume=1_000_000.0),
+        ]
+
+    class _FixedProvider:
+        def fetch_ohlcv(self, symbol, *, period="5y", interval="1d"):
+            return OHLCV(symbol=symbol, interval=interval, bars=_stop_hit_bars())
+
+    monkeypatch.setattr(universe_module, "get_market_data_provider", lambda: _FixedProvider())
+    monkeypatch.setattr(registry_module, "get_strategy", lambda name: _StopHitStrategy())
+    # main.run_backtest_universe_command's own forensics re-fetch also goes
+    # through market.data_provider.get_market_data_provider (a fresh,
+    # function-local import each call, unlike backtesting.universe's own
+    # module-top import) -- patch the source module directly for that path.
+    import market.data_provider as market_data_provider_module
+
+    monkeypatch.setattr(market_data_provider_module, "get_market_data_provider", lambda: _FixedProvider())
+
+    # "AAPL" is a REAL cached symbol in this repo's own data/market/ --
+    # CachedMarketDataProvider would silently serve the real 5-year cache
+    # on a hit, ignoring _FixedProvider entirely, and on a genuine cache
+    # MISS for any other symbol it would WRITE a new file under
+    # data/market/ as a real side effect. Bypass caching altogether (same
+    # `lambda inner: inner` pattern tests/test_shadow_run.py's own fixture
+    # already uses) so this test touches no real files either way.
+    import backtesting.cache as cache_module
+
+    monkeypatch.setattr(cache_module, "CachedMarketDataProvider", lambda inner: inner)
+    monkeypatch.setattr(universe_module, "CachedMarketDataProvider", lambda inner: inner)
+
+    args = parse_args(["backtest-universe", "--symbols", "AAPL", "--initial-capital", "100000"])
+    run_backtest_universe_command(args)
+
+    output = capsys.readouterr().out
+    assert "EXIT-REASON ATTRIBUTION" in output
+    assert "STOP" in output
+    assert "MAXIMUM FAVORABLE/ADVERSE EXCURSION" in output
+    assert "Trades analyzed:               1" in output
+    assert "POOLED VERDICT" in output
