@@ -450,12 +450,14 @@ def run_backtest_universe_command(args: argparse.Namespace) -> None:
             print(f"({len(temporal_result.failed_symbols)} symbol(s) failed and were excluded, not silently dropped)")
 
         period_reports = {}
+        period_returns = {}
         for label, trades in (
             ("Development", temporal_result.development_trades),
             ("Validation", temporal_result.validation_trades),
             ("Out-of-Sample", temporal_result.out_of_sample_trades),
         ):
             returns = per_trade_returns(trades)
+            period_returns[label] = returns
             period_report = compute_profitability_report_from_returns(returns)
             period_reports[label] = period_report
             win_rate_text = f"{period_report.win_rate:.1%} (95% CI {period_report.win_rate_ci_low:.1%}-{period_report.win_rate_ci_high:.1%})" if period_report.win_rate is not None else "N/A"
@@ -475,6 +477,22 @@ def run_backtest_universe_command(args: argparse.Namespace) -> None:
             print(f"  INTERPRETATION: consistent verdict ({dev_verdict}) across all three periods.")
         else:
             print("  INTERPRETATION: verdicts differ across periods -- treat as temporally unstable, not proof of an edge in any one period.")
+
+        if args.multiple_testing_correction:
+            from strategy.multiple_testing import apply_multiple_testing_correction
+
+            audit = apply_multiple_testing_correction(period_returns)
+
+            print("\n" + "-" * 50)
+            print(f"MULTIPLE TESTING CORRECTION (Phase 9 -- family of {audit.family_size} simultaneous tests, Bonferroni)")
+            print("-" * 50 + "\n")
+            print(f"Corrected z: {audit.corrected_z:.4f} (vs. 1.96 uncorrected) for alpha={audit.alpha}")
+            for r in audit.results:
+                flag = " <- VERDICT CHANGED" if r.verdict_changed else ""
+                print(f"  {r.name:<16} uncorrected={r.uncorrected.verdict.value:<24} corrected={r.corrected.verdict.value}{flag}")
+            print(f"\n  Any split still POSITIVE_PERFORMANCE after correction: {audit.any_verdict_survives_correction_as_positive}")
+            print("  A positive result that only appears BEFORE correction is exactly the false-positive risk")
+            print("  running several simultaneous tests against the same dataset creates.")
 
     if args.promotion_gate:
         from backtesting.universe import run_universe_backtest_by_period
@@ -2744,6 +2762,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "trades (backtesting.runner's existing 60/20/20 chronological split, reused verbatim) "
             "across the universe and report a verdict per period -- detects overfitting (development "
             "positive, validation/OOS negative) and temporal instability."
+        ),
+    )
+    backtest_universe_parser.add_argument(
+        "--multiple-testing-correction", action="store_true",
+        help=(
+            "Strategy science Phase 9: requires --temporal-robustness (uses its already-computed "
+            "development/validation/out-of-sample returns as a family of 3 simultaneous tests). Applies "
+            "a Bonferroni correction (strategy.multiple_testing) and reports each split's verdict at "
+            "both the standard 95%% confidence level and the corrected level, flagging any that differ -- "
+            "a positive result that only appears before correction is exactly the false-positive risk "
+            "running several simultaneous tests against the same dataset creates."
         ),
     )
     backtest_universe_parser.add_argument(

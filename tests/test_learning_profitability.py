@@ -15,6 +15,7 @@ from learning.profitability import (
     _max_drawdown,
     _wilson_score_interval,
     compute_profitability_report,
+    compute_profitability_report_from_returns,
     compute_sector_performance,
 )
 from market_intelligence.models import CandidateScore
@@ -246,3 +247,46 @@ def test_sector_performance_groups_missing_sector_as_unknown():
 
 def test_sector_performance_empty_for_no_items():
     assert compute_sector_performance([]) == []
+
+
+# --- compute_profitability_report_from_returns's optional `z` override -----
+
+
+def test_default_z_matches_the_original_hardcoded_95_percent_behavior():
+    import random
+
+    rng = random.Random(7)
+    returns = [0.008 + rng.gauss(0, 0.03) for _ in range(40)]
+    report = compute_profitability_report_from_returns(returns)
+    assert "95%" in report.reasoning[1]
+
+
+def test_a_stricter_z_widens_the_ci_and_can_downgrade_the_verdict():
+    # strategy.multiple_testing's own Bonferroni-corrected z for a
+    # 9-hypothesis family (this session's real H_ENTRY_*/H_EXIT_* count)
+    # is ~2.77 -- a WIDER interval than the uncorrected 95% default. A
+    # borderline-positive sample (POSITIVE_PERFORMANCE at the default
+    # 1.96) must downgrade to STATISTICALLY_MEANINGLESS once corrected
+    # for having run several simultaneous tests against the same data.
+    import random
+
+    rng = random.Random(7)
+    returns = [0.008 + rng.gauss(0, 0.03) for _ in range(40)]
+    default_report = compute_profitability_report_from_returns(returns)
+    corrected_report = compute_profitability_report_from_returns(returns, z=2.7729)
+
+    assert default_report.verdict == ProfitabilityVerdict.POSITIVE_PERFORMANCE
+    assert corrected_report.verdict == ProfitabilityVerdict.STATISTICALLY_MEANINGLESS
+    assert corrected_report.mean_return_ci_low < default_report.mean_return_ci_low
+    assert corrected_report.mean_return_ci_high > default_report.mean_return_ci_high
+    assert "99.4%" in corrected_report.reasoning[1]
+
+
+def test_existing_callers_omitting_z_are_unaffected():
+    # Behavior-preservation check: every pre-existing call site (none of
+    # which pass z) must produce IDENTICAL results to before this
+    # parameter existed.
+    returns = [0.01, -0.02, 0.03, -0.01, 0.02] * 10
+    with_default_kwarg = compute_profitability_report_from_returns(returns, z=1.96)
+    without_kwarg_at_all = compute_profitability_report_from_returns(returns)
+    assert with_default_kwarg == without_kwarg_at_all

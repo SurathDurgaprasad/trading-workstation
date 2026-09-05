@@ -31,6 +31,7 @@ from __future__ import annotations
 import math
 from datetime import datetime, timezone
 from enum import Enum
+from statistics import NormalDist
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
@@ -198,7 +199,7 @@ def compute_profitability_report(items: list["EvaluatedPrediction"]) -> Profitab
     return compute_profitability_report_from_returns(returns)
 
 
-def compute_profitability_report_from_returns(returns: list[float]) -> ProfitabilityReport:
+def compute_profitability_report_from_returns(returns: list[float], *, z: float = _CONFIDENCE_Z) -> ProfitabilityReport:
     """The exact same Wilson-CI/mean-CI verdict machinery
     compute_profitability_report uses, factored out to operate on a plain
     list of per-trade returns rather than EvaluatedPrediction objects --
@@ -207,7 +208,14 @@ def compute_profitability_report_from_returns(returns: list[float]) -> Profitabi
     applies to prediction evidence, rather than inventing a second,
     potentially-drifting one. compute_profitability_report itself is now
     a thin wrapper around this (behavior-preserving refactor -- verified
-    via the existing test suite passing unchanged)."""
+    via the existing test suite passing unchanged).
+
+    `z` optionally overrides the default 95% confidence z-score (1.96) --
+    used by strategy.multiple_testing to apply a Bonferroni-corrected,
+    WIDER interval when evaluating one of several simultaneous hypothesis
+    tests against the same dataset, reusing this module's own machinery
+    rather than duplicating it. Every existing caller omits `z` and gets
+    byte-identical behavior to before this parameter existed."""
     from learning.analysis import _resolution_stats
 
     n = len(returns)
@@ -223,9 +231,11 @@ def compute_profitability_report_from_returns(returns: list[float]) -> Profitabi
     expectancy = average_return  # the exact mean of every resolved return -- see the field's own docstring for why this is not reconstructed from win/loss averages
 
     win_ci_low, win_ci_high = _wilson_score_interval(len(wins), n)
-    mean_ci = _mean_confidence_interval(returns)
+    mean_ci = _mean_confidence_interval(returns, z=z)
     max_dd = _max_drawdown(returns)
     volatility = _sample_stdev(returns)
+
+    confidence_pct_text = "95%" if z == _CONFIDENCE_Z else f"{(2 * NormalDist().cdf(z) - 1) * 100:.1f}%"
 
     reasoning: list[str] = [
         f"{n} resolved prediction(s) with a recorded return (minimum required for any verdict: {MIN_SAMPLE_SIZE_FOR_A_VERDICT}).",
@@ -239,9 +249,9 @@ def compute_profitability_report_from_returns(returns: list[float]) -> Profitabi
         verdict = ProfitabilityVerdict.INSUFFICIENT_DATA
     else:
         ci_low, ci_high = mean_ci
-        reasoning.append(f"Mean per-trade return: {average_return:+.2%}, 95% CI [{ci_low:+.2%}, {ci_high:+.2%}].")
+        reasoning.append(f"Mean per-trade return: {average_return:+.2%}, {confidence_pct_text} CI [{ci_low:+.2%}, {ci_high:+.2%}].")
         if ci_low <= 0.0 <= ci_high:
-            reasoning.append("The confidence interval straddles zero -- this average return cannot be distinguished from noise at 95% confidence.")
+            reasoning.append(f"The confidence interval straddles zero -- this average return cannot be distinguished from noise at {confidence_pct_text} confidence.")
             verdict = ProfitabilityVerdict.STATISTICALLY_MEANINGLESS
         elif ci_low > 0.0:
             reasoning.append("The confidence interval lies entirely above zero.")

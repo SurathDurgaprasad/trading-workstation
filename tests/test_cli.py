@@ -62,6 +62,12 @@ def test_backtest_universe_subcommand_defaults():
     assert args.promotion_gate_db is None
     assert args.walk_forward_folds == 0
     assert args.execution_robustness_iterations == 0
+    assert args.multiple_testing_correction is False
+
+
+def test_backtest_universe_subcommand_accepts_multiple_testing_correction_flag():
+    args = parse_args(["backtest-universe", "--symbols", "AAPL", "--multiple-testing-correction"])
+    assert args.multiple_testing_correction is True
 
 
 def test_backtest_universe_subcommand_accepts_execution_robustness_iterations():
