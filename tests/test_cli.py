@@ -53,6 +53,12 @@ def test_backtest_universe_subcommand_defaults():
     assert args.initial_capital == 100_000.0
     assert args.strategy == "trend_momentum_baseline"
     assert args.cost_model == "default"
+    assert args.random_baseline_iterations == 0
+
+
+def test_backtest_universe_subcommand_accepts_random_baseline_iterations():
+    args = parse_args(["backtest-universe", "--symbols", "AAPL", "--random-baseline-iterations", "50"])
+    assert args.random_baseline_iterations == 50
 
 
 def test_backtest_universe_subcommand_accepts_nse_cost_model():

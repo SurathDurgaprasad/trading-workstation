@@ -319,6 +319,42 @@ def run_backtest_universe_command(args: argparse.Namespace) -> None:
     for line in report.reasoning:
         print(f"  - {line}")
 
+    if args.random_baseline_iterations > 0:
+        from backtesting.random_baseline import run_random_baseline_monte_carlo
+
+        real_trade_counts = {symbol: len(r.trades) for symbol, r in result.per_symbol.items()}
+        indicator_series_by_symbol: dict = {}
+        for symbol in result.per_symbol:
+            if real_trade_counts.get(symbol, 0) <= 0:
+                continue
+            try:
+                indicator_series_by_symbol[symbol] = compute_indicator_series(
+                    provider.fetch_ohlcv(symbol, period=args.period, interval=args.interval)
+                )
+            except (ValueError, MarketDataError):
+                continue  # already reported as a skip in the excursion section above
+
+        import dataclasses
+
+        mc_result = run_random_baseline_monte_carlo(
+            indicator_series_by_symbol=indicator_series_by_symbol, real_trade_counts_by_symbol=real_trade_counts,
+            iterations=args.random_baseline_iterations, initial_capital=args.initial_capital, cost_model=cost_model,
+        )
+        real_mean_return_pct = (sum(pooled_returns) / len(pooled_returns) * 100.0) if pooled_returns else None
+        mc_result = dataclasses.replace(mc_result, real_strategy_mean_return_pct=real_mean_return_pct)
+
+        print("\n" + "-" * 50)
+        print(f"RANDOM-ENTRY BASELINE (Phase 5 -- {len(mc_result.iterations)} Monte Carlo iterations)")
+        print("-" * 50 + "\n")
+        random_means = [it.mean_return_pct for it in mc_result.iterations]
+        print(f"Real strategy pooled mean return:   {real_mean_return_pct:+.2f}%" if real_mean_return_pct is not None else "Real strategy pooled mean return:   N/A")
+        print(f"Random baseline mean return (avg of iterations): {sum(random_means) / len(random_means):+.2f}%" if random_means else "Random baseline: no iterations produced trades")
+        fraction = mc_result.fraction_random_at_least_as_good
+        if fraction is not None:
+            print(f"Fraction of random iterations >= real strategy's result: {fraction:.1%}")
+            print("  -> A HIGH fraction means the real result is unremarkable vs. pure chance;")
+            print("     a LOW fraction means entry timing itself carried real information.")
+
     print("\n" + "-" * 50)
     print("\nIMPORTANT:")
     print("This is historical simulation across a fixed universe, not evidence of future profitability.")
@@ -2421,6 +2457,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     backtest_universe_parser.add_argument("--interval", default="1d", help="Bar interval (default: 1d).")
     backtest_universe_parser.add_argument("--initial-capital", type=float, default=100_000.0, help="Starting capital per symbol's own independent backtest (default: 100000).")
     backtest_universe_parser.add_argument("--strategy", default="trend_momentum_baseline", help="Registered strategy name (default: trend_momentum_baseline).")
+    backtest_universe_parser.add_argument(
+        "--random-baseline-iterations", type=int, default=0,
+        help=(
+            "Strategy science Phase 5: run N Monte Carlo iterations of a random-entry baseline "
+            "(same ATR-based stop/target/sizing/cost assumptions, only entry TIMING randomized, "
+            "matching each symbol's own real trade count) and report what fraction of random "
+            "iterations performed at least as well as the real strategy. 0 (default) skips this -- "
+            "opt-in because each iteration re-runs the full universe (~2-3s/iteration; 200-300 "
+            "iterations is a reasonable range for a meaningful distribution)."
+        ),
+    )
     backtest_universe_parser.add_argument(
         "--cost-model", choices=["default", "india_nse_intraday_2026"], default="default",
         help=(
