@@ -441,6 +441,31 @@ def run_backtest_universe_command(args: argparse.Namespace) -> None:
         else:
             print("  INTERPRETATION: verdicts differ across periods -- treat as temporally unstable, not proof of an edge in any one period.")
 
+    if args.compare_baselines:
+        from strategy.simple_baselines import SimpleMomentumBaseline, SimpleTrendBaseline
+
+        print("\n" + "-" * 50)
+        print("BASELINE COMPARISON -- STRATEGY COMPLEXITY (Phase 3)")
+        print("-" * 50 + "\n")
+
+        comparison_rows = [(strategy.name, report)]
+        for candidate in (SimpleMomentumBaseline(), SimpleTrendBaseline()):
+            candidate_universe_result = run_universe_backtest(
+                universe.symbols, strategy=candidate, period=args.period, interval=args.interval,
+                initial_capital=args.initial_capital, cost_model=cost_model,
+            )
+            candidate_returns = per_trade_returns(candidate_universe_result.pooled_trades)
+            candidate_report = compute_profitability_report_from_returns(candidate_returns)
+            comparison_rows.append((candidate.name, candidate_report))
+
+        for name, candidate_report in comparison_rows:
+            win_rate_text = f"{candidate_report.win_rate:.1%}" if candidate_report.win_rate is not None else "N/A"
+            expectancy_text = f"{candidate_report.expectancy:+.2%}" if candidate_report.expectancy is not None else "N/A"
+            pf_text = f"{candidate_report.profit_factor:.2f}" if candidate_report.profit_factor is not None else "N/A"
+            print(f"{name:<28} {candidate_report.sample_size:>4} trades, win rate {win_rate_text:>7}, expectancy {expectancy_text:>8}, profit factor {pf_text:>5}, verdict {candidate_report.verdict.value}")
+        print("\n  A simpler rule performing comparably (or better) means the selected strategy's added")
+        print("  complexity is not justified by this evidence.")
+
     print("\n" + "-" * 50)
     print("\nIMPORTANT:")
     print("This is historical simulation across a fixed universe, not evidence of future profitability.")
@@ -2570,6 +2595,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "trades (backtesting.runner's existing 60/20/20 chronological split, reused verbatim) "
             "across the universe and report a verdict per period -- detects overfitting (development "
             "positive, validation/OOS negative) and temporal instability."
+        ),
+    )
+    backtest_universe_parser.add_argument(
+        "--compare-baselines", action="store_true",
+        help=(
+            "Strategy science Phase 3: run SimpleMomentumBaseline (close > SMA20 only) and "
+            "SimpleTrendBaseline (SMA20 > SMA50 only) against the SAME universe (same ATR-based "
+            "stop/target risk mechanics as the selected --strategy, isolating entry-condition "
+            "complexity as the only variable) and report a side-by-side comparison -- answers "
+            "whether the selected strategy's added complexity actually outperforms these simpler rules."
         ),
     )
     backtest_universe_parser.add_argument(

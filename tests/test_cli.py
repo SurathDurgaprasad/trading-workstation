@@ -56,6 +56,12 @@ def test_backtest_universe_subcommand_defaults():
     assert args.random_baseline_iterations == 0
     assert args.regime_analysis is False
     assert args.temporal_robustness is False
+    assert args.compare_baselines is False
+
+
+def test_backtest_universe_subcommand_accepts_compare_baselines_flag():
+    args = parse_args(["backtest-universe", "--symbols", "AAPL", "--compare-baselines"])
+    assert args.compare_baselines is True
 
 
 def test_backtest_universe_subcommand_accepts_regime_analysis_flag():
