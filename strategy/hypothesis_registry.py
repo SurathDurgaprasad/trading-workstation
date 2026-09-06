@@ -103,8 +103,24 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
             experiment_design="Not yet built.",
             success_criteria="Pullback variant beats TrendMomentumBaseline's pooled expectancy with sufficient sample size (>=30 trades).",
             failure_criteria="No improvement, or an improvement not statistically distinguishable from noise.",
-            status=HypothesisStatus.OPEN,
-            evidence="Not yet tested this session.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "STRATEGY EDGE DISCOVERY mission, Phase B (see docs/H_ENTRY_PULLBACK_EVALUATION.md for the full "
+                "evidence): implemented as PullbackContinuationStrategy (strategy/pullback_continuation.py) -- "
+                "uptrend + net-bullish momentum + RSI14 was >=55 two bars ago, has since cooled into [40,55], plus a "
+                "same-day resumption close -- reusing TrendMomentumBaseline's own ATR-based stop/target verbatim. "
+                "Run against the real 41-symbol universe, 5 years daily bars: only 14 development / 10 validation / "
+                "5 out-of-sample trades (29 total, pooled) -- INSUFFICIENT_DATA, below the 30-trade floor even "
+                "pooled across all three splits. The rule's five-way AND condition, with a specific 2-bar RSI-shape "
+                "requirement, fires too rarely to be evaluated with confidence on the available data. Directionally "
+                "favorable point estimates were observed (beats the frozen baseline's own per-trade mean, beats "
+                "64% of random-baseline Monte Carlo iterations) but are not meaningful at this sample size. "
+                "INCONCLUSIVE: not evidence against the underlying pullback idea, but evidence that this specific "
+                "implementation cannot be tested as designed. Per the mission's own explicit instruction, the rule "
+                "was NOT loosened and re-run to clear the sample floor -- that would be the prohibited "
+                "'adjust until profitable' pattern. This result, combined with H_EXIT_002's own INCONCLUSIVE "
+                "verdict, triggers the mission's stop condition; no further entry hypotheses were implemented."
+            ),
         ),
         HypothesisRecord(
             hypothesis_id="H_ENTRY_004",
