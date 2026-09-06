@@ -247,6 +247,7 @@ def test_rejected_tick_counts_starts_at_zero_for_every_known_reason():
     builder = CandleBuilder(symbol="RELIANCE", interval="1m")
     assert builder.rejected_tick_counts == {
         "non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0, "late_out_of_order": 0,
+        "implausible_timestamp": 0,
     }
 
 
@@ -284,3 +285,109 @@ def test_max_tick_deviation_pct_none_disables_the_plausibility_check():
 
     bar = builder.flush()
     assert bar.high == 10_000.0
+
+
+# --- timestamp plausibility (live-market-readiness audit finding) -----------
+#
+# Real bug found via adversarial audit, reproduced here before being fixed:
+# on_tick trusted a tick's own `timestamp` unconditionally to compute its
+# bucket, with no plausibility check at all (unlike price, which IS
+# checked). A single tick with a valid price but a corrupted/wildly-future
+# timestamp (e.g. a decode glitch in Dhan's LTT field) would seed a bucket
+# dated far in the future; every subsequent, genuinely-real tick would then
+# have an earlier bucket_start than that seeded state and be rejected
+# FOREVER as "late_out_of_order", with no self-recovery -- candle
+# production for that symbol permanently stops. The fix compares each
+# tick's timestamp against this builder's own LAST KNOWN GOOD timestamp
+# (mirroring _last_known_price's identical pattern), not against
+# `received_at` -- a wall-clock comparison would falsely reject every tick
+# in this entire test file, whose synthetic timestamps are deliberately
+# small epoch offsets, not real "now" values. One consequence, stated
+# explicitly rather than hidden: a CORRUPTED VERY FIRST TICK (no prior
+# timestamp to compare against yet) is not covered by this specific
+# check -- every test below therefore seeds one real tick first, matching
+# the realistic, hours-long-live-session shape of the actual risk found.
+
+
+def test_a_wildly_future_timestamp_does_not_permanently_kill_candle_production():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))  # establishes a real baseline
+
+    # A tick with an otherwise-valid price but a garbage timestamp ~30 days
+    # ahead of the last real one -- e.g. a corrupted LTT field, not caught
+    # by the price-deviation check since the price itself is fine.
+    corrupted_result = builder.on_tick(price=101.0, volume=1, timestamp=_ts(30 * 86400), received_at=_ts(1))
+    assert corrupted_result is None  # rejected -- never seeds/replaces the real bucket
+
+    # Every subsequent tick uses REAL, current timestamps. Before the fix,
+    # these would all be endlessly rejected as "late_out_of_order" against
+    # the corrupted future bucket the bad tick would otherwise have seeded.
+    result_2 = builder.on_tick(price=102.0, volume=5, timestamp=_ts(30), received_at=_ts(30))
+    assert result_2 is None  # still bucket 0, no bar yet -- but must not be REJECTED
+    assert builder.rejected_tick_counts["late_out_of_order"] == 0
+
+    bar = builder.on_tick(price=103.0, volume=5, timestamp=_ts(61), received_at=_ts(61))
+    assert bar is not None  # candle production recovered and completed a real bar
+    assert bar.open == 100.0
+    assert bar.close == 102.0  # the corrupted 101.0 tick never merged in
+
+
+def test_a_wildly_future_timestamp_mid_bucket_does_not_prematurely_close_the_real_bucket():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+    builder.on_tick(price=102.0, volume=5, timestamp=_ts(30), received_at=_ts(30))
+
+    # A garbage-future-timestamped tick arrives WHILE a real bucket is
+    # already open -- must not be trusted to finalize/roll over that bucket
+    # early (it is not a genuine "next bucket" tick, its timestamp is
+    # simply corrupted).
+    corrupted_result = builder.on_tick(price=101.0, volume=1, timestamp=_ts(30 * 86400), received_at=_ts(31))
+    assert corrupted_result is None
+
+    # The real bucket is still open and accumulates the next genuine tick.
+    bar = builder.on_tick(price=105.0, volume=2, timestamp=_ts(61), received_at=_ts(61))
+    assert bar is not None
+    assert bar.high == 102.0  # the corrupted 101.0 tick with the garbage timestamp never merged in
+    assert bar.close == 102.0
+
+
+def test_implausible_timestamp_increments_its_own_rejection_counter():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+    builder.on_tick(price=101.0, volume=1, timestamp=_ts(30 * 86400), received_at=_ts(1))
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1
+
+
+def test_max_timestamp_skew_seconds_none_disables_the_timestamp_plausibility_check():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m", max_timestamp_skew_seconds=None)
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+    # With the check disabled, the garbage-future timestamp is trusted again
+    # (reproducing this module's original, pre-fix behavior exactly) -- it
+    # rolls the bucket over and completes bucket 0.
+    result = builder.on_tick(price=101.0, volume=1, timestamp=_ts(30 * 86400), received_at=_ts(1))
+    assert result is not None
+    assert result.close == 100.0
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 0
+
+
+def test_a_moderately_late_tick_within_tolerance_is_not_treated_as_implausible():
+    # Mirrors the existing late-tick test's own 190s receipt gap -- well
+    # within any reasonable skew tolerance, must still hit the ordinary
+    # late/out-of-order path, not the new implausible-timestamp path.
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(65), received_at=_ts(65))
+    late_result = builder.on_tick(price=999.0, volume=100, timestamp=_ts(10), received_at=_ts(200))
+    assert late_result is None
+    assert builder.rejected_tick_counts["late_out_of_order"] == 1
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 0
+
+
+def test_corrupted_very_first_tick_is_a_documented_residual_gap():
+    # Stated, not hidden: with NO prior tick to compare against, the very
+    # first tick a fresh builder ever receives is not covered by the
+    # timestamp-plausibility check -- this test documents that boundary
+    # explicitly rather than leaving it an undocumented surprise.
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    result = builder.on_tick(price=100.0, volume=10, timestamp=_ts(30 * 86400), received_at=_ts(0))
+    assert result is None  # no bar yet either way
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 0  # NOT caught -- documented limitation

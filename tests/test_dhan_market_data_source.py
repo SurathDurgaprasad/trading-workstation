@@ -229,7 +229,7 @@ def test_rejected_tick_counts_by_symbol_aggregates_across_the_real_wire_path(ins
     source, factory = _source(instrument_map, credentials)
     source.subscribe(["RELIANCE.NS"], "1m")
 
-    assert source.rejected_tick_counts_by_symbol() == {"RELIANCE.NS": {"non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0, "late_out_of_order": 0}}
+    assert source.rejected_tick_counts_by_symbol() == {"RELIANCE.NS": {"non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0, "late_out_of_order": 0, "implausible_timestamp": 0}}
 
     factory.current.simulate_message(_ticker_packet(2885, 0.0, epoch=10))  # non-positive price, real wire encoding
 
@@ -524,3 +524,62 @@ def test_server_sent_disconnect_packet_triggers_reconnect_path(instrument_map, c
     source.subscribe(["RELIANCE.NS"], "1m")
     factory.current.simulate_message(_disconnect_packet(805))  # "too many connections" per Dhan's documented codes
     assert len(factory.instances) == 2  # reconnect was attempted
+
+
+# --- partial multi-symbol subscribe failure (live-market-readiness audit) ---
+#
+# Real bug found via adversarial audit, reproduced here before being fixed:
+# subscribe() mutated _security_id_to_symbol/_candle_builders/_subscribed_symbols
+# PER-SYMBOL, inside its own loop, BEFORE checking whether the whole batch of
+# symbols actually resolved -- and BEFORE ever reaching the _connect()/
+# _send_subscribe() call below the loop. If any symbol in a multi-symbol
+# call failed to resolve (a typo, or an instrument genuinely absent from
+# Dhan's master), InstrumentNotFoundError propagated out of subscribe()
+# with symbols BEFORE the bad one already left in a partial, inconsistent
+# state (added to internal maps) yet never actually subscribed over the
+# wire (the exception prevented _connect()/_send_subscribe() from ever
+# running) -- an atomicity violation with no test coverage at all (every
+# existing subscribe() test in this file passes exactly one symbol).
+
+
+def test_subscribe_with_one_unresolvable_symbol_leaves_no_partial_state(instrument_map, credentials):
+    from live.dhan.instruments import InstrumentNotFoundError
+
+    source, factory = _source(instrument_map, credentials)
+
+    with pytest.raises(InstrumentNotFoundError):
+        source.subscribe(["RELIANCE.NS", "NOTAREALSYMBOL.NS"], "1m")
+
+    # Atomicity: a batch that fails must leave NO trace of the symbols that
+    # would have resolved fine -- not a half-subscribed source.
+    assert source._subscribed_symbols == set()
+    assert source._candle_builders == {}
+    assert source._security_id_to_symbol == {}
+    assert source.state == DhanConnectionState.DISCONNECTED
+    assert len(factory.instances) == 0  # never even attempted to connect/subscribe over the wire
+
+
+def test_subscribe_with_one_unresolvable_symbol_does_not_send_a_partial_wire_message(instrument_map, credentials):
+    from live.dhan.instruments import InstrumentNotFoundError
+
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")  # a real, already-connected subscription first
+    assert len(factory.current.sent_messages) == 1
+
+    with pytest.raises(InstrumentNotFoundError):
+        source.subscribe(["NOTAREALSYMBOL.NS"], "1m")
+
+    # The failed batch must not have sent any wire message, nor disturbed
+    # the already-successful RELIANCE.NS subscription.
+    assert len(factory.current.sent_messages) == 1
+    assert source._subscribed_symbols == {"RELIANCE.NS"}
+
+
+def test_subscribe_with_all_valid_symbols_still_works_after_the_fix(instrument_map, credentials):
+    # A pure control case: a fully-valid multi-symbol call (even though
+    # this fixture only has one real instrument, a duplicate-safe list)
+    # must behave exactly as before.
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    assert source.is_connected() is True
+    assert source._subscribed_symbols == {"RELIANCE.NS"}

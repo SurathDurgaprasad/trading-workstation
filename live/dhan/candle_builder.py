@@ -59,7 +59,10 @@ class CandleBuilder:
     given a sequence of ticks, and therefore trivially unit-testable
     without any real Dhan connection."""
 
-    def __init__(self, *, symbol: str, interval: str, max_tick_deviation_pct: float = 20.0):
+    def __init__(
+        self, *, symbol: str, interval: str, max_tick_deviation_pct: float = 20.0,
+        max_timestamp_skew_seconds: float | None = 3600.0,
+    ):
         self.symbol = symbol
         self.interval = interval
         self._bucket_seconds = interval_to_timedelta(interval).total_seconds()
@@ -86,8 +89,47 @@ class CandleBuilder:
         independent of whether this specific tick's price is) -- see the
         price_is_valid handling inside on_tick."""
         self._last_known_price: float | None = None
+        self._max_timestamp_skew_seconds = max_timestamp_skew_seconds
+        self._last_known_timestamp: datetime | None = None
+        """Live-market-readiness audit finding: unlike price, a tick's own
+        `timestamp` was trusted UNCONDITIONALLY to compute its bucket, with
+        no plausibility check at all -- a single tick with an otherwise-
+        valid price but a corrupted/wildly-future timestamp (e.g. a decode
+        glitch in Dhan's LTT field) would seed `_state.bucket_start` far in
+        the future; every subsequent, genuinely-real tick would then have
+        an EARLIER bucket_start than that seeded state and be rejected
+        FOREVER via the late/out-of-order path below, with no
+        self-recovery -- candle production for that symbol permanently
+        stops. Worse, if the corrupted tick arrives while a real bucket is
+        already open, its garbage-future timestamp can look like "the next
+        bucket has started" and prematurely finalize/close the real,
+        still-accumulating bucket early.
+
+        Checked against `_last_known_timestamp` (this builder's own last
+        genuinely accepted tick, mirroring `_last_known_price`'s identical
+        pattern) rather than `received_at` (local wall-clock receipt time):
+        a wall-clock comparison would be self-consistent in real production
+        use, but is NOT what this check needs to be robust against a purely
+        synthetic/replayed/backtested tick stream whose own timestamps are
+        deliberately far from "now" (this project's own test suite,
+        `paper/advance.py`'s Yahoo-driven fills, etc.) -- comparing
+        consecutive REAL exchange timestamps against each other is
+        self-consistent regardless of what wall-clock epoch is in use.
+        RESIDUAL LIMITATION, stated rather than hidden: because there is no
+        `_last_known_timestamp` yet for the very first tick a fresh
+        CandleBuilder instance ever receives, that one specific tick is NOT
+        covered by this check (nothing to compare it against) -- the
+        defense fully covers every tick after the first, which is the
+        realistic, hours-long-live-session shape of the actual production
+        risk found by this audit. 1 hour default: generous enough to
+        tolerate any real illiquid-symbol lull between successive trades,
+        tight enough to catch genuine corruption (which in practice is
+        either wildly wrong or off by a fixed encoding-bug offset, never
+        merely "a bit late" -- see the late-tick path below for that
+        ordinary case). None disables the check entirely."""
         self.rejected_tick_counts: dict[str, int] = {
             "non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0, "late_out_of_order": 0,
+            "implausible_timestamp": 0,
         }
         """Strategy science Phase 16 (observability) -- each rejection is
         already logged (see on_tick), but a log line alone isn't
@@ -133,6 +175,20 @@ class CandleBuilder:
         0.0). It would only matter for a real per-tick-volume feed, which
         this project does not have (the Quote/Full cumulative-to-incremental
         conversion above is explicitly not implemented either)."""
+        if self._last_known_timestamp is not None and self._max_timestamp_skew_seconds is not None:
+            skew_seconds = abs((timestamp - self._last_known_timestamp).total_seconds())
+            if skew_seconds > self._max_timestamp_skew_seconds:
+                self.rejected_tick_counts["implausible_timestamp"] += 1
+                logger.warning(
+                    "CandleBuilder(%s, %s): rejecting a tick with an implausible timestamp (timestamp=%s, "
+                    "last known real timestamp=%s, skew=%.0fs > %.0fs threshold) -- likely a corrupted/garbage "
+                    "exchange timestamp, never trusted to seed, complete, or otherwise touch any bucket.",
+                    self.symbol, self.interval, timestamp, self._last_known_timestamp, skew_seconds,
+                    self._max_timestamp_skew_seconds,
+                )
+                return None  # fully inert -- unlike an invalid PRICE, an invalid TIMESTAMP can never be
+                # trusted to complete an elapsed bucket either, since bucket membership is computed FROM it.
+
         price_is_valid = True
         if price <= 0:
             price_is_valid = False
@@ -214,6 +270,7 @@ class CandleBuilder:
         self._state.close = price
         self._state.volume += volume
         self._last_known_price = price
+        self._last_known_timestamp = timestamp
         self._state.last_received_at = received_at
         self._state.last_source_timestamp = timestamp
 

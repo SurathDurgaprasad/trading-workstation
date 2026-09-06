@@ -180,12 +180,26 @@ class DhanMarketDataSource:
         return self.instrument_map.lookup(trading_symbol=symbol, exchange="NSE")
 
     def subscribe(self, symbols: list[str], interval: str) -> None:
+        """Live-market-readiness audit finding: this used to mutate
+        _security_id_to_symbol/_candle_builders/_subscribed_symbols PER-
+        SYMBOL, inside the resolution loop itself -- so a batch of several
+        symbols where one failed to resolve (InstrumentNotFoundError) left
+        every symbol resolved BEFORE the bad one partially registered
+        (added to internal maps) yet never actually subscribed over the
+        wire (the exception prevented _connect()/_send_subscribe() from
+        ever running below). Now resolves the ENTIRE batch first, as a
+        pure computation with no side effects, and only mutates state /
+        sends anything once every symbol in the batch has resolved --
+        subscribe() either fully succeeds (all symbols registered AND
+        subscribed) or fully fails (no partial state, nothing sent), never
+        a silent, partially-stranded feed."""
         if interval != self.interval:
             raise ValueError(f"This DhanMarketDataSource was constructed for interval={self.interval!r}, not {interval!r}. Construct a separate instance per interval.")
 
+        resolved = [(symbol, self._resolve_instrument(symbol)) for symbol in symbols]  # raises before any mutation below if any symbol fails
+
         instruments = []
-        for symbol in symbols:
-            instrument = self._resolve_instrument(symbol)
+        for symbol, instrument in resolved:
             self._security_id_to_symbol[instrument.security_id] = symbol
             self._candle_builders.setdefault(symbol, CandleBuilder(symbol=symbol, interval=self.interval))
             instruments.append((instrument.exchange_segment, instrument.security_id))
