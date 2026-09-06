@@ -29,6 +29,12 @@ documents/
 *.pem
 *.key
 
+# Operator-local exchange holiday/schedule config (real dates, not
+# secret, but environment-specific and never fabricated by this
+# codebase -- see config/schedule.yaml.example for the template).
+config/schedule.yaml
+!config/schedule.yaml.example
+
 # OS/editor noise
 .DS_Store
 Thumbs.db

@@ -28,6 +28,7 @@ to generate bars/signals for this page to show and act on.
 
 import html
 from datetime import datetime, timezone
+from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -39,11 +40,58 @@ from dashboard import intelligence
 
 _REFRESH_SECONDS = 15
 
+_schedule_config_path: str | None = None
+"""Set once at startup by main.py's `run_dashboard_command` via
+`configure()`, from the optional `--schedule-config` CLI flag. None (the
+default -- e.g. under every existing test, which never calls
+`configure()`) reproduces the page's original behavior exactly."""
+
+
+def configure(*, schedule_config_path: str | None) -> None:
+    """Live-market-readiness audit finding: the dashboard's own market-
+    status banner never had a way to consult the SAME holiday list an
+    operator may have already configured for the scheduler
+    (scheduler/config.py's ScheduleConfig.holidays, YAML `--config`) --
+    it only ever printed a generic "does not know holidays" disclaimer.
+    Called once at process startup, never per-request (a dashboard GET
+    must never trigger file I/O just to render the banner -- see
+    `_market_status_banner`'s own docstring); the loaded holiday set is
+    cached at module level for the life of the process."""
+    global _schedule_config_path, _cached_holidays
+    _schedule_config_path = schedule_config_path
+    _cached_holidays = _load_holidays(schedule_config_path)
+
+
+_cached_holidays: frozenset | None = None
+"""None (the default, e.g. every existing test that never calls
+configure()) means "no calendar was ever consulted" -- deliberately
+distinct from an explicitly-loaded, possibly-empty frozenset(). Collapsing
+both to a bare frozenset() was a real bug caught by this fix's own tests
+before it shipped (see main.py's identical fix and its own note)."""
+
+_DEFAULT_SCHEDULE_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "schedule.yaml"
+"""Same default-path convention as main.py's identically-named constant
+(kept as a separate copy, not a cross-import, since dashboard/app.py has
+no existing dependency on main.py and shouldn't gain one for three
+lines) -- an operator who forgets to pass --schedule-config still gets
+holiday cross-checking if they've populated this conventional path."""
+
+
+def _load_holidays(path: str | None) -> frozenset | None:
+    resolved = path or (str(_DEFAULT_SCHEDULE_CONFIG_PATH) if _DEFAULT_SCHEDULE_CONFIG_PATH.exists() else None)
+    if not resolved:
+        return None
+    from scheduler.config import ScheduleConfig
+
+    return frozenset(ScheduleConfig.from_yaml_file(resolved).holidays)
+
 
 def _market_status_banner() -> str:
     """Computed fresh, in-process, from wall-clock IST time only -- zero
     I/O, zero network call, safe on every page load (mission rule: a
-    dashboard GET must never trigger a hidden market-data fetch).
+    dashboard GET must never trigger a hidden market-data fetch). The
+    holiday set itself (if any) was already loaded once at startup by
+    `configure()`, not re-read from disk here.
 
     Real gap found via adversarial UI audit: NEITHER dashboard page showed
     whether the market was even open, forcing an operator to compute IST
@@ -51,22 +99,34 @@ def _market_status_banner() -> str:
     page could be trusted. live.dhan.market_session.current_market_session
     already existed (used by the scheduler) but was never surfaced here.
 
-    Honest about its own limitation, not just OPEN/PRE_OPEN/CLOSED: this
-    function has no exchange holiday calendar (see market_session.py's own
+    Honest about its own limitation, not just OPEN/PRE_OPEN/CLOSED: when
+    no holiday calendar was configured (the default), this function has
+    no way to know exchange holidays (see market_session.py's own
     documented limitation), so a holiday weekday during session hours
-    would show OPEN -- stated explicitly rather than silently wrong."""
+    would show OPEN -- stated explicitly rather than silently wrong. When
+    `--schedule-config` WAS supplied, the state is cross-checked for real
+    and a confirmed holiday correctly shows CLOSED."""
     from live.dhan.market_session import current_market_session
 
-    session = current_market_session()
+    session = current_market_session(holidays=_cached_holidays)
     state = session.state.value
     state_class = "tag-long" if state == "OPEN" else "tag-sim"
+    if session.holiday_calendar_consulted:
+        holiday_line = (
+            f"NSE/BSE cash-market session hours (09:15-15:30 IST, weekdays), cross-checked against "
+            f"{session.holiday_calendar_size} configured holiday date(s) from --schedule-config."
+        )
+    else:
+        holiday_line = (
+            "NSE/BSE cash-market session hours only (09:15-15:30 IST, weekdays) -- does NOT know exchange "
+            "holidays (no --schedule-config was supplied); a holiday weekday during session hours would show OPEN."
+        )
     return (
         '<div class="kv" style="max-width:640px;">'
         f'<div>Market status</div><div><span class="tag {state_class}">{state}</span></div>'
         f'<div>IST time</div><div>{session.as_of_ist.strftime("%Y-%m-%d %H:%M:%S")} ({session.as_of_ist.strftime("%A")})</div>'
         "</div>"
-        '<p class="muted">NSE/BSE cash-market session hours only (09:15-15:30 IST, weekdays) -- does NOT know exchange '
-        "holidays (no holiday calendar is integrated); a holiday weekday during session hours would show OPEN.</p>"
+        f'<p class="muted">{holiday_line}</p>'
     )
 
 

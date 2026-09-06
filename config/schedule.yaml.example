@@ -1,0 +1,32 @@
+# Copy this file to config/schedule.yaml (gitignored -- see .gitignore) and
+# fill in `holidays:` with the real, current-year NSE/BSE cash-market
+# holiday dates from the exchange's own published circular:
+#   https://www.nseindia.com/resources/exchange-communication-holidays
+#
+# This project deliberately ships NO pre-filled holiday dates -- holiday
+# calendars change every year and this codebase's own "never silently
+# fake data" rule (see scheduler/config.py's module docstring) forbids
+# guessing them. An EMPTY or MISSING file is always safe: every command
+# that consults this file (readiness-check, paper-live, shadow-run, the
+# dashboard, `schedule tick`/`loop`) falls back to its original,
+# holiday-blind behavior, which is honestly disclosed wherever the
+# market session state is printed.
+#
+# `--schedule-config <path>` on any of the commands above overrides this
+# default path with a different file (e.g. a symlink-free copy per
+# environment).
+
+holidays:
+  # - "2026-01-26"   # example format only -- verify against the real published calendar before adding real dates
+  # - "2026-03-04"
+
+# Optional: the SAME file also configures `schedule tick`/`loop`'s slot
+# timings (see scheduler/config.py's own ScheduleSlot docs). Omit `slots:`
+# entirely to keep the built-in pre_market/market_open/intraday/pre_close/
+# post_market defaults -- only `holidays:` is required for the
+# market-session holiday cross-check described above.
+# slots:
+#   - name: pre_market
+#     after: "08:45"
+#     before: "09:15"
+#     action: shadow_run

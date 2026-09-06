@@ -946,8 +946,13 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
     if args.source == "dhan":
         from live.dhan.market_session import current_market_session
 
-        session = current_market_session()
-        print(f"MARKET SESSION: {session.state.value} (as of {session.as_of_ist.strftime('%H:%M:%S IST')}, does NOT account for exchange holidays)")
+        holidays = _load_holidays_for_session_check(args.schedule_config)
+        session = current_market_session(holidays=holidays)
+        holiday_note = (
+            f"cross-checked against {session.holiday_calendar_size} configured holiday date(s){' -- TODAY IS A CONFIGURED HOLIDAY' if session.is_confirmed_holiday else ''}"
+            if session.holiday_calendar_consulted else "does NOT account for exchange holidays -- pass --schedule-config to cross-check"
+        )
+        print(f"MARKET SESSION: {session.state.value} (as of {session.as_of_ist.strftime('%H:%M:%S IST')}, {holiday_note})")
     print("This process places NO real orders and holds NO broker connection for execution.")
     if pipeline.is_kill_switch_active():
         print("\n*** KILL SWITCH ACTIVE *** -- no new signal will be approved or executed.")
@@ -1051,7 +1056,10 @@ def _run_paper_live_loop(args: argparse.Namespace, pipeline, engine, store, stat
 def run_dashboard_command(args: argparse.Namespace) -> None:
     import uvicorn
 
+    import dashboard.app as dashboard_app
     from dashboard.app import app
+
+    dashboard_app.configure(schedule_config_path=args.schedule_config)
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         # Strategy science Phase 17 (security review) finding: the
@@ -1514,6 +1522,46 @@ def run_size_command(args: argparse.Namespace) -> None:
 # --------------------------------------------------------------------------
 
 DEFAULT_PREDICTIONS_DB_PATH = PROJECT_ROOT / "data" / "predictions.db"
+
+
+DEFAULT_SCHEDULE_CONFIG_PATH = PROJECT_ROOT / "config" / "schedule.yaml"
+"""Live-market-readiness audit finding (adversarial review of the first
+version of this fix): making holiday cross-checking fully opt-in behind
+`--schedule-config` means an operator who simply forgets the flag
+silently gets the OLD, holiday-blind behavior on every command except
+`schedule` itself -- an easy, consequential thing to forget on exactly
+the kind of morning (a holiday) it would matter most. This well-known,
+documented default path closes that gap without inventing a hidden
+default holiday LIST (there is none, and none is fabricated here) --
+only a conventional CONFIG FILE LOCATION an operator can populate once.
+If the file doesn't exist, behavior is unchanged from before this
+existed (empty holiday set, same as ever)."""
+
+
+def _load_holidays_for_session_check(schedule_config_path: str | None) -> frozenset | None:
+    """Live-market-readiness audit finding: `scheduler/runner.py` already
+    consults `scheduler.config.ScheduleConfig.holidays` before running a
+    scheduled slot, but every other caller of `current_market_session()`
+    (readiness-check, paper-live/shadow-run startup banners, the
+    dashboard) had no way to benefit from the SAME operator-supplied
+    holiday list even when one already existed. Reuses
+    `ScheduleConfig.from_yaml_file`'s own `holidays:` YAML key verbatim --
+    no second holiday-calendar format.
+
+    Resolution order: an explicitly passed --schedule-config path always
+    wins; otherwise DEFAULT_SCHEDULE_CONFIG_PATH is used IF it exists.
+    Returns None (never a bare empty frozenset) when NEITHER is
+    available, so the caller -- and `current_market_session`'s own
+    `holiday_calendar_consulted` flag -- can tell "no calendar was ever
+    supplied" apart from "a real, possibly-empty calendar was checked."
+    Collapsing both cases to an empty frozenset was a real bug caught by
+    this fix's own test suite (test_cli.py) before it shipped."""
+    path = schedule_config_path or (DEFAULT_SCHEDULE_CONFIG_PATH if DEFAULT_SCHEDULE_CONFIG_PATH.exists() else None)
+    if not path:
+        return None
+    from scheduler.config import ScheduleConfig
+
+    return frozenset(ScheduleConfig.from_yaml_file(path).holidays)
 
 
 def _risk_config_from_args(args: argparse.Namespace) -> RiskConfig:
@@ -2136,8 +2184,13 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     print("=" * 70)
     from live.dhan.market_session import current_market_session
 
-    session = current_market_session()
-    print(f"Market session:  {session.state.value} (as of {session.as_of_ist.strftime('%H:%M:%S IST')}, does not account for exchange holidays)")
+    holidays = _load_holidays_for_session_check(args.schedule_config)
+    session = current_market_session(holidays=holidays)
+    holiday_note = (
+        f"cross-checked against {session.holiday_calendar_size} configured holiday date(s){' -- TODAY IS A CONFIGURED HOLIDAY' if session.is_confirmed_holiday else ''}"
+        if session.holiday_calendar_consulted else "does not account for exchange holidays -- pass --schedule-config to cross-check"
+    )
+    print(f"Market session:  {session.state.value} (as of {session.as_of_ist.strftime('%H:%M:%S IST')}, {holiday_note})")
     print(f"Live overlay:    {'DHAN (--live-source dhan)' if live_snapshot_provider is not None else 'none -- Yahoo historical only'}")
 
     logger.info("shadow-run: scanning %d symbols", len(universe))
@@ -2531,10 +2584,19 @@ def run_readiness_check_command(args: argparse.Namespace) -> None:
         print(f"[FAIL] {exc}")
         exit_code = 1
 
-    session = current_market_session()
+    holidays = _load_holidays_for_session_check(args.schedule_config)
+    session = current_market_session(holidays=holidays)
+    if session.holiday_calendar_consulted:
+        config_source = args.schedule_config or str(DEFAULT_SCHEDULE_CONFIG_PATH)
+        holiday_note = (
+            f"cross-checked against {session.holiday_calendar_size} configured holiday date(s) from {config_source!r} "
+            f"-- {'TODAY IS A CONFIGURED HOLIDAY' if session.is_confirmed_holiday else 'today is not in that list'}."
+        )
+    else:
+        holiday_note = "No holiday calendar was supplied (pass --schedule-config) -- verify the target date isn't a market holiday yourself."
     print(
         f"[INFO] Market session right now: {session.state.value} (as of {session.as_of_ist.strftime('%Y-%m-%d %H:%M:%S %Z')}). "
-        "No exchange holiday calendar is integrated -- verify the target date isn't a market holiday yourself."
+        f"{holiday_note}"
     )
 
     kill_status = workstation.get_kill_switch_status()
@@ -3046,6 +3108,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--initial-capital", type=float, default=100_000.0,
         help="Simulated starting capital (default: 100000). Only takes effect the first time this database is used.",
     )
+    paper_live_parser.add_argument("--schedule-config", type=str, default=None, help="Optional path to the SAME YAML schedule/holiday config used with `schedule --config` (holidays: key). When given, the startup market-session banner is cross-checked against it.")
 
     dashboard_parser = subparsers.add_parser(
         "dashboard",
@@ -3058,6 +3121,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     dashboard_parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1, local-only).")
     dashboard_parser.add_argument("--port", type=int, default=8765, help="Bind port (default: 8765).")
+    dashboard_parser.add_argument("--schedule-config", type=str, default=None, help="Optional path to the SAME YAML schedule/holiday config used with `schedule --config` (holidays: key). When given, the market-status banner is cross-checked against it instead of only warning that no holiday calendar was consulted.")
 
     universe_parser = subparsers.add_parser(
         "universe",
@@ -3092,6 +3156,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     readiness_check_parser.add_argument("--symbols", type=str, default=None, help="Optional comma-separated symbols to also check historical cache freshness for.")
+    readiness_check_parser.add_argument("--schedule-config", type=str, default=None, help="Optional path to the SAME YAML schedule/holiday config used with `schedule --config` (scheduler/config.py's ScheduleConfig, top-level `holidays:` key). When given, the market-session check is cross-checked against it instead of only warning that no holiday calendar was consulted.")
 
     scan_parser = subparsers.add_parser(
         "scan",
@@ -3298,6 +3363,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     shadow_run_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
     shadow_run_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker/rate-limit protection across the whole run (default: off, matches prior behavior exactly). Prints a provider-metrics summary at the end.")
     shadow_run_parser.add_argument("--live-source", choices=["dhan"], default=None, help="Phase 32: overlay every candidate's price with a real Dhan live quote (requires DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN) instead of the Yahoo historical close. One adapter is built for the whole run and closed at the end. A failed/unhealthy live source silently falls back to the Yahoo historical price per symbol.")
+    shadow_run_parser.add_argument("--schedule-config", type=str, default=None, help="Optional path to the SAME YAML schedule/holiday config used with `schedule --config` (holidays: key). When given, the startup market-session banner is cross-checked against it.")
     _add_optional_sizing_args(shadow_run_parser)
     shadow_run_parser.add_argument(
         "--paper-execute", action="store_true",

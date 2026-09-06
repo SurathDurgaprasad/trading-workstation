@@ -81,3 +81,59 @@ def test_is_bar_within_expected_session_true_during_open():
 
 def test_is_bar_within_expected_session_false_after_close():
     assert is_bar_within_expected_session(_ist(2026, 9, 7, 22, 0)) is False
+
+
+# --- holiday awareness (opt-in via `holidays`, additive, backward compatible) ---
+
+
+def test_no_holidays_supplied_reproduces_original_behavior():
+    # 2026-09-07 12:00 is a real Monday mid-session -- no holidays param at all.
+    session = current_market_session(_ist(2026, 9, 7, 12, 0))
+    assert session.state == MarketSessionState.OPEN
+    assert session.is_confirmed_holiday is False
+    assert session.holiday_calendar_size == 0
+    assert session.holiday_calendar_consulted is False
+
+
+def test_empty_holidays_set_is_still_a_real_consulted_calendar():
+    # Deliberately distinct from omitting `holidays` entirely -- an explicitly
+    # empty set means "a real calendar was checked and had nothing", not
+    # "no calendar was ever supplied". Collapsing the two was a real bug
+    # caught while wiring this into main.py/dashboard/app.py.
+    session = current_market_session(_ist(2026, 9, 7, 12, 0), holidays=frozenset())
+    assert session.state == MarketSessionState.OPEN
+    assert session.is_confirmed_holiday is False
+    assert session.holiday_calendar_size == 0
+    assert session.holiday_calendar_consulted is True
+
+
+def test_confirmed_holiday_weekday_during_session_hours_is_closed():
+    from datetime import date
+
+    holidays = frozenset({date(2026, 9, 7)})
+    session = current_market_session(_ist(2026, 9, 7, 12, 0), holidays=holidays)
+    assert session.state == MarketSessionState.CLOSED
+    assert session.is_confirmed_holiday is True
+    assert session.holiday_calendar_size == 1
+    assert session.holiday_calendar_consulted is True
+
+
+def test_non_holiday_weekday_with_calendar_supplied_stays_open_and_is_confirmed_clear():
+    from datetime import date
+
+    holidays = frozenset({date(2026, 12, 25)})  # a different date, not today
+    session = current_market_session(_ist(2026, 9, 7, 12, 0), holidays=holidays)
+    assert session.state == MarketSessionState.OPEN
+    assert session.is_confirmed_holiday is False
+    assert session.holiday_calendar_size == 1  # a calendar WAS checked, just didn't match today
+    assert session.holiday_calendar_consulted is True
+
+
+def test_holiday_on_a_weekend_does_not_change_the_already_closed_state():
+    from datetime import date
+
+    # 2026-09-05 is a Saturday -- already CLOSED regardless of the holiday list.
+    holidays = frozenset({date(2026, 9, 5)})
+    session = current_market_session(_ist(2026, 9, 5, 12, 0), holidays=holidays)
+    assert session.state == MarketSessionState.CLOSED
+    assert session.is_confirmed_holiday is True

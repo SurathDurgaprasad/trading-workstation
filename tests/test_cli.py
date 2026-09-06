@@ -217,6 +217,60 @@ def test_readiness_check_command_warns_on_an_active_kill_switch(monkeypatch, cap
     assert "left on from last session" in captured.out
 
 
+# --- readiness-check: holiday-calendar cross-check (live-market-readiness audit) ---
+
+
+def test_readiness_check_with_no_holiday_config_discloses_the_gap_honestly(monkeypatch, capsys, tmp_path):
+    import live.workstation as workstation_module
+    import main as main_module
+
+    monkeypatch.setenv("DHAN_CLIENT_ID", "fake-client-id")
+    monkeypatch.setenv("DHAN_ACCESS_TOKEN", "fake-access-token")
+    monkeypatch.setattr(workstation_module, "LIVE_STATE_DB_PATH", tmp_path / "live_state.db")
+    monkeypatch.setattr(main_module, "DEFAULT_SCHEDULE_CONFIG_PATH", tmp_path / "does_not_exist.yaml")
+    args = parse_args(["readiness-check"])
+
+    run_readiness_check_command(args)
+
+    captured = capsys.readouterr()
+    assert "No holiday calendar was supplied" in captured.out
+
+
+def test_readiness_check_cross_checks_an_explicit_schedule_config(monkeypatch, capsys, tmp_path):
+    import live.workstation as workstation_module
+
+    monkeypatch.setenv("DHAN_CLIENT_ID", "fake-client-id")
+    monkeypatch.setenv("DHAN_ACCESS_TOKEN", "fake-access-token")
+    monkeypatch.setattr(workstation_module, "LIVE_STATE_DB_PATH", tmp_path / "live_state.db")
+    config_path = tmp_path / "schedule.yaml"
+    config_path.write_text("holidays:\n  - \"2026-01-26\"\n")
+    args = parse_args(["readiness-check", "--schedule-config", str(config_path)])
+
+    run_readiness_check_command(args)
+
+    captured = capsys.readouterr()
+    assert "cross-checked against 1 configured holiday date(s)" in captured.out
+
+
+def test_readiness_check_uses_the_default_schedule_config_path_when_present(monkeypatch, capsys, tmp_path):
+    import live.workstation as workstation_module
+    import main as main_module
+
+    monkeypatch.setenv("DHAN_CLIENT_ID", "fake-client-id")
+    monkeypatch.setenv("DHAN_ACCESS_TOKEN", "fake-access-token")
+    monkeypatch.setattr(workstation_module, "LIVE_STATE_DB_PATH", tmp_path / "live_state.db")
+    default_path = tmp_path / "config" / "schedule.yaml"
+    default_path.parent.mkdir(parents=True)
+    default_path.write_text("holidays: []\n")
+    monkeypatch.setattr(main_module, "DEFAULT_SCHEDULE_CONFIG_PATH", default_path)
+    args = parse_args(["readiness-check"])  # no --schedule-config passed -- must still find the default path
+
+    run_readiness_check_command(args)
+
+    captured = capsys.readouterr()
+    assert "cross-checked against 0 configured holiday date(s)" in captured.out
+
+
 def test_backtest_subcommand_overrides():
     args = parse_args(
         [

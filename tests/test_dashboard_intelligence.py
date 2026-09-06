@@ -678,6 +678,24 @@ def test_intelligence_page_market_status_discloses_no_holiday_awareness(client):
     assert "does NOT know exchange" in response.text
 
 
+def test_intelligence_page_cross_checks_a_configured_holiday_calendar(client, monkeypatch, tmp_path):
+    # Live-market-readiness audit fix: dashboard.app.configure() lets the
+    # SAME holiday list an operator already set up for the scheduler
+    # (scheduler/config.py's ScheduleConfig.holidays) be consulted here
+    # too, instead of only ever disclosing "does not know holidays".
+    import dashboard.app as dashboard_app_module
+
+    config_path = tmp_path / "schedule.yaml"
+    config_path.write_text('holidays:\n  - "2026-01-26"\n')
+    dashboard_app_module.configure(schedule_config_path=str(config_path))
+    try:
+        response = client.get("/intelligence")
+        assert "cross-checked against 1 configured holiday date(s)" in response.text
+        assert "does NOT know exchange" not in response.text
+    finally:
+        dashboard_app_module.configure(schedule_config_path=None)  # restore isolation for later tests
+
+
 # --- KILL SWITCH section ------------------------------------------------------
 #
 # Real gap found via adversarial UI audit (a real, running dashboard was
