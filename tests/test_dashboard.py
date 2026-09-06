@@ -86,6 +86,19 @@ def test_index_renders_empty_workstation(client):
     assert 'href="/intelligence"' in response.text
 
 
+def test_index_states_the_scientific_no_edge_verdict_prominently(client):
+    # Live-market-readiness audit finding: nothing on the dashboard stated
+    # the actual, already-completed strategy research conclusion -- the
+    # closest existing analog (/intelligence's own smaller-sample
+    # "Profitability evidence" section) is a DIFFERENT finding an operator
+    # could easily mistake for "not enough data yet". This must appear on
+    # every page (via _page()), not just one, so it can never be missed.
+    for path in ("/", "/intelligence"):
+        response = client.get(path)
+        assert "SCIENTIFIC STRATEGY VERDICT: NO DEMONSTRATED EDGE" in response.text
+        assert "Do not interpret any signal, decision, or prediction shown on this dashboard as evidence of profitability" in response.text
+
+
 def test_index_shows_initial_capital_and_realized_pnl(client):
     """Mission requirement: the dashboard's ACCOUNT section must show
     starting capital and realized P&L, not just cash/equity/open P&L --

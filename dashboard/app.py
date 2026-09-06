@@ -156,6 +156,37 @@ def _broker_connectivity_banner() -> str:
     return f'<div class="banner">SIMULATED PAPER TRADING &mdash; {connectivity_text} No real order can ever be placed here.</div>'
 
 
+def _scientific_verdict_banner() -> str:
+    """Live-market-readiness audit finding: nowhere on this dashboard
+    stated the actual, already-completed strategy research conclusion.
+    The closest existing analog -- /intelligence's own "Profitability
+    evidence" section -- reports a verdict over a much smaller, live
+    decision_engine prediction sample (often INSUFFICIENT_DATA), which is
+    a DIFFERENT finding and could easily be misread as "not enough data
+    yet, might turn positive" by an operator who never saw the real
+    research. The actual, decisive finding -- a real 41-symbol universe,
+    5 years, 368+ backtested TrendMomentumBaseline trades, cross-checked
+    against buy-and-hold and random-entry Monte Carlo baselines, plus a
+    full follow-up mission testing exit and entry variants -- is stated
+    here, on every page (via _page()), so an operator can never mistake
+    this platform for a demonstrated profitable trading system. Static
+    text: this is a completed, historical research finding, not a number
+    that changes with today's market, so it is not queried from any
+    store. See docs/SCIENTIFIC_FINAL_REPORT.md,
+    docs/RESEARCH_FOUNDATION_FINAL_OUTPUT.md, and
+    docs/STRATEGY_EDGE_DISCOVERY_FINAL_OUTPUT.md for the full evidence."""
+    return (
+        '<div class="banner verdict-banner">'
+        "<strong>SCIENTIFIC STRATEGY VERDICT: NO DEMONSTRATED EDGE.</strong> "
+        "TrendMomentumBaseline (the active strategy) was backtested against a real 41-symbol universe over 5 years "
+        "(368+ trades): negative mean return, underperforms buy-and-hold, underperformed by 96% of random-entry "
+        "Monte Carlo iterations. A follow-up research program testing exit and entry variants found the same "
+        "result. Do not interpret any signal, decision, or prediction shown on this dashboard as evidence of "
+        "profitability. See docs/STRATEGY_EDGE_DISCOVERY_FINAL_OUTPUT.md for the full evidence."
+        "</div>"
+    )
+
+
 def _page(body: str) -> str:
     return f"""<!doctype html>
 <html>
@@ -167,6 +198,8 @@ def _page(body: str) -> str:
   body {{ font-family: -apple-system, Segoe UI, sans-serif; background: #0f1115; color: #e6e6e6; margin: 0; padding: 24px; }}
   .banner {{ background: #7a1f1f; color: #fff; padding: 10px 16px; font-weight: bold; border-radius: 4px; margin-bottom: 16px; }}
   .kill-active {{ background: #b30000; }}
+  .verdict-banner {{ background: #3a3316; color: #f0d878; border: 1px solid #6b5a1f; font-weight: normal; }}
+  .verdict-banner strong {{ font-weight: bold; }}
   h2 {{ border-bottom: 1px solid #333; padding-bottom: 4px; margin-top: 28px; }}
   table {{ width: 100%; border-collapse: collapse; margin-top: 8px; }}
   th, td {{ text-align: left; padding: 6px 10px; border-bottom: 1px solid #262a33; font-size: 14px; }}
@@ -189,6 +222,7 @@ def _page(body: str) -> str:
 </head>
 <body>
 {_broker_connectivity_banner()}
+{_scientific_verdict_banner()}
 {_market_status_banner()}
 {body}
 <p class="muted">Auto-refreshes every {_REFRESH_SECONDS}s. This page does not advance the market itself &mdash;
