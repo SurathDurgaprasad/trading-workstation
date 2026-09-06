@@ -85,23 +85,35 @@ def run_walk_forward_validation(
     cost_model: CostModel | None = None,
     risk_config: RiskConfig | None = None,
     use_cache: bool = True,
+    backtest_runner=None,
 ) -> WalkForwardResult:
     """Fetches each symbol's own indicator series once, splits it into
-    n_folds proportional windows via split_into_n_folds, runs the
-    standard (unmodified) backtesting.engine.run_backtest independently
-    on each windowed slice, and pools trades by fold index across the
-    whole universe -- one symbol's own indicator warm-up/rolling-window
-    calculation is computed ONCE over its full fetched series and then
-    SLICED per fold (never recomputed per fold), which is safe precisely
-    because a rolling indicator's value at any bar depends only on prior
-    bars, never later ones (see this module's own leakage-detection
-    test)."""
+    n_folds proportional windows via split_into_n_folds, runs a backtest
+    independently on each windowed slice, and pools trades by fold index
+    across the whole universe -- one symbol's own indicator warm-up/
+    rolling-window calculation is computed ONCE over its full fetched
+    series and then SLICED per fold (never recomputed per fold), which is
+    safe precisely because a rolling indicator's value at any bar depends
+    only on prior bars, never later ones (see this module's own
+    leakage-detection test).
+
+    `backtest_runner` (added for strategy edge discovery, so H_EXIT_*
+    experiments -- and future H_ENTRY_* ones -- can be walk-forward
+    validated with the SAME leakage-safe folding logic, not a
+    reimplementation): a callable taking (symbol=, indicator_series=,
+    strategy=, cost_model=, initial_capital=, risk_config=) and returning
+    an object with a `.trades` list -- the SAME signature shape as
+    backtesting.engine.run_backtest and every backtesting.exit_experiments
+    function. Defaults to the standard, unmodified run_backtest when
+    omitted (existing callers are entirely unaffected -- this parameter
+    is purely additive)."""
     from backtesting.cache import CachedMarketDataProvider
-    from backtesting.engine import run_backtest
+    from backtesting.engine import run_backtest as _default_run_backtest
     from backtesting.universe import per_trade_returns
     from market.data_provider import MarketDataError, get_market_data_provider
     from market.indicators import compute_indicator_series
 
+    run = backtest_runner or _default_run_backtest
     provider = CachedMarketDataProvider(get_market_data_provider()) if use_cache else get_market_data_provider()
     failed_symbols: dict[str, str] = {}
     fold_trades: list[list[Trade]] = [[] for _ in range(n_folds)]
@@ -123,7 +135,7 @@ def run_walk_forward_validation(
             sliced = indicator_series.loc[(indicator_series.index >= fold_start) & (indicator_series.index <= fold_end)]
             if sliced.empty:
                 continue
-            result = run_backtest(
+            result = run(
                 symbol=symbol, indicator_series=sliced, strategy=strategy, cost_model=cost_model,
                 initial_capital=initial_capital, risk_config=risk_config,
             )

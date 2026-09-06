@@ -185,3 +185,61 @@ def test_walk_forward_isolates_a_failing_symbol_from_the_rest(_fake_oscillating_
 
     assert "BADSYMBOL" in result.failed_symbols
     assert sum(len(f.trades) for f in result.folds) > 0  # AAA's trades still made it through
+
+
+# --- run_walk_forward_validation: pluggable backtest_runner -----------------
+
+
+def test_walk_forward_default_backtest_runner_is_unchanged(_fake_oscillating_provider):
+    # Omitting backtest_runner entirely must reproduce EXACTLY the same
+    # trades as before this parameter existed -- the whole point of an
+    # additive, backward-compatible extension.
+    _fake_oscillating_provider({"AAA"}, n_bars=100)
+    baseline = run_walk_forward_validation(["AAA"], strategy=_RepeatingSignalStrategy(), n_folds=4, initial_capital=100_000.0)
+
+    _fake_oscillating_provider({"AAA"}, n_bars=100)
+    explicit_default = run_walk_forward_validation(
+        ["AAA"], strategy=_RepeatingSignalStrategy(), n_folds=4, initial_capital=100_000.0, backtest_runner=run_backtest,
+    )
+
+    for a, b in zip(baseline.folds, explicit_default.folds):
+        a_fields = [(t.entry_time, t.exit_time, t.exit_price, t.net_pnl) for t in a.trades]
+        b_fields = [(t.entry_time, t.exit_time, t.exit_price, t.net_pnl) for t in b.trades]
+        assert a_fields == b_fields
+
+
+def test_walk_forward_accepts_a_custom_backtest_runner(_fake_oscillating_provider):
+    # A spy runner proves the callable itself is what drives fold trades
+    # (both that it receives the expected call shape, and that its
+    # RETURN VALUE -- not the standard engine's -- ends up pooled into
+    # the fold) rather than relying on any particular strategy producing
+    # a distinguishable exit-reason mix, which is fragile to price-path
+    # specifics.
+    calls = []
+
+    class _FakeResult:
+        def __init__(self, trades):
+            self.trades = trades
+
+    def _spy_runner(*, symbol, indicator_series, strategy, cost_model, initial_capital, risk_config):
+        calls.append(symbol)
+        real = run_backtest(
+            symbol=symbol, indicator_series=indicator_series, strategy=strategy, cost_model=cost_model,
+            initial_capital=initial_capital, risk_config=risk_config,
+        )
+        return _FakeResult(trades=real.trades[:1])  # deliberately truncated, so a wrong pass-through is detectable
+
+    _fake_oscillating_provider({"AAA"}, n_bars=100)
+    standard_result = run_walk_forward_validation(["AAA"], strategy=_RepeatingSignalStrategy(), n_folds=4, initial_capital=100_000.0)
+
+    _fake_oscillating_provider({"AAA"}, n_bars=100)
+    spied_result = run_walk_forward_validation(
+        ["AAA"], strategy=_RepeatingSignalStrategy(), n_folds=4, initial_capital=100_000.0, backtest_runner=_spy_runner,
+    )
+
+    assert calls, "custom backtest_runner was never called"
+    assert all(c == "AAA" for c in calls)
+    for standard_fold, spied_fold in zip(standard_result.folds, spied_result.folds):
+        assert len(spied_fold.trades) <= 1
+        if standard_fold.trades:
+            assert len(spied_fold.trades) == 1  # truncated by the spy, proving its return value (not the standard engine's) was used
