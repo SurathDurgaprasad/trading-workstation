@@ -282,6 +282,12 @@ def _fmt_money(value: float) -> str:
     return f"{value:,.2f}"
 
 
+def _decision_id_cell(entry) -> str:
+    if entry.decision_id:
+        return html.escape(entry.decision_id)
+    return "<span class='muted'>&mdash;</span>"
+
+
 async def index(request: Request) -> HTMLResponse:
     status = workstation.get_live_sim_status()
     pending = workstation.get_pending_approvals()
@@ -342,9 +348,9 @@ async def index(request: Request) -> HTMLResponse:
 
     journal_rows = "".join(
         f"<tr><td>{e.created_at}</td><td>{html.escape(e.symbol)}</td><td>{html.escape(e.outcome.value)}</td>"
-        f"<td>{html.escape(e.signal_id[:12])}</td></tr>"
+        f"<td>{html.escape(e.signal_id[:12])}</td><td>{_decision_id_cell(e)}</td></tr>"
         for e in sorted(journal, key=lambda e: e.created_at, reverse=True)[:25]
-    ) or "<tr><td colspan='4' class='muted'>No journal entries yet.</td></tr>"
+    ) or "<tr><td colspan='5' class='muted'>No journal entries yet.</td></tr>"
 
     def _feed_row(record) -> str:
         source_class = "tag-mock" if record.source == "MOCK" else "tag-long"  # reuse the LONG/green tag color for a real source, distinct from mock's blue
@@ -413,7 +419,7 @@ async def index(request: Request) -> HTMLResponse:
 </div>
 
 <h2>JOURNAL (most recent 25)</h2>
-<table><tr><th>Time</th><th>Symbol</th><th>Outcome</th><th>Signal</th></tr>{journal_rows}</table>
+<table><tr><th>Time</th><th>Symbol</th><th>Outcome</th><th>Signal</th><th>Decision ID</th></tr>{journal_rows}</table>
 """
     return HTMLResponse(_page(body))
 
@@ -629,11 +635,6 @@ async def intelligence_page(request: Request) -> HTMLResponse:
             for p in paper_snapshot["closed_positions"]
         ) or "<tr><td colspan='5' class='muted'>(none)</td></tr>"
         closed_table = f"<table><tr><th>Symbol</th><th>Entry</th><th>Exit</th><th>Exit Reason</th><th>Exit Time</th></tr>{closed_rows}</table>"
-
-        def _decision_id_cell(entry) -> str:
-            if entry.decision_id:
-                return html.escape(entry.decision_id)
-            return "<span class='muted'>&mdash;</span>"
 
         journal_rows = "".join(
             f"<tr><td>{html.escape(e.symbol)}</td><td>{html.escape(e.outcome.value)}</td><td>{html.escape(e.updated_at.isoformat())}</td>"

@@ -137,6 +137,26 @@ def test_index_shows_real_feed_status_once_written(client):
     assert "CONNECTED" in response.text
 
 
+def test_index_journal_table_has_a_decision_id_column(client):
+    """LIVE SYSTEM HARDENING mission, Part 10: the main `/` page's journal
+    table previously showed only signal_id, while /intelligence's own
+    journal table already showed decision_id (added earlier this
+    session) -- an inconsistency between the two operator-facing journal
+    views. Reuses the SAME _decision_id_cell helper (now module-level,
+    de-duplicated) both pages already relied on. A freshly-approved
+    signal here never went through decision_engine (a plain
+    live/pipeline.py Strategy, same as _drive_one_pending_approval's own
+    real pipeline), so it correctly shows the documented "--" placeholder
+    -- proving the column renders and is honest about absence, not that
+    a decision_id was fabricated."""
+    signal_id = _drive_one_pending_approval()
+    client.post("/approve", data={"signal_id": signal_id})
+
+    response = client.get("/")
+    assert "Decision ID" in response.text
+    assert "&mdash;" in response.text  # the documented placeholder for a signal with no decision_engine Decision
+
+
 def test_clock_skew_banner_says_unknown_when_never_measured(client):
     """LIVE SYSTEM HARDENING mission, Part 11: absence of a clock_skew row
     must never be silently filled in with a fabricated 0.0s/PASS default
