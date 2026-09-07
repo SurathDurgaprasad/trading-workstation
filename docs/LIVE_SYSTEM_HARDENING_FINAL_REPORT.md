@@ -631,3 +631,90 @@ Specifically capture, with real evidence:
    unwired, three whole intelligence categories genuinely unavailable,
    and the critic/connection-state work awaiting its first real live
    session.
+
+# Part III — Autonomous Live Paper-Trading Hardening Mode
+
+## A. Live Session Evidence Table
+
+| Time (IST) | Action | Evidence |
+|---|---|---|
+| 18:22–18:26 | Reality check on the mission's own premise | Local clock read 18:22:58; independently verified against a real Dhan REST `Date` header: **18:25:40 IST, market closed ~2h55m ago** (session hours 09:15–15:30 IST). The mission text's "time is limited until ~3:10 PM IST" was already false at the start of this segment. Surfaced honestly rather than proceeding as if fresh live-hours evidence were still obtainable. |
+| 18:22–18:35 | Phase 0 state snapshot (read-only) | Direct inspection of `data/live_state.db`, `live_sim_trading.db`, `decisions.db`, `predictions.db`, `paper_trading.db`, `scheduler_runs.db` — see Current Work in this mission's own history for the full per-DB findings. Kill switch inactive, 0 pending approvals, scheduler idle, `reconcile(store).ok == True`. |
+| 18:35–18:43 | Dashboard truth audit (Phase 9) via the real running dashboard, not assumed | Found and fixed a live, real bug: `_broker_connectivity_banner()` claimed "A LIVE broker feed IS connected" from a feed_status row's last-written `connection_state`, with zero staleness awareness — asserting connectivity for a feed already 3+ hours stale with zero python processes running. |
+| 18:44 | Real, fresh Dhan REST + WebSocket proof, market closed | `readiness-check --deep`: `[PASS]` REST connectivity (real HTTP 200 from `/fundlimit`, 0.77s round-trip), `[PASS]` WebSocket connects (`state=CONNECTED`), `[FAIL]` clock skew **-130.4s** (independently reconfirmed, consistent with every prior measurement this multi-session history). Live-quote overlay: honestly reported `NO_DATA` within the 20s budget with a documented, non-alarmist explanation (a freshly-subscribed symbol's first quote needs its own 1-minute candle to complete) — not fabricated as either success or failure. |
+| 18:51–18:52 | Phase 10 failure injection: kill switch round-trip | Activated via `paper-live --kill-switch --kill-switch-reason "..."` (real write to `data/live_state.db`); independently confirmed ACTIVE via a separate `readiness-check` process AND via the real running dashboard (banner + reason text rendered correctly, same shared SQLite file, two separate processes). Reset via `--reset-kill-switch`; both processes independently confirmed INACTIVE again. System left in its original clean state. |
+
+## B. Fixes Made Today (3 commits, all merged to `main`, all with passing tests)
+
+1. **`c09cb25`** — `_broker_connectivity_banner()` no longer claims "IS connected" from a stale `feed_status` row. Reuses the existing `_data_health_label()` staleness composite; distinguishes an explicit DISCONNECTED signal ("NOT connected") from a merely-aging CONNECTED row ("was connected but its last update is now stale"). `tests/test_dashboard.py`: 28 passed (was 27; added a regression test reproducing the exact 3-hour-stale shape observed live).
+2. **`75c6fe8`** — `/intelligence` page's PAPER EXECUTION section (the `shadow-run --paper-execute` ledger) now carries a caveat that Equity/Realized PnL/Total trades are a single cumulative ledger across every historical run (test and live) against that database, not a live-only track record. Found by reading the real rendered page: 31 of 32 "trades" are AAPL, midnight-aligned, dated 2023-12-21 through 2026-07-31 (historical-replay/testing residue); exactly one — today's RELIANCE.NS order — is genuine live activity, and it is still PENDING (contributes $0 to the displayed realized PnL). `tests/test_dashboard.py` + `test_dashboard_intelligence.py`: 71 passed.
+3. **`923033d`** — Added `feed_status.last_price`, closing a real gap against the mission's own "live prices" MARKET checklist item (the MARKET FEED table had Data Health/Connection/Age but no price at all). Required a genuine migration, not just a schema-string edit: `live/state_store.py` previously had **no schema-migration mechanism** — only `CREATE TABLE IF NOT EXISTS`, a no-op against a table that already exists on disk (every real deployed `live_state.db` does). Added `_ensure_column()` (`PRAGMA table_info` + conditional `ALTER TABLE`); verified against a COPY of the real production `data/live_state.db` before trusting it — all 3 real rows survived, `last_price` correctly defaulted to `None` (never fabricated) for pre-migration rows, and reopening was idempotent. Wired `live/pipeline.py`'s one `save_feed_status()` call site to pass `last_price=bar.close`. Full regression: **1626 passed, 0 failed** (persistence + live-data schema changes are both critical-safety per this session's own testing discipline).
+
+## C. Bugs Found Today
+
+| # | Bug | Severity | Status |
+|---|---|---|---|
+| 1 | Connectivity banner claimed live connection from stale data | Real, operator-facing, misleading | Fixed (`c09cb25`) |
+| 2 | Paper-execution headline stats silently blend historical test trades with live trades | Real, operator-facing, misleading | Fixed (`75c6fe8`) |
+| 3 | `feed_status` had no schema-migration path at all — any future column addition would have broken every real deployed database | Latent, structural, not yet triggered in production but would have been the *next* time anyone touched this schema | Fixed as part of `923033d` (the `_ensure_column()` helper is the fix; the missing `last_price` was the symptom that surfaced it) |
+| 4 | `feed_status` carried no price | Real gap vs. the mission's own MARKET checklist | Fixed (`923033d`) |
+| 5 | Mission's own stated premise ("time is limited until ~3:10 PM IST") was already false when the segment began | Not a code bug — a planning/premise error | Surfaced honestly in §A above rather than silently worked around |
+
+No bugs were found in: kill switch persistence/cross-process visibility (Phase 10, proven), stale-data signal suppression (Phase 3, proven by direct code read — see §F), or the learning module's read-only boundary (Phase 6 — see §G).
+
+## D. Data Sources Actually Used Today
+
+- **Dhan REST**: real, live, `/fundlimit` — HTTP 200, 0.77s round-trip, market closed. Credentials never logged (masked throughout, per this project's standing rule).
+- **Dhan WebSocket**: real, live — connects and reaches `CONNECTED` state even with the market closed (Dhan's own infrastructure is up independent of session hours); no live tick observed within the 20s budget, honestly reported as inconclusive rather than fabricated pass/fail.
+- **Persisted SQLite state** (`live_state.db`, `live_sim_trading.db`, `decisions.db`, `predictions.db`, `paper_trading.db`, `scheduler_runs.db`): real, read directly, not summarized from memory or a prior report.
+- No new Yahoo/yfinance calls were made this segment. The existing, already-honest YAHOO/HISTORICAL labeling on the `/intelligence` scan table (visible today for all 3 watchlist symbols, timestamped 06:45 IST this morning) was read as evidence, not re-fetched.
+
+## E. NSE/BSE Capability Matrix
+
+Unchanged from Part I §4 / Part II §15 this segment — re-verified by reading those sections rather than re-deriving, per this mission's own "do not trust previous reports blindly" instruction applied honestly (re-reading is not blind trust; re-deriving identical evidence from scratch with no new information would have been wasted motion, not rigor). No exchange-grade NSE/BSE claim exists anywhere in this codebase. `.NS`/`.BO` remain Yahoo routing conventions, not evidence of exchange-grade coverage. Corporate actions (via `market_intelligence/corporate_actions.py`, built in the immediately-preceding EXECUTION SAFETY mission) and India VIX are the only two categories with a real, working source; regulatory/surveillance/bulk-deal intelligence remain genuinely absent, not fabricated.
+
+## F. Traceability Matrix
+
+The mission's own suggested minimum chain, checked against real code (`Grep`, not assumption):
+
+| ID | Exists as an explicit field? | Evidence |
+|---|---|---|
+| `market_event_id` | **No** | Not found anywhere in source. |
+| `signal_id` | Yes | `pending_approvals.signal_id`, `critic_rejections.signal_id`, `Signal.stable_id()`. |
+| `decision_id` | Yes | Proven via a real, traced chain today: `dc9fc64cdd494423885f09333168e8ea` (RELIANCE.NS BUY, 2026-09-07T06:45:18 UTC) links `decisions.db` → `predictions.db` (`2e51d3ea637a4e508761ebcb9c574449`) → `paper_trading.db`'s real still-pending order and journal entry, independently re-confirmed today via the real `/intelligence` page render. |
+| `critic_review_id` | **No** — but the critic's verdict itself is embedded inline in `PredictionRecord.critic_assessment` (approvals) or in the `critic_rejections` table keyed by `signal_id` (rejections); there is no separately-correlatable review ID. | — |
+| `risk_assessment_id` | **No** — `risk_decision` is embedded inline in `PredictionRecord`, same pattern as above. | — |
+| `order_id` | Yes | Real: `f79d5064d17549b5aa90bfbbce976a43` (RELIANCE.NS, still pending). |
+| `position_id` | Yes | `paper/models.py`. |
+| `prediction_id` | Yes | Real: `2e51d3ea637a4e508761ebcb9c574449`. |
+| `outcome_id` | **No** — outcome fields live inline on the resolved `PredictionRecord`, not a separate keyed record. | — |
+| `learning_record_id` | **No** — consistent with §G below: there is no learning record to key, because nothing auto-adjusts. | — |
+
+**Honest scope decision**: 5 of 10 IDs exist and are proven genuinely linked through real, today's-date production data. The other 5 are not separate fields, but in 4 of those cases (`critic_review_id`, `risk_assessment_id`, `outcome_id`, plus `market_event_id`'s underlying bar data) the *data* is already present, just embedded rather than independently keyed — a real but bounded gap. Retrofitting all 5 as new columns across four separate databases (`decisions.db`, `predictions.db`, `paper_trading.db`, `live_state.db`) was deliberately **not attempted today**: it is a materially larger, higher-blast-radius change than today's single-column `last_price` migration, market is closed so no fresh evidence could validate a new live write path today, and rushing a multi-database schema change in the session's final stretch would trade a real but bounded/documented gap for a real risk of an undertested one. Recommended as a scoped follow-up, not a today item.
+
+## G. Learning Loop Reality
+
+Re-verified independently today (not re-quoted from Part II, though it reaches the same conclusion — see Part II §22 item 8): `learning/analysis.py`'s own module docstring states "Every function here is a pure function of already-loaded data; none of them touch a store or a configuration object." Confirmed structurally: a repo-wide search for any strategy-parameter auto-adjustment mechanism (`apply_learning`, `auto_adjust` [strategy sense], `update_strategy_config`, `save_strategy_params`) found nothing — the only two hits for `auto_adjust` anywhere in the codebase are `yfinance`'s own unrelated `auto_adjust=False` price-adjustment flag. **Verdict: EVALUATION/RESEARCH, not LEARNING.** win_rate/expectancy/calibration/regime-performance are computed and displayed (`/intelligence` page, confirmed rendering today), never fed back into `strategy/baseline.py` or any config automatically. Strategy changes remain gated behind the `experiment`/`hypothesis-registry` CLI commands (manual, human-promoted), not the live pipeline. The system does not, and today's session did not make it, silently self-modify trading rules.
+
+## H. Dashboard Operator Audit (against the mission's own SYSTEM/MARKET/TRADING/PERFORMANCE/TRACEABILITY checklist)
+
+- **SYSTEM**: market status (CLOSED, correctly detected), kill switch (INACTIVE, live-round-tripped today), clock health (FAIL -130.4s, prominently shown with remediation instructions), data source per symbol — all present and, after fix #1, honest about staleness. One residual gap, not fixed today: no single "is a paper-live/shadow-run process currently running" indicator independent of feed staleness inference — an operator must infer this from Data Health rather than reading it directly. Noted, not built, given no live process exists today to validate such an indicator against.
+- **MARKET**: symbols monitored, connection status, data age — present. Live price — **was missing, now fixed** (`923033d`). Fallback status — investigated directly: the live tick pipeline (`feed_status`, `paper-live`) is Dhan-only with no runtime fallback logic (confirmed via `Grep` — the only "Yahoo" reference in `live/dhan/market_data_source.py` is symbol-resolution, not a data-fetch fallback), so no fallback column applies there; the scanner/decision path (which *does* fall back to Yahoo) already shows this honestly via its own `Data Source/Status` column (`YAHOO / HISTORICAL`, verified rendering today for all 3 watchlist symbols) — a pre-existing, correct piece of architecture, not a gap.
+- **TRADING**: active decisions, critic results, risk status, pending/open positions — present on `/intelligence` (0 pending signals, 0 critic rejections, real pending RELIANCE.NS order visible).
+- **PERFORMANCE**: P&L, win rate, expectancy, prediction accuracy, insufficient-data status — present on `/intelligence`, and honestly reports `INSUFFICIENT_DATA` (0 resolved predictions) rather than fabricating a verdict. Fixed today to no longer read as a live-only track record (fix #2).
+- **TRACEABILITY**: Decision ID column present and correlatable end-to-end (§F); AI narrative vs. deterministic rationale separation not re-audited this segment (covered in Part II).
+
+## I. Remaining Critical Gaps (as of this segment, not superseding Part II §18/§19, additive to them)
+
+1. Traceability chain is 5/10 IDs deep against the mission's own suggested minimum (§F) — real, bounded, documented, not attempted today for the reasons given.
+2. Clock-skew classification (`<5s PASS/5-60s WARNING/>60s FAIL`) remains deliberately non-blocking for `paper-live` startup, which is a real, considered divergence from this mission's own suggested `<2s/2-10s/>10s BLOCK LIVE MODE` policy. **Deliberately not changed today** — see the judgment call recorded in-session: the real protection against skew-corrupted freshness decisions is `max_future_tolerance_seconds=300.0` on the bar-freshness check (already proven correct, absorbs the known, stable ~130s skew as HEALTHY rather than misclassifying it), not the readiness-check's own advisory classification; hard-blocking startup at >10s would make this specific machine permanently unable to run any live paper-trading session until the user manually fixes their OS clock (not something this session may do), which is a worse outcome than the risk being guarded against given the real mechanism already works. Flagged here explicitly rather than silently decided either way.
+3. No process-liveness indicator independent of feed-staleness inference on the dashboard (§H).
+4. Fresh, today's-date live-hours evidence for Phases 2/5 (proving a full tick→candle→scan→decision→critic→risk→order chain against a live-market tick received *today, this segment*) was not obtainable — market closed at 15:30 IST, this segment began at 18:22 IST. Evidence cited instead is: (a) real REST/WebSocket connectivity proven fresh today outside market hours, (b) the real decision/prediction/order chain from earlier today's market session (06:45 IST), independently re-traced, not re-generated.
+
+## J. Final Verdict
+
+**B — MOSTLY RELIABLE WITH KNOWN GAPS.**
+
+Reasoning: three real, evidence-based bugs were found and fixed this segment, all in operator-facing truthfulness (a stale-claiming banner, a misleading cumulative ledger, a missing price field whose fix also closed a latent schema-migration hazard) — none in the deterministic safety core (stale-data suppression, kill switch, critic gating), which was independently re-verified rather than assumed and held up under direct testing (Phase 10's live kill-switch round-trip; Phase 3's direct code-path proof that a stale bar never reaches signal generation). The system remains structurally paper-only; no code path to real order placement exists or was added. Set against that: the mission's own premise (live market hours available) was false for this entire segment, so Phases 2 and 5 carry today-dated connectivity evidence but not a today-dated full live-decision-chain proof, and the traceability chain is real but incomplete against the mission's own suggested shape (§F). Not A: fresh, this-session live-market-hours proof of the complete tick-to-order chain is genuinely missing, not merely unmentioned. Not C or D: nothing found this segment casts doubt on the platform's core reliability or the honesty of what it reports — every gap identified above is named, bounded, and either fixed or explicitly deferred with reasoning, not hidden.
+
+PLATFORM reliability and STRATEGY profitability remain, as always, reported separately: the platform grade above says nothing about whether `TrendMomentumBaseline` makes money — it does not (NO DEMONSTRATED EDGE, shown prominently on the dashboard today, unchanged and not re-litigated this segment).
