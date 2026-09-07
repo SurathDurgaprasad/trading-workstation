@@ -524,6 +524,48 @@ passed) and a final milestone full regression after all five landed
 nothing uncounted). Safety suite (`test_dhan_no_real_orders.py`,
 `test_broker.py`) green at every commit.
 
+### 20.1 Addendum — adversarial self-review of `live/critic_gate.py` (commits `90febae`, `e80abc7`)
+
+After §17 landed, `live/critic_gate.py` was re-read fresh, per this
+mission's own "actively try to disprove the system" instruction, since
+it is the highest-stakes new code (wired into the live execution path).
+Two real, non-hypothetical gaps were found and fixed, each exercised by
+a new test that failed against the old code before the fix:
+
+- **Non-atomic partial update**: if `run_scan()` succeeded but the
+  separate `compute_benchmark_context()` call then raised, `self.
+  _candidate` had already been reassigned to fresh data while `self.
+  _benchmark_context` silently kept its old value and `_last_refresh_error`
+  got set — an inconsistent state a concurrent read could observe. Both
+  real fetches now commit together, or neither does.
+- **Unbounded staleness on repeated failure**: the refresh-retry timer
+  advanced on every attempt, success or failure, with nothing tracking
+  how old the cached evidence had actually become — a persistent
+  data-provider outage would have left pre-outage evidence in place
+  indefinitely, evaluated by the critic as if current. A new
+  `max_staleness_seconds` bound (default 3× `refresh_seconds`) now fails
+  closed once evidence is genuinely too old, tracked separately from the
+  retry timer so one transient failure alone doesn't spuriously block.
+
+Also confirmed, via a test that initially failed for the *wrong* reason:
+`market_intelligence.scanner._screen_symbol`/`_fetch_benchmark` and
+`market_intelligence.regime.compute_benchmark_context` all narrowly
+catch `MarketDataError`/`ValueError` themselves and degrade gracefully
+rather than raising — `CriticGate`'s own exception handling only ever
+engages for a genuinely unexpected failure type. A reassuring, now
+directly-verified property of the whole stack, not assumed.
+
+A parallel, lower-urgency gap was found (not fixed) in the still-unwired
+`market_intelligence/event_risk.py`: `assess_event_risk()` has no
+equivalent staleness check for the `CorporateActionsSnapshot` it's
+given, unlike `critic.engine.evaluate()`'s own `DATA_FRESHNESS` check.
+Documented in that module's own docstring as a decision to make before
+it is ever wired into a live path, not hidden.
+
+1615 → **1619 passed, 0 failed** (full regression clean) plus one
+documentation-only commit (0 logic change, all 13 `event_risk` tests
+unaffected).
+
 ## 21. For the Next Live Market Session
 
 Per this mission's own instruction: do not force trades, do not loosen
