@@ -258,7 +258,7 @@ class LiveSimPipeline:
             self.state_store.save_feed_status(
                 symbol=symbol, source=bar.source.value, status=bar.status.value,
                 bar_timestamp=bar.timestamp, received_at=bar.received_at or self._clock(),
-                connection_state=self._connection_state_label(),
+                connection_state=self._connection_state_label(), last_price=bar.close,
             )
 
         engine_bar = Bar(timestamp=bar.timestamp, open=bar.open, high=bar.high, low=bar.low, close=bar.close, volume=bar.volume)

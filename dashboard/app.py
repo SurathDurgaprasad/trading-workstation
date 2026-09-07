@@ -451,18 +451,26 @@ async def index(request: Request) -> HTMLResponse:
         conn = record.connection_state or "UNKNOWN"
         conn_class = "tag-long" if conn == "CONNECTED" else "tag-short"
         health_label, health_class = _data_health_label(connection_state=record.connection_state, age_seconds=age_seconds)
+        # AUTONOMOUS LIVE PAPER-TRADING HARDENING mission, dashboard truth
+        # audit: this table had no price at all -- a real gap against the
+        # mission's own "live prices" checklist item. last_price is None
+        # for any row written before this column existed (old rows are
+        # never backfilled, see state_store._ensure_column) -- shown
+        # honestly as "n/a", never a fabricated 0 or blank.
+        price_text = f"{record.last_price:,.2f}" if record.last_price is not None else "n/a"
         return (
             f"<tr><td>{html.escape(record.symbol)}</td>"
             f"<td><span class='tag {source_class}'>{html.escape(record.source)}</span></td>"
             f"<td><span class='tag {status_class}'>{html.escape(record.status)}</span></td>"
             f"<td><span class='tag {conn_class}'>{html.escape(conn)}</span></td>"
             f"<td><span class='tag {health_class}'>{html.escape(health_label)}</span></td>"
+            f"<td>{price_text}</td>"
             f"<td>{html.escape(record.bar_timestamp)}</td>"
             f"<td>{age_text}</td></tr>"
         )
 
     feed_rows = "".join(_feed_row(r) for r in feed_status) or (
-        "<tr><td colspan='7' class='muted'>No market data processed yet in this session &mdash; "
+        "<tr><td colspan='8' class='muted'>No market data processed yet in this session &mdash; "
         "run <code>python main.py paper-live ...</code> to start a feed.</td></tr>"
     )
 
@@ -475,7 +483,7 @@ async def index(request: Request) -> HTMLResponse:
 
 <h2>MARKET FEED</h2>
 <p class="muted">The last bar actually delivered by whatever is driving the feed (the paper-live CLI, in another process) &mdash; never fabricated here. Data Health is a display-only approximation (see its own tooltip in the source); the real gate against acting on stale data is the live pipeline's own freshness check, not this label.</p>
-<table><tr><th>Symbol</th><th>Source</th><th>Status</th><th>Connection</th><th>Data Health</th><th>Last Bar</th><th>Data Age</th></tr>{feed_rows}</table>
+<table><tr><th>Symbol</th><th>Source</th><th>Status</th><th>Connection</th><th>Data Health</th><th>Last Price</th><th>Last Bar</th><th>Data Age</th></tr>{feed_rows}</table>
 
 <h2>SIGNALS <span class="tag tag-mock">from pending approvals</span></h2>
 <p class="muted">Derived from the latest signal seen for each symbol currently awaiting approval.</p>

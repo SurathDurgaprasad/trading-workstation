@@ -197,6 +197,22 @@ def test_feed_status_connection_state_uses_a_richer_value_when_the_source_expose
     assert record.connection_state == "RECONNECTING"
 
 
+def test_feed_status_last_price_is_the_processed_bars_close():
+    """AUTONOMOUS LIVE PAPER-TRADING HARDENING mission, dashboard truth
+    audit: feed_status previously carried no price at all -- real gap
+    against the mission's own "live prices" MARKET checklist item."""
+    from live.state_store import LiveStateStore
+
+    state_store = LiveStateStore(":memory:")
+    bar = _qualifying_bar(1, close=123.45)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    pipeline, engine, store = _pipeline(script, clock=lambda: bar.timestamp, state_store=state_store)
+    pipeline.process_next()
+
+    record = state_store.get_feed_status("TEST")
+    assert record.last_price == 123.45
+
+
 # --- critic gate integration (LIVE SYSTEM HARDENING mission) -----------------
 
 

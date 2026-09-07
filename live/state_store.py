@@ -85,6 +85,12 @@ CREATE TABLE IF NOT EXISTS feed_status (
     received_at TEXT NOT NULL,
     connection_state TEXT,
     updated_at TEXT NOT NULL
+    -- last_price added via _ensure_column() below, NOT here -- CREATE TABLE
+    -- IF NOT EXISTS is a no-op against a table that already exists on disk
+    -- (every real deployed live_state.db does), so a column added only to
+    -- this DDL string would silently never reach a real database and the
+    -- next save_feed_status() call against it would raise "no column
+    -- named last_price". See _ensure_column's own docstring.
 );
 
 CREATE TABLE IF NOT EXISTS clock_skew (
@@ -158,6 +164,35 @@ class FeedStatusRecord:
     received_at: str
     connection_state: str | None
     updated_at: str
+    last_price: float | None = None
+    """The bar's own close price at the moment this row was written --
+    AUTONOMOUS LIVE PAPER-TRADING HARDENING mission, dashboard truth audit:
+    the MARKET FEED table had a Data Health/Age column but no price at
+    all, real gap against the mission's own "live prices" checklist item.
+    None for any row written before this column existed (old real rows
+    are never backfilled -- see _ensure_column) or if a source ever
+    delivers a bar without a close (neither happens today, kept optional
+    for honesty rather than assuming)."""
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, coltype: str) -> None:
+    """Additive, idempotent migration for a table that may already exist
+    on disk (every real deployed live_state.db does) with an older schema.
+    CREATE TABLE IF NOT EXISTS in _SCHEMA only creates a table that is
+    entirely missing; it silently does nothing to add a new column to a
+    table that already exists -- SQLite has no CREATE-OR-ALTER. Without
+    this, a column added only to the _SCHEMA string above would work
+    against a fresh test DB (created new, so it includes the column from
+    the start) while breaking every real, already-created production DB
+    the moment code tries to read/write the new column -- exactly the
+    "write migration-safe changes, do not break existing databases"
+    hazard this project holds itself to. table/column names here are
+    always our own hardcoded literals, never user input, so this f-string
+    is not a SQL-injection risk despite not being parameterized (SQLite
+    does not support parameterizing identifiers in DDL)."""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
 
 
 class LiveStateStore:
@@ -166,6 +201,7 @@ class LiveStateStore:
         self._conn = sqlite3.connect(self.db_path, isolation_level=None)
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
+        _ensure_column(self._conn, "feed_status", "last_price", "REAL")
 
     def close(self) -> None:
         self._conn.close()
@@ -268,28 +304,30 @@ class LiveStateStore:
     # --- feed status (Phase 15) -------------------------------------------------
 
     def save_feed_status(
-        self, *, symbol: str, source: str, status: str, bar_timestamp: datetime, received_at: datetime, connection_state: str | None = None,
+        self, *, symbol: str, source: str, status: str, bar_timestamp: datetime, received_at: datetime,
+        connection_state: str | None = None, last_price: float | None = None,
     ) -> None:
         self._conn.execute(
-            "INSERT INTO feed_status (symbol, source, status, bar_timestamp, received_at, connection_state, updated_at) "
-            "VALUES (?,?,?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET "
+            "INSERT INTO feed_status (symbol, source, status, bar_timestamp, received_at, connection_state, updated_at, last_price) "
+            "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET "
             "source=excluded.source, status=excluded.status, bar_timestamp=excluded.bar_timestamp, "
-            "received_at=excluded.received_at, connection_state=excluded.connection_state, updated_at=excluded.updated_at",
-            (symbol, source, status, bar_timestamp.isoformat(), received_at.isoformat(), connection_state, _now()),
+            "received_at=excluded.received_at, connection_state=excluded.connection_state, updated_at=excluded.updated_at, "
+            "last_price=excluded.last_price",
+            (symbol, source, status, bar_timestamp.isoformat(), received_at.isoformat(), connection_state, _now(), last_price),
         )
 
     def get_feed_status(self, symbol: str) -> "FeedStatusRecord | None":
         row = self._conn.execute(
-            "SELECT symbol, source, status, bar_timestamp, received_at, connection_state, updated_at FROM feed_status WHERE symbol = ?",
+            "SELECT symbol, source, status, bar_timestamp, received_at, connection_state, updated_at, last_price FROM feed_status WHERE symbol = ?",
             (symbol,),
         ).fetchone()
         if row is None:
             return None
-        return FeedStatusRecord(symbol=row[0], source=row[1], status=row[2], bar_timestamp=row[3], received_at=row[4], connection_state=row[5], updated_at=row[6])
+        return FeedStatusRecord(symbol=row[0], source=row[1], status=row[2], bar_timestamp=row[3], received_at=row[4], connection_state=row[5], updated_at=row[6], last_price=row[7])
 
     def list_feed_status(self) -> list["FeedStatusRecord"]:
-        rows = self._conn.execute("SELECT symbol, source, status, bar_timestamp, received_at, connection_state, updated_at FROM feed_status ORDER BY symbol").fetchall()
-        return [FeedStatusRecord(symbol=r[0], source=r[1], status=r[2], bar_timestamp=r[3], received_at=r[4], connection_state=r[5], updated_at=r[6]) for r in rows]
+        rows = self._conn.execute("SELECT symbol, source, status, bar_timestamp, received_at, connection_state, updated_at, last_price FROM feed_status ORDER BY symbol").fetchall()
+        return [FeedStatusRecord(symbol=r[0], source=r[1], status=r[2], bar_timestamp=r[3], received_at=r[4], connection_state=r[5], updated_at=r[6], last_price=r[7]) for r in rows]
 
     # --- clock skew (LIVE SYSTEM HARDENING mission, Part 11) --------------------
 

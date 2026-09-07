@@ -137,6 +137,39 @@ def test_index_shows_real_feed_status_once_written(client):
     assert "CONNECTED" in response.text
 
 
+def test_market_feed_table_shows_a_real_last_price(client):
+    # AUTONOMOUS LIVE PAPER-TRADING HARDENING mission, dashboard truth
+    # audit: the MARKET FEED table had no price column at all -- real gap
+    # against the mission's own "live prices" checklist item.
+    import live.workstation as workstation_module
+    from datetime import datetime, timezone
+
+    state_store = workstation_module.new_live_state_store()
+    now = datetime.now(timezone.utc)
+    state_store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, connection_state="CONNECTED", last_price=1309.2)
+    state_store.close()
+
+    response = client.get("/")
+    assert "Last Price" in response.text
+    assert "1,309.20" in response.text
+
+
+def test_market_feed_table_shows_n_a_when_last_price_was_never_recorded(client):
+    # A row written before the last_price column existed (or by a caller
+    # that never supplied one) must show an honest "n/a", never a
+    # fabricated 0.00 or blank cell.
+    import live.workstation as workstation_module
+    from datetime import datetime, timezone
+
+    state_store = workstation_module.new_live_state_store()
+    now = datetime.now(timezone.utc)
+    state_store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, connection_state="CONNECTED")
+    state_store.close()
+
+    response = client.get("/")
+    assert "n/a" in response.text
+
+
 # --- _data_health_label (LIVE SYSTEM HARDENING mission, Part 3) -- pure unit tests ---
 
 

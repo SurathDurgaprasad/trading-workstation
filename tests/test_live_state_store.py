@@ -192,6 +192,62 @@ def test_feed_status_survives_a_reopened_connection(tmp_path):
     assert record.source == "DHAN"
 
 
+def test_save_and_get_feed_status_round_trips_last_price(tmp_path):
+    # AUTONOMOUS LIVE PAPER-TRADING HARDENING mission, dashboard truth
+    # audit: the MARKET FEED table had no price at all -- real gap
+    # against the mission's own "live prices" checklist item.
+    store = LiveStateStore(tmp_path / "state.db")
+    now = datetime.now(timezone.utc)
+    store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, last_price=1309.2)
+    record = store.get_feed_status("RELIANCE.NS")
+    assert record.last_price == 1309.2
+    assert store.list_feed_status()[0].last_price == 1309.2
+
+
+def test_feed_status_last_price_defaults_to_none_when_not_supplied(tmp_path):
+    # Never fabricate a price -- a caller that does not pass last_price
+    # (or an old row written before this column existed) must read back
+    # as None, not 0.0 or any other guessed value.
+    store = LiveStateStore(tmp_path / "state.db")
+    now = datetime.now(timezone.utc)
+    store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now)
+    assert store.get_feed_status("RELIANCE.NS").last_price is None
+
+
+def test_feed_status_migration_adds_last_price_to_a_pre_existing_database(tmp_path):
+    # Proves the real hazard this migration exists to avoid: a database
+    # file created by an OLDER version of this schema (before last_price
+    # existed) must gain the column in place, with old rows preserved and
+    # last_price honestly None -- never an error, never silent data loss.
+    # This mirrors verification actually run against a copy of the real
+    # production data/live_state.db during development of this fix.
+    import sqlite3
+
+    db_path = tmp_path / "state.db"
+    old_schema_conn = sqlite3.connect(str(db_path))
+    old_schema_conn.execute(
+        "CREATE TABLE feed_status (symbol TEXT PRIMARY KEY, source TEXT NOT NULL, status TEXT NOT NULL, "
+        "bar_timestamp TEXT NOT NULL, received_at TEXT NOT NULL, connection_state TEXT, updated_at TEXT NOT NULL)"
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    old_schema_conn.execute(
+        "INSERT INTO feed_status (symbol, source, status, bar_timestamp, received_at, connection_state, updated_at) "
+        "VALUES ('RELIANCE.NS', 'DHAN', 'LIVE', ?, ?, 'CONNECTED', ?)",
+        (now, now, now),
+    )
+    old_schema_conn.commit()
+    old_schema_conn.close()
+
+    store = LiveStateStore(db_path)  # must not raise, e.g. "no column named last_price"
+    record = store.get_feed_status("RELIANCE.NS")
+    assert record is not None
+    assert record.source == "DHAN"  # pre-existing data intact
+    assert record.last_price is None  # never fabricated for a pre-migration row
+
+    store.save_feed_status(symbol="TCS.NS", source="DHAN", status="LIVE", bar_timestamp=datetime.now(timezone.utc), received_at=datetime.now(timezone.utc), last_price=4123.5)
+    assert store.get_feed_status("TCS.NS").last_price == 4123.5
+
+
 def test_get_clock_skew_returns_none_when_never_measured(tmp_path):
     store = LiveStateStore(tmp_path / "state.db")
     assert store.get_clock_skew() is None
