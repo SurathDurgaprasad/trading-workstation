@@ -371,6 +371,47 @@ def test_shadow_run_paper_execute_a_critic_reject_prevents_the_order_but_not_the
     assert "KILL_SWITCH" in predictions[0].critic_assessment.failed_checks
 
 
+def test_shadow_run_threads_a_real_benchmark_context_into_the_critic(tmp_path, capsys, monkeypatch):
+    """LIVE SYSTEM HARDENING mission: the critic's own REGIME_CONFLICT
+    check has always accepted an optional benchmark_context, but no
+    caller ever supplied one -- verified gap, now closed. --benchmark ""
+    (every other test in this file) deliberately disables it; passing a
+    real symbol here proves compute_benchmark_context is actually called
+    and its result actually reaches critic.engine.evaluate(), via the
+    REGIME_CONFLICT check flipping from "not evaluated" to evaluated.
+
+    This module's own autouse _wire_fakes fixture serves only 100 bars,
+    fewer than learning.regime.classify_regime_at's real
+    BROAD_TREND_SMA_PERIOD=200 requirement -- correctly (honestly)
+    classifying as UNKNOWN with too little history, not a bug. This test
+    needs a real UPTREND classification to prove the wiring, so it
+    overrides the provider locally with a longer series, same fake
+    shape, just enough real history."""
+    import market.data_provider as market_data_provider_module
+
+    monkeypatch.setattr(market_data_provider_module, "get_market_data_provider", lambda: _FakeMarketDataProvider(_uptrend_bars(n=250)))
+
+    args = _paper_execute_args(tmp_path, symbols="AAPL")
+    args.benchmark = "^NSEI"  # override this file's usual "" (disabled) default
+
+    run_shadow_run_command(args)
+
+    from predictions.store import PredictionStore
+
+    prediction_store = PredictionStore(tmp_path / "predictions.db")
+    predictions = prediction_store.list_predictions()
+    prediction_store.close()
+    assert len(predictions) == 1
+    assessment = predictions[0].critic_assessment
+    assert assessment is not None
+
+    from critic.models import CriticCheckName
+
+    regime_check = next(c for c in assessment.checks if c.name == CriticCheckName.REGIME_CONFLICT)
+    assert regime_check.evaluated is True
+    assert "UPTREND" in regime_check.detail
+
+
 def test_shadow_run_skip_critic_leaves_critic_assessment_none_even_when_it_would_reject(tmp_path, capsys):
     """--skip-critic must bypass the critic entirely -- no verdict
     persisted, and paper execution proceeds exactly as it did before the

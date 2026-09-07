@@ -2211,6 +2211,21 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     benchmark_symbol = args.benchmark or None
     live_snapshot_provider = _build_live_snapshot_provider(args)
 
+    # LIVE SYSTEM HARDENING mission, Part 2 (market regime -> critic): the
+    # critic's own REGIME_CONFLICT check has always accepted an optional
+    # benchmark_context parameter, but no caller ever supplied one -- a
+    # real, verified gap (confirmed by reading this exact call site before
+    # this fix). Computed ONCE here, before the per-candidate loop, and
+    # reused for every candidate this run -- a benchmark's own trend/
+    # volatility regime does not meaningfully change between candidates in
+    # the same scan, so recomputing it per-symbol would be wasted work, not
+    # extra safety. Never fabricated: compute_benchmark_context itself
+    # returns trend_regime=UNKNOWN (never a fabricated NEUTRAL) when
+    # benchmark_symbol is None or the fetch fails -- see its own docstring.
+    from market_intelligence.regime import compute_benchmark_context
+
+    benchmark_context = compute_benchmark_context(benchmark_symbol, provider=provider, period=args.period, interval=args.interval)
+
     print("=" * 70)
     print("SHADOW RUN -- FULL PIPELINE, ONE PASS -- NOT AN ORDER (no real or paper trade is placed)")
     print("=" * 70)
@@ -2302,6 +2317,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
                                 decision, signal, config=_critic_config_for_interval(args.interval),
                                 kill_switch_active=kill_switch_active,
                                 existing_pending_order=existing_pending, existing_open_position=existing_open,
+                                benchmark_context=benchmark_context,
                             )
                             critic_verdicts[critic_assessment.verdict.value] = critic_verdicts.get(critic_assessment.verdict.value, 0) + 1
 
