@@ -80,6 +80,25 @@ def test_h_entry_002_is_rejected_with_the_real_dev_val_oos_evidence():
     assert "INSUFFICIENT_DATA" in h.evidence
 
 
+def test_h_entry_004_is_rejected_with_the_real_dev_val_oos_evidence():
+    """BUILD THE REAL TRADING BRAIN mission: the momentum-acceleration
+    candidates (strategy/momentum_acceleration.py) were run through the
+    full universe dev/val/oos protocol via
+    run_universe_momentum_acceleration_experiment(). All three candidates
+    show a confident NEGATIVE_PERFORMANCE development verdict, each
+    meaningfully worse than the frozen baseline's own already-negative
+    performance -- REJECTED, not OPEN and not SUPPORTED."""
+    registry = build_hypothesis_registry()
+    h = next(h for h in registry if h.hypothesis_id == "H_ENTRY_004")
+
+    assert h.status == HypothesisStatus.REJECTED
+    assert "REJECTED" in h.evidence
+    # Spot-check the real, actually-measured figures are present verbatim.
+    assert "171/88/91" in h.evidence
+    assert "146/75/85" in h.evidence
+    assert "141/73/80" in h.evidence
+
+
 def test_all_exit_hypotheses_have_now_been_implemented_and_tested():
     """H_EXIT_001 through H_EXIT_004 have all been implemented and run
     against the real 41-symbol universe this session (see the dedicated

@@ -167,12 +167,39 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
             description="Momentum ACCELERATION (is momentum increasing, not merely positive) matters more than absolute momentum level.",
             rationale="RSI14>50 and MACD>signal are absolute-level conditions -- they do not distinguish momentum that is building from momentum that is already fading from a high level.",
             expected_effect="A strategy conditioning on momentum acceleration should show a higher win rate than one conditioning on momentum level alone.",
-            dataset_restrictions="Same 41-symbol universe.",
-            experiment_design="Not yet built.",
+            dataset_restrictions="Same 41-symbol universe (32 NSE, 9 US), 5 years daily bars.",
+            experiment_design=(
+                "BUILD THE REAL TRADING BRAIN mission: strategy/momentum_acceleration.py -- three FilteredStrategy "
+                "candidates wrapping the frozen TrendMomentumBaseline, gated on a signed 3-bar delta of an "
+                "already-causal indicator (A: rsi_14.diff(3)>0, B: macd_histogram.diff(3)>0, C: both), the lookback "
+                "chosen a priori and never tuned against any result. Run via "
+                "run_universe_momentum_acceleration_experiment() -- a self-contained fetch/compute/split/run loop "
+                "(mirroring backtesting.runner.run_full_backtest's own internal structure) rather than a direct "
+                "call to that shared function, since it needed a column-injection step run_full_backtest exposes "
+                "no hook for."
+            ),
             success_criteria="Acceleration-based variant improves win rate/expectancy with sufficient sample size.",
             failure_criteria="No improvement.",
-            status=HypothesisStatus.OPEN,
-            evidence="Not yet tested this session.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Run against the real 41-symbol universe, all 41 backtested successfully (0 failed). "
+                "A_rsi_accelerating (171/88/91 dev/val/oos trades): development expectancy -1.19% (mean-return "
+                "95% CI [-1.76%, -0.62%], entirely negative) -> NEGATIVE_PERFORMANCE. Validation -0.69%, "
+                "out-of-sample +0.02% (essentially flat), both STATISTICALLY_MEANINGLESS. "
+                "B_macd_histogram_widening (146/75/85 trades): development expectancy -1.19% (CI [-1.82%, "
+                "-0.56%]) -> NEGATIVE_PERFORMANCE. Validation -0.52%, out-of-sample -0.13%, STATISTICALLY_"
+                "MEANINGLESS. "
+                "C_both_accelerating (141/73/80 trades): development expectancy -1.09% (CI [-1.73%, -0.46%]) -> "
+                "NEGATIVE_PERFORMANCE. Validation -0.53%, out-of-sample -0.19%, STATISTICALLY_MEANINGLESS. "
+                "All three candidates: PROMOTION VERDICT REJECTED (a confidently NEGATIVE_PERFORMANCE development "
+                "split is disqualifying per this project's own promotion rule, regardless of validation/OOS). "
+                "Bonferroni correction (family_size=3, out-of-sample returns, corrected z=2.394): no candidate "
+                "survives as positive. Unlike H_EXIT_002's real directional improvement, and unlike H_ENTRY_002's "
+                "own OOS point estimates staying close to the baseline's, these three candidates' development "
+                "expectancy (-1.09% to -1.19%) is MEANINGFULLY WORSE than the frozen baseline's own -0.78% "
+                "(H_EXIT_001's evidence) -- gating on short-horizon momentum acceleration does not merely fail to "
+                "help, it actively selects a worse subset of the baseline's own signals on this evidence."
+            ),
         ),
         HypothesisRecord(
             hypothesis_id="H_ENTRY_005",
