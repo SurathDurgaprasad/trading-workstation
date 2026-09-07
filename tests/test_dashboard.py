@@ -137,6 +137,35 @@ def test_index_shows_real_feed_status_once_written(client):
     assert "CONNECTED" in response.text
 
 
+def test_index_shows_no_critic_rejections_when_none_ever_recorded(client):
+    response = client.get("/")
+    assert "No signal has ever been rejected by the deterministic critic." in response.text
+
+
+def test_index_shows_a_real_persisted_critic_rejection(client):
+    """LIVE SYSTEM HARDENING mission: directly exercises
+    live.workstation.get_critic_rejections() through the dashboard --
+    proving a critic-rejected signal (which never creates a JournalEntry
+    at all) is still genuinely visible to an operator, not silently
+    lost."""
+    import live.workstation as workstation_module
+    from datetime import datetime, timezone
+
+    state_store = workstation_module.new_live_state_store()
+    state_store.save_critic_rejection(
+        signal_id="sig-abc123", symbol="RELIANCE.NS", verdict="REJECT",
+        reasons=["Kill switch is active -- execution safety blocks any new order."],
+        checks=[], rejected_at=datetime.now(timezone.utc),
+    )
+    state_store.close()
+
+    response = client.get("/")
+    assert "RELIANCE.NS" in response.text
+    assert "REJECT" in response.text
+    assert "Kill switch is active" in response.text
+    assert "sig-abc123"[:12] in response.text
+
+
 def test_index_journal_table_has_a_decision_id_column(client):
     """LIVE SYSTEM HARDENING mission, Part 10: the main `/` page's journal
     table previously showed only signal_id, while /intelligence's own

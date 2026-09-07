@@ -1,11 +1,13 @@
 """Phase 12 §8 — the human-approval domain state machine. Target flow:
 
-    SIGNAL_GENERATED -> RISK_APPROVED -> AI_EXPLAINED -> PENDING_HUMAN_APPROVAL
+    SIGNAL_GENERATED -> [CRITIC_REJECTED] -> RISK_APPROVED -> AI_EXPLAINED -> PENDING_HUMAN_APPROVAL
         -> HUMAN_APPROVED -> EXECUTED
 
 This module defines the STATES and legal TRANSITIONS only — it does not
-decide what counts as "approved" (RiskEngine, unchanged, does that) or run
-the AI (agents.signal_explainer, unchanged, does that) or execute anything
+decide what counts as "approved" (RiskEngine, unchanged, does that), what
+the critic rejects (critic.engine, unchanged, does that — see
+live/critic_gate.py for the bridge), or run the AI (agents.
+signal_explainer, unchanged, does that) or execute anything
 (PaperTradingEngine, unchanged, does that). It exists so that once
 human-approval is required, no code path can skip straight from a risk
 decision to execution — enforced structurally, not by convention.
@@ -27,6 +29,12 @@ from enum import Enum
 
 class SignalLifecycleState(str, Enum):
     SIGNAL_GENERATED = "SIGNAL_GENERATED"
+    CRITIC_REJECTED = "CRITIC_REJECTED"
+    """LIVE SYSTEM HARDENING mission: the deterministic critic (critic.
+    engine.evaluate(), already used by shadow-run) runs BEFORE risk, when
+    wired in -- a REJECT/INSUFFICIENT_EVIDENCE verdict stops a signal
+    here, before it ever reaches risk sizing or an order. Terminal, same
+    posture as RISK_REJECTED."""
     RISK_APPROVED = "RISK_APPROVED"
     RISK_REJECTED = "RISK_REJECTED"
     AI_EXPLAINED = "AI_EXPLAINED"
@@ -49,7 +57,10 @@ class IllegalStateTransitionError(Exception):
 
 def legal_transitions(require_human_approval: bool) -> dict[SignalLifecycleState, set[SignalLifecycleState]]:
     graph: dict[SignalLifecycleState, set[SignalLifecycleState]] = {
-        SignalLifecycleState.SIGNAL_GENERATED: {SignalLifecycleState.RISK_APPROVED, SignalLifecycleState.RISK_REJECTED},
+        SignalLifecycleState.SIGNAL_GENERATED: {
+            SignalLifecycleState.CRITIC_REJECTED, SignalLifecycleState.RISK_APPROVED, SignalLifecycleState.RISK_REJECTED,
+        },
+        SignalLifecycleState.CRITIC_REJECTED: set(),
         SignalLifecycleState.RISK_APPROVED: {SignalLifecycleState.AI_EXPLAINED, SignalLifecycleState.PENDING_HUMAN_APPROVAL},
         SignalLifecycleState.AI_EXPLAINED: {SignalLifecycleState.PENDING_HUMAN_APPROVAL},
         SignalLifecycleState.PENDING_HUMAN_APPROVAL: {
@@ -101,6 +112,6 @@ class SignalLifecycle:
     @property
     def is_terminal(self) -> bool:
         return self.state in (
-            SignalLifecycleState.RISK_REJECTED, SignalLifecycleState.HUMAN_REJECTED,
+            SignalLifecycleState.CRITIC_REJECTED, SignalLifecycleState.RISK_REJECTED, SignalLifecycleState.HUMAN_REJECTED,
             SignalLifecycleState.APPROVAL_EXPIRED, SignalLifecycleState.EXECUTED,
         )

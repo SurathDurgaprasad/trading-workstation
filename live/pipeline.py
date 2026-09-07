@@ -40,8 +40,10 @@ from enum import Enum
 
 import pandas as pd
 
+from critic.models import CriticAssessment
 from live.approval import SignalLifecycle, SignalLifecycleState
 from live.contracts import NO_NEW_BAR, FeedDisconnectedError, MarketDataSource
+from live.critic_gate import CriticGate
 from live.freshness import DEFAULT_FRESHNESS_POLICY, FreshnessPolicy, FreshnessResult
 from live.state_store import LiveStateStore
 from market.data_provider import OHLCV, OHLCVBar
@@ -75,7 +77,7 @@ class _SymbolBuffer:
 class PipelineStepResult:
     """One outcome of LiveSimPipeline.process_next()."""
 
-    kind: str  # BAR_PROCESSED | DUPLICATE_SKIPPED | OUT_OF_ORDER_REJECTED | STALE_SIGNAL_SUPPRESSED | FEED_DISCONNECTED | FEED_EXHAUSTED | NO_NEW_DATA | PENDING_HUMAN_APPROVAL | KILL_SWITCH_ACTIVE
+    kind: str  # BAR_PROCESSED | DUPLICATE_SKIPPED | OUT_OF_ORDER_REJECTED | STALE_SIGNAL_SUPPRESSED | FEED_DISCONNECTED | FEED_EXHAUSTED | NO_NEW_DATA | PENDING_HUMAN_APPROVAL | KILL_SWITCH_ACTIVE | CRITIC_REJECTED
     symbol: str | None = None
     bar: OHLCVBar | None = None
     freshness: FreshnessResult | None = None
@@ -84,6 +86,14 @@ class PipelineStepResult:
     lifecycle: SignalLifecycle | None = None
     detail: str | None = None
     expired_signal_ids: list[str] = field(default_factory=list)
+    critic_assessment: "CriticAssessment | None" = None
+    """LIVE SYSTEM HARDENING mission: set whenever a critic_gate was
+    configured and actually ran for this signal -- on CRITIC_REJECTED
+    (why it was blocked) AND on a pass-through kind like BAR_PROCESSED/
+    PENDING_HUMAN_APPROVAL (the critic's full assessment, for
+    traceability, even when it did not block). None when no critic_gate
+    is configured (unchanged, existing behavior) or the signal never
+    reached the critic (e.g. KILL_SWITCH_ACTIVE, checked earlier)."""
 
 
 class ApprovalActionOutcome(str, Enum):
@@ -127,6 +137,7 @@ class LiveSimPipeline:
         approval_timeout_seconds: float | None = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
         state_store: LiveStateStore | None = None,
         clock: Callable[[], datetime] | None = None,
+        critic_gate: CriticGate | None = None,
     ):
         self.source = source
         self.engine = engine
@@ -137,6 +148,15 @@ class LiveSimPipeline:
         self.approval_timeout_seconds = approval_timeout_seconds
         self.state_store = state_store
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self.critic_gate = critic_gate
+        """LIVE SYSTEM HARDENING mission: optional, default None (byte-for-
+        byte existing behavior preserved for every caller that does not
+        pass one -- the entire pre-existing test suite included). When
+        set, every live-generated BUY signal is evaluated against the
+        SAME deterministic critic shadow-run already uses (live/
+        critic_gate.py) BEFORE risk sizing; a blocking verdict (REJECT or
+        INSUFFICIENT_EVIDENCE) prevents any paper order from being
+        created at all -- see _handle_signal."""
         self._buffers: dict[str, _SymbolBuffer] = {}
         self.pending_approvals: dict[str, _PendingApproval] = {}
         self.lifecycles: dict[str, SignalLifecycle] = {}  # signal_id -> lifecycle, for every signal ever seen
@@ -247,13 +267,41 @@ class LiveSimPipeline:
         signal_id = signal.stable_id()
         lifecycle = self.lifecycles.setdefault(signal_id, SignalLifecycle(signal_id=signal_id, require_human_approval=self.require_human_approval))
 
+        critic_assessment = None
+        if self.critic_gate is not None:
+            now = self._clock()
+            gate_result = self.critic_gate.evaluate(
+                signal, indicators=self.latest_indicators(symbol), now=now,
+                kill_switch_active=self.is_kill_switch_active(),
+                existing_pending_order=self.engine.store.get_pending_order(symbol) is not None,
+                existing_open_position=self.engine.store.get_open_position(symbol) is not None,
+            )
+            critic_assessment = gate_result.assessment
+            if gate_result.blocked:
+                lifecycle.transition_to(SignalLifecycleState.CRITIC_REJECTED)
+                if self.state_store is not None:
+                    self.state_store.save_critic_rejection(
+                        signal_id=signal_id, symbol=symbol,
+                        verdict=gate_result.assessment.verdict.value if gate_result.assessment else "EVIDENCE_UNAVAILABLE",
+                        reasons=list(gate_result.assessment.reasons) if gate_result.assessment else [gate_result.block_reason],
+                        checks=[c.model_dump(mode="json") for c in gate_result.assessment.checks] if gate_result.assessment else [],
+                        rejected_at=now,
+                    )
+                return PipelineStepResult(
+                    kind="CRITIC_REJECTED", symbol=symbol, bar=bar, freshness=freshness, signal=signal,
+                    lifecycle=lifecycle, detail=gate_result.block_reason, critic_assessment=critic_assessment,
+                )
+
         if not self.require_human_approval:
             journal = self.engine.submit_signal(signal)
             was_approved = journal.outcome.value.startswith("APPROVED")
             lifecycle.transition_to(SignalLifecycleState.RISK_APPROVED if was_approved else SignalLifecycleState.RISK_REJECTED)
             if was_approved:
                 lifecycle.transition_to(SignalLifecycleState.EXECUTED)
-            return PipelineStepResult(kind="BAR_PROCESSED", symbol=symbol, bar=bar, freshness=freshness, signal=signal, journal_entry=journal, lifecycle=lifecycle)
+            return PipelineStepResult(
+                kind="BAR_PROCESSED", symbol=symbol, bar=bar, freshness=freshness, signal=signal,
+                journal_entry=journal, lifecycle=lifecycle, critic_assessment=critic_assessment,
+            )
 
         # require_human_approval=True: evaluate risk WITHOUT submitting — no
         # order is created yet. The FIRST of two risk checks; the second
@@ -262,7 +310,10 @@ class LiveSimPipeline:
         decision = self.engine.risk_engine.evaluate(signal, self.engine.account)
         if not decision.approved:
             lifecycle.transition_to(SignalLifecycleState.RISK_REJECTED)
-            return PipelineStepResult(kind="BAR_PROCESSED", symbol=symbol, bar=bar, freshness=freshness, signal=signal, lifecycle=lifecycle)
+            return PipelineStepResult(
+                kind="BAR_PROCESSED", symbol=symbol, bar=bar, freshness=freshness, signal=signal,
+                lifecycle=lifecycle, critic_assessment=critic_assessment,
+            )
 
         lifecycle.transition_to(SignalLifecycleState.RISK_APPROVED)
         lifecycle.transition_to(SignalLifecycleState.PENDING_HUMAN_APPROVAL)
@@ -283,7 +334,10 @@ class LiveSimPipeline:
                 created_at=now, expires_at=expires_at,
             )
 
-        return PipelineStepResult(kind="PENDING_HUMAN_APPROVAL", symbol=symbol, bar=bar, freshness=freshness, signal=signal, lifecycle=lifecycle)
+        return PipelineStepResult(
+            kind="PENDING_HUMAN_APPROVAL", symbol=symbol, bar=bar, freshness=freshness, signal=signal,
+            lifecycle=lifecycle, critic_assessment=critic_assessment,
+        )
 
     def mark_ai_explained(self, signal_id: str) -> None:
         """Optional — call after actually running agents.signal_explainer

@@ -925,6 +925,35 @@ def _measure_and_persist_clock_skew_once(state_store) -> None:
     )
 
 
+def _build_critic_gate_for_paper_live(args: argparse.Namespace):
+    """LIVE SYSTEM HARDENING mission: the deterministic critic
+    (critic.engine.evaluate(), already used by shadow-run) was never
+    wired into paper-live at all -- a real, verified gap ("paper-live
+    --auto-approve can bypass human confirmation AND the critic, using
+    risk.engine alone"). Returns None (byte-for-byte existing behavior)
+    for --source mock: a mock/replay session serves cached/synthetic
+    historical bars for its own tick source, not a genuine unattended-
+    live scenario, and CachedMarketDataProvider-backed scanner/benchmark
+    evidence for an ARBITRARY mock symbol may not even exist on disk --
+    forcing it on would risk blocking every mock session on a data gap
+    unrelated to what it's actually testing. --skip-critic opts out
+    explicitly for --source dhan too, mirroring shadow-run's own flag."""
+    if args.source != "dhan" or args.skip_critic:
+        return None
+
+    from backtesting.cache import CachedMarketDataProvider
+    from live.critic_gate import DEFAULT_REFRESH_SECONDS, CriticGate
+    from market.data_provider import get_market_data_provider
+
+    provider = CachedMarketDataProvider(get_market_data_provider())
+    benchmark_symbol = args.benchmark or None
+    refresh_seconds = args.critic_refresh_seconds if args.critic_refresh_seconds is not None else DEFAULT_REFRESH_SECONDS
+    return CriticGate(
+        symbol=args.symbol, provider=provider, benchmark_symbol=benchmark_symbol,
+        config=_critic_config_for_interval(args.interval), refresh_seconds=refresh_seconds,
+    )
+
+
 def run_paper_live_command(args: argparse.Namespace) -> None:
     from live.freshness import FreshnessPolicy
     from live.pipeline import DEFAULT_APPROVAL_TIMEOUT_SECONDS, LiveSimPipeline
@@ -957,10 +986,11 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
     source, source_label, status_label = _build_market_data_source(args)
     freshness_policy = FreshnessPolicy(multiplier=args.freshness_multiplier)
     approval_timeout_seconds = args.approval_timeout_seconds if args.approval_timeout_seconds is not None else DEFAULT_APPROVAL_TIMEOUT_SECONDS
+    critic_gate = _build_critic_gate_for_paper_live(args)
     pipeline = LiveSimPipeline(
         source=source, engine=engine, strategy=strategy, symbols=[args.symbol], interval=args.interval,
         freshness_policy=freshness_policy, require_human_approval=not args.no_human_approval,
-        approval_timeout_seconds=approval_timeout_seconds, state_store=state_store,
+        approval_timeout_seconds=approval_timeout_seconds, state_store=state_store, critic_gate=critic_gate,
     )
 
     print("=" * 60)
@@ -974,6 +1004,12 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
     print(f"DATABASE: {db_path}")
     print(f"STATE DB: {state_db_path}")
     print(f"HUMAN APPROVAL REQUIRED: {not args.no_human_approval}")
+    if critic_gate is not None:
+        print(f"DETERMINISTIC CRITIC: ACTIVE (benchmark={args.benchmark or 'disabled'}) -- every BUY signal is independently re-examined before risk sizing; REJECT/INSUFFICIENT_EVIDENCE blocks the order.")
+    elif args.source == "dhan":
+        print("DETERMINISTIC CRITIC: SKIPPED (--skip-critic) -- risk.engine is the only gate before an order. Not recommended for unattended (--auto-approve) sessions.")
+    else:
+        print("DETERMINISTIC CRITIC: not applicable for --source mock (see run_paper_live_command's own reasoning).")
     if args.source == "dhan":
         from live.dhan.market_session import current_market_session
 
@@ -1042,6 +1078,12 @@ def _run_paper_live_loop(args: argparse.Namespace, pipeline, engine, store, stat
 
         if result.kind == "KILL_SWITCH_ACTIVE":
             print(f"\n[{args.symbol}] bar#{processed:4d} {result.bar.timestamp}  KILL SWITCH ACTIVE -- signal suppressed, no order created.")
+            continue
+
+        if result.kind == "CRITIC_REJECTED":
+            verdict = result.critic_assessment.verdict.value if result.critic_assessment else "UNKNOWN"
+            print(f"\n[{args.symbol}] bar#{processed:4d} {result.bar.timestamp}  CRITIC {verdict} -- {result.detail}")
+            print("  No paper order was created. See `python main.py dashboard` for the full persisted rejection detail.")
             continue
 
         if result.kind == "PENDING_HUMAN_APPROVAL":
@@ -3285,6 +3327,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Simulated starting capital (default: 100000). Only takes effect the first time this database is used.",
     )
     paper_live_parser.add_argument("--schedule-config", type=str, default=None, help="Optional path to the SAME YAML schedule/holiday config used with `schedule --config` (holidays: key). When given, the startup market-session banner is cross-checked against it.")
+    paper_live_parser.add_argument(
+        "--skip-critic", action="store_true",
+        help=(
+            "Explicit opt-OUT, default off: the deterministic critic (critic.engine.evaluate, via live/critic_gate.py) "
+            "runs by default for --source dhan sessions, independently re-examining every live-generated BUY signal "
+            "before risk sizing -- a REJECT/INSUFFICIENT_EVIDENCE verdict prevents any paper order. Mirrors "
+            "shadow-run's own --skip-critic flag. Has no effect for --source mock (the critic never runs there "
+            "regardless -- see run_paper_live_command's own reasoning)."
+        ),
+    )
+    paper_live_parser.add_argument("--benchmark", default="^NSEI", help="Benchmark symbol for the critic's market-regime check (default: ^NSEI, only used with --source dhan). Pass an empty string to disable.")
+    paper_live_parser.add_argument(
+        "--critic-refresh-seconds", type=float, default=None,
+        help=(
+            "How often the critic's scanner/benchmark evidence is refreshed (default: matches "
+            "live.critic_gate.DEFAULT_REFRESH_SECONDS, 900s / 15 min -- these are daily-timeframe signals, "
+            "refreshing every live tick would be wasted network calls, not extra safety)."
+        ),
+    )
 
     dashboard_parser = subparsers.add_parser(
         "dashboard",

@@ -296,6 +296,7 @@ async def index(request: Request) -> HTMLResponse:
     risk = workstation.get_risk_state()
     journal = workstation.get_trade_journal()
     feed_status = workstation.get_feed_status()
+    critic_rejections = workstation.get_critic_rejections(limit=25)
 
     kill_banner = ""
     if status["kill_switch_active"]:
@@ -352,6 +353,14 @@ async def index(request: Request) -> HTMLResponse:
         for e in sorted(journal, key=lambda e: e.created_at, reverse=True)[:25]
     ) or "<tr><td colspan='5' class='muted'>No journal entries yet.</td></tr>"
 
+    critic_rejection_rows = "".join(
+        f"<tr><td>{html.escape(r.rejected_at)}</td><td>{html.escape(r.symbol)}</td>"
+        f"<td><span class='tag tag-short'>{html.escape(r.verdict)}</span></td>"
+        f"<td>{html.escape(r.reasons[0]) if r.reasons else ''}</td>"
+        f"<td>{html.escape(r.signal_id[:12])}</td></tr>"
+        for r in critic_rejections
+    ) or "<tr><td colspan='5' class='muted'>No signal has ever been rejected by the deterministic critic.</td></tr>"
+
     def _feed_row(record) -> str:
         source_class = "tag-mock" if record.source == "MOCK" else "tag-long"  # reuse the LONG/green tag color for a real source, distinct from mock's blue
         status_class = "tag-sim" if record.status in ("SIMULATED", "HISTORICAL") else "tag-long"
@@ -393,6 +402,10 @@ async def index(request: Request) -> HTMLResponse:
 
 <h2>SIGNALS / PENDING APPROVAL ({status['pending_approvals_count']})</h2>
 <table><tr><th>Signal ID</th><th>Symbol</th><th>Direction</th><th>Stop</th><th>Target</th><th>Qty</th><th>Expires</th><th>Action</th></tr>{pending_rows}</table>
+
+<h2>CRITIC REJECTIONS (most recent 25)</h2>
+<p class="muted">Signals the deterministic critic (critic.engine.evaluate, independent of decision_engine.rules.classify) blocked BEFORE risk sizing or any paper order was attempted &mdash; only present when this session's paper-live was started without --skip-critic.</p>
+<table><tr><th>Rejected At</th><th>Symbol</th><th>Verdict</th><th>Reason</th><th>Signal ID</th></tr>{critic_rejection_rows}</table>
 
 <h2>POSITIONS ({len(positions)} open)</h2>
 <table><tr><th>Symbol</th><th>Qty</th><th>Entry</th><th>Stop</th><th>Target</th><th>Entry Time</th></tr>{position_rows}</table>

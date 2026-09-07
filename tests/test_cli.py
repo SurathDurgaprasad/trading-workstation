@@ -473,12 +473,56 @@ def test_paper_live_subcommand_defaults():
     assert args.source == "mock"  # real Dhan connection is opt-in, never the default
     assert args.refresh_instrument_map is False
     assert args.initial_capital == 100_000.0
+    assert args.skip_critic is False  # the deterministic critic runs by default for --source dhan
+    assert args.benchmark == "^NSEI"
+    assert args.critic_refresh_seconds is None  # resolved to live.critic_gate.DEFAULT_REFRESH_SECONDS at run time
 
 
 def test_paper_live_source_dhan_flag():
     args = parse_args(["paper-live", "--symbol", "RELIANCE.NS", "--source", "dhan", "--refresh-instrument-map"])
     assert args.source == "dhan"
     assert args.refresh_instrument_map is True
+
+
+# --- _build_critic_gate_for_paper_live (LIVE SYSTEM HARDENING mission) -------
+
+
+def test_critic_gate_is_none_for_source_mock_regardless_of_skip_critic():
+    from main import _build_critic_gate_for_paper_live
+
+    args = parse_args(["paper-live", "--symbol", "AAPL"])  # --source mock (default)
+    assert _build_critic_gate_for_paper_live(args) is None
+
+
+def test_critic_gate_is_none_when_skip_critic_is_passed():
+    from main import _build_critic_gate_for_paper_live
+
+    args = parse_args(["paper-live", "--symbol", "RELIANCE.NS", "--source", "dhan", "--skip-critic"])
+    assert _build_critic_gate_for_paper_live(args) is None
+
+
+def test_critic_gate_is_built_for_source_dhan_by_default():
+    from live.critic_gate import CriticGate, DEFAULT_REFRESH_SECONDS
+    from main import _build_critic_gate_for_paper_live
+
+    args = parse_args(["paper-live", "--symbol", "RELIANCE.NS", "--source", "dhan"])
+    gate = _build_critic_gate_for_paper_live(args)
+    assert isinstance(gate, CriticGate)
+    assert gate._symbol == "RELIANCE.NS"  # noqa: SLF001 -- read-only introspection for this test only
+    assert gate._benchmark_symbol == "^NSEI"  # noqa: SLF001
+    assert gate._refresh_seconds == DEFAULT_REFRESH_SECONDS  # noqa: SLF001
+
+
+def test_critic_gate_respects_a_disabled_benchmark_and_custom_refresh():
+    from main import _build_critic_gate_for_paper_live
+
+    args = parse_args([
+        "paper-live", "--symbol", "RELIANCE.NS", "--source", "dhan",
+        "--benchmark", "", "--critic-refresh-seconds", "60",
+    ])
+    gate = _build_critic_gate_for_paper_live(args)
+    assert gate._benchmark_symbol is None  # noqa: SLF001
+    assert gate._refresh_seconds == 60.0  # noqa: SLF001
 
 
 def test_paper_live_source_rejects_unknown_values():

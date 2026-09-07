@@ -28,6 +28,17 @@ Three tables:
     (zero I/O on page load, same rule feed_status already follows). If no
     measurement has ever been taken, the table is empty and the dashboard
     must say "UNKNOWN", never fabricate a value or silently omit the row.
+  - critic_rejections (LIVE SYSTEM HARDENING mission): one row per signal
+    the deterministic critic (live/critic_gate.py, wrapping the SAME
+    critic.engine.evaluate() shadow-run already uses) blocked before it
+    ever reached risk sizing or an order. Multi-row (unlike clock_skew's
+    single row) since many distinct signals can be rejected over a
+    session; keyed by signal_id like pending_approvals, for the same
+    "one row per thing that happened" reason. This is the durable record
+    "rejection reason must be persisted... visible in dashboard" (mission
+    requirement) depends on -- a critic-rejected signal never reaches
+    pending_approvals or a JournalEntry at all, so without this table its
+    rejection would leave no trace anywhere.
 """
 
 import sqlite3
@@ -84,6 +95,15 @@ CREATE TABLE IF NOT EXISTS clock_skew (
     measured_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS critic_rejections (
+    signal_id TEXT PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    verdict TEXT NOT NULL,
+    reasons_json TEXT NOT NULL,
+    checks_json TEXT NOT NULL,
+    rejected_at TEXT NOT NULL
+);
 """
 
 
@@ -117,6 +137,16 @@ class ClockSkewRecord:
     detail: str
     measured_at: str  # when the underlying REAL measurement was taken (UTC isoformat)
     updated_at: str  # when this row was last written (UTC isoformat) -- lets the dashboard tell a fresh row from a stale one
+
+
+@dataclass
+class CriticRejectionRecord:
+    signal_id: str
+    symbol: str
+    verdict: str  # critic.models.CriticVerdict value -- REJECT or INSUFFICIENT_EVIDENCE, the two blocking verdicts
+    reasons: list[str]
+    checks: list[dict]  # each critic.models.CriticCheck, JSON-serialized (name/evaluated/passed/severity/detail)
+    rejected_at: str  # UTC isoformat
 
 
 @dataclass
@@ -281,6 +311,36 @@ class LiveStateStore:
         if row is None:
             return None
         return ClockSkewRecord(skew_seconds=row[0], classification=row[1], detail=row[2], measured_at=row[3], updated_at=row[4])
+
+    # --- critic rejections (LIVE SYSTEM HARDENING mission) ----------------------
+
+    def save_critic_rejection(
+        self, *, signal_id: str, symbol: str, verdict: str, reasons: list[str], checks: list[dict], rejected_at: datetime,
+    ) -> None:
+        import json
+
+        self._conn.execute(
+            "INSERT INTO critic_rejections (signal_id, symbol, verdict, reasons_json, checks_json, rejected_at) "
+            "VALUES (?,?,?,?,?,?) ON CONFLICT(signal_id) DO UPDATE SET "
+            "symbol=excluded.symbol, verdict=excluded.verdict, reasons_json=excluded.reasons_json, "
+            "checks_json=excluded.checks_json, rejected_at=excluded.rejected_at",
+            (signal_id, symbol, verdict, json.dumps(reasons), json.dumps(checks), rejected_at.isoformat()),
+        )
+
+    def list_critic_rejections(self, limit: int = 50) -> list["CriticRejectionRecord"]:
+        import json
+
+        rows = self._conn.execute(
+            "SELECT signal_id, symbol, verdict, reasons_json, checks_json, rejected_at FROM critic_rejections "
+            "ORDER BY rejected_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            CriticRejectionRecord(
+                signal_id=r[0], symbol=r[1], verdict=r[2], reasons=json.loads(r[3]), checks=json.loads(r[4]), rejected_at=r[5],
+            )
+            for r in rows
+        ]
 
 
 def _serialize_history(history: list[tuple]) -> str:

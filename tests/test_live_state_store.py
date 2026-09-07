@@ -230,3 +230,58 @@ def test_clock_skew_survives_a_reopened_connection(tmp_path):
     record = store2.get_clock_skew()
     assert record is not None
     assert record.skew_seconds == -130.0
+
+
+def test_list_critic_rejections_is_empty_when_never_written(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    assert store.list_critic_rejections() == []
+
+
+def test_save_and_list_a_critic_rejection(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    now = datetime.now(timezone.utc)
+    store.save_critic_rejection(
+        signal_id="sig-1", symbol="RELIANCE.NS", verdict="REJECT",
+        reasons=["Kill switch is active -- execution safety blocks any new order."],
+        checks=[{"name": "KILL_SWITCH", "evaluated": True, "passed": False, "severity": "HARD", "detail": "Kill switch is active."}],
+        rejected_at=now,
+    )
+    rejections = store.list_critic_rejections()
+    assert len(rejections) == 1
+    record = rejections[0]
+    assert record.signal_id == "sig-1"
+    assert record.symbol == "RELIANCE.NS"
+    assert record.verdict == "REJECT"
+    assert record.reasons == ["Kill switch is active -- execution safety blocks any new order."]
+    assert record.checks[0]["name"] == "KILL_SWITCH"
+    assert record.rejected_at == now.isoformat()
+
+
+def test_list_critic_rejections_orders_most_recent_first(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    now = datetime.now(timezone.utc)
+    store.save_critic_rejection(signal_id="sig-old", symbol="A", verdict="REJECT", reasons=["old"], checks=[], rejected_at=now)
+    store.save_critic_rejection(signal_id="sig-new", symbol="B", verdict="REJECT", reasons=["new"], checks=[], rejected_at=now + timedelta(minutes=5))
+    rejections = store.list_critic_rejections()
+    assert [r.signal_id for r in rejections] == ["sig-new", "sig-old"]
+
+
+def test_list_critic_rejections_respects_limit(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    now = datetime.now(timezone.utc)
+    for i in range(5):
+        store.save_critic_rejection(signal_id=f"sig-{i}", symbol="A", verdict="REJECT", reasons=[], checks=[], rejected_at=now + timedelta(minutes=i))
+    assert len(store.list_critic_rejections(limit=2)) == 2
+
+
+def test_critic_rejection_survives_a_reopened_connection(tmp_path):
+    db_path = tmp_path / "state.db"
+    now = datetime.now(timezone.utc)
+    store1 = LiveStateStore(db_path)
+    store1.save_critic_rejection(signal_id="sig-1", symbol="A", verdict="INSUFFICIENT_EVIDENCE", reasons=["r"], checks=[], rejected_at=now)
+    store1.close()
+
+    store2 = LiveStateStore(db_path)
+    rejections = store2.list_critic_rejections()
+    assert len(rejections) == 1
+    assert rejections[0].verdict == "INSUFFICIENT_EVIDENCE"

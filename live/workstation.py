@@ -189,6 +189,21 @@ def get_trade_journal() -> list:
     return get_live_engine().store.list_journal_entries()
 
 
+def get_critic_rejections(limit: int = 50) -> list:
+    """LIVE SYSTEM HARDENING mission: returns live.state_store.
+    CriticRejectionRecord objects -- the ONLY durable trace of a signal
+    the deterministic critic blocked before it ever reached risk sizing
+    or a paper order (a critic-rejected signal never creates a
+    JournalEntry, so without this it would leave no trace anywhere).
+    Read-only, local SQLite only. Empty list means no rejection has ever
+    been persisted -- never fabricated."""
+    state_store = new_live_state_store()
+    try:
+        return state_store.list_critic_rejections(limit=limit)
+    finally:
+        state_store.close()
+
+
 def get_feed_status() -> list:
     """Phase 15 §7/§22: returns live.state_store.FeedStatusRecord objects
     -- read-only, the ONLY honest source of "what did the market feed most

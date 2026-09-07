@@ -88,3 +88,20 @@ def test_cannot_skip_from_signal_generated_straight_to_pending_approval():
     lifecycle = SignalLifecycle(signal_id="abc", require_human_approval=True)
     with pytest.raises(IllegalStateTransitionError):
         lifecycle.transition_to(SignalLifecycleState.PENDING_HUMAN_APPROVAL)
+
+
+def test_critic_rejection_is_terminal_and_reachable_from_signal_generated():
+    """LIVE SYSTEM HARDENING mission: the critic runs BEFORE risk when
+    wired in -- CRITIC_REJECTED must be reachable straight from
+    SIGNAL_GENERATED, and terminal, same posture as RISK_REJECTED."""
+    lifecycle = SignalLifecycle(signal_id="abc", require_human_approval=False)
+    lifecycle.transition_to(SignalLifecycleState.CRITIC_REJECTED)
+    assert lifecycle.is_terminal
+    with pytest.raises(IllegalStateTransitionError):
+        lifecycle.transition_to(SignalLifecycleState.RISK_APPROVED)
+
+
+def test_critic_rejection_reachable_in_human_approval_mode_too():
+    lifecycle = SignalLifecycle(signal_id="abc", require_human_approval=True)
+    lifecycle.transition_to(SignalLifecycleState.CRITIC_REJECTED)
+    assert lifecycle.is_terminal

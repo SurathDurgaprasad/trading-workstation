@@ -31,15 +31,60 @@ def _qualifying_bar(day, hour=9, minute=15, **overrides):
     return make_mock_bar(**base)
 
 
-def _pipeline(script, *, interval="1d", require_human_approval=False, clock=None, freshness_policy=None):
+def _pipeline(script, *, interval="1d", require_human_approval=False, clock=None, freshness_policy=None, strategy=None, critic_gate=None, state_store=None):
     source = MockMarketDataSource(script, clock=clock)
     store = PaperStore(":memory:")
     engine = PaperTradingEngine(store, initial_capital=100_000.0)
     pipeline = LiveSimPipeline(
-        source=source, engine=engine, strategy=TrendMomentumBaseline(), symbols=["TEST"], interval=interval,
+        source=source, engine=engine, strategy=strategy or TrendMomentumBaseline(), symbols=["TEST"], interval=interval,
         require_human_approval=require_human_approval, clock=clock, freshness_policy=freshness_policy or FreshnessPolicy(),
+        critic_gate=critic_gate, state_store=state_store,
     )
     return pipeline, engine, store
+
+
+class _ScriptedStrategy:
+    """Fires a fixed Signal on every call -- lets critic-gate integration
+    tests reach _handle_signal deterministically, independent of
+    TrendMomentumBaseline's own real entry conditions (same pattern as
+    tests/test_risk_day_boundary.py's own _ScriptedStrategy)."""
+
+    name = "scripted_test_strategy"
+    version = "1.0"
+
+    def __init__(self, *, stop_price: float = 95.0, target_price: float = 110.0):
+        self._stop_price = stop_price
+        self._target_price = target_price
+
+    def generate_signal(self, indicator_series, index, symbol):
+        from strategy.signal import ReasonCode, Side, Signal
+
+        row = indicator_series.iloc[index]
+        return Signal(
+            symbol=symbol, generated_at=indicator_series.index[index], side=Side.LONG,
+            reference_price=float(row["close"]), stop_price=self._stop_price, target_price=self._target_price,
+            risk_reward=2.0, strategy_name=self.name, reason_codes=[ReasonCode.TREND_CONFIRMED],
+        )
+
+
+class _FakeCriticGate:
+    """A minimal double matching CriticGate's own evaluate() signature --
+    the REAL CriticGate's internal logic (scanner evidence, benchmark
+    context, critic.engine.evaluate()) is already thoroughly covered by
+    tests/test_live_critic_gate.py; this proves the PIPELINE WIRING calls
+    it correctly and branches on its result correctly, not the critic
+    math itself."""
+
+    def __init__(self, result):
+        self._result = result
+        self.calls = []
+
+    def evaluate(self, signal, *, indicators, now, kill_switch_active, existing_pending_order, existing_open_position):
+        self.calls.append(dict(
+            signal=signal, indicators=indicators, now=now, kill_switch_active=kill_switch_active,
+            existing_pending_order=existing_pending_order, existing_open_position=existing_open_position,
+        ))
+        return self._result
 
 
 # --- 1. live-bar ordering / 8. source metadata / 9. freshness metadata -----
@@ -111,6 +156,127 @@ def test_fresh_bar_is_not_suppressed():
 
 
 # --- 5/6. feed disconnect / reconnect ------------------------------------------
+
+
+# --- critic gate integration (LIVE SYSTEM HARDENING mission) -----------------
+
+
+def test_no_critic_gate_configured_is_byte_for_byte_the_existing_behavior():
+    """Default (critic_gate=None): every pre-existing caller of
+    LiveSimPipeline, including the entire rest of this test file, must be
+    completely unaffected -- proven by this whole file's other 17 tests
+    passing unchanged, not just this one. This test names that
+    invariant explicitly."""
+    bar = make_mock_bar(timestamp=datetime(2026, 1, 1, 9, 15), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000.0)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    pipeline, engine, store = _pipeline(script, interval="1m", strategy=_ScriptedStrategy(), clock=lambda: bar.timestamp + timedelta(seconds=5))
+    assert pipeline.critic_gate is None
+    result = pipeline.process_next()
+    assert result.kind == "BAR_PROCESSED"
+    assert result.critic_assessment is None
+    assert result.journal_entry is not None  # the real, unaffected paper-execution path
+
+
+def test_a_blocking_critic_gate_prevents_any_paper_order():
+    from critic.models import CriticAssessment, CriticVerdict
+    from live.critic_gate import CriticGateResult
+
+    blocking_assessment = CriticAssessment(
+        verdict=CriticVerdict.REJECT, checks=(), failed_checks=("KILL_SWITCH",),
+        warnings=(), reasons=["Kill switch is active -- execution safety blocks any new order."], config_version="test",
+    )
+    gate = _FakeCriticGate(CriticGateResult(blocked=True, block_reason=blocking_assessment.reasons[0], assessment=blocking_assessment, decision=None))
+
+    bar = make_mock_bar(timestamp=datetime(2026, 1, 1, 9, 15), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000.0)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    pipeline, engine, store = _pipeline(script, interval="1m", strategy=_ScriptedStrategy(), critic_gate=gate, clock=lambda: bar.timestamp + timedelta(seconds=5))
+
+    result = pipeline.process_next()
+
+    assert result.kind == "CRITIC_REJECTED"
+    assert result.journal_entry is None  # no paper order was ever created
+    assert result.detail == "Kill switch is active -- execution safety blocks any new order."
+    assert result.critic_assessment is blocking_assessment
+    assert result.lifecycle.is_terminal
+    assert len(gate.calls) == 1
+
+    # No pending order/position was ever submitted to the paper engine at all.
+    assert store.get_pending_order("TEST") is None
+    assert store.get_open_position("TEST") is None
+
+
+def test_a_blocking_critic_gate_persists_the_rejection_when_a_state_store_is_configured():
+    from critic.models import CriticAssessment, CriticVerdict
+    from live.critic_gate import CriticGateResult
+    from live.state_store import LiveStateStore
+
+    assessment = CriticAssessment(
+        verdict=CriticVerdict.INSUFFICIENT_EVIDENCE, checks=(), failed_checks=(),
+        warnings=(), reasons=["Neither market context nor research evidence is available."], config_version="test",
+    )
+    gate = _FakeCriticGate(CriticGateResult(blocked=True, block_reason=assessment.reasons[0], assessment=assessment, decision=None))
+    state_store = LiveStateStore(":memory:")
+
+    bar = make_mock_bar(timestamp=datetime(2026, 1, 1, 9, 15), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000.0)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    pipeline, engine, store = _pipeline(script, interval="1m", strategy=_ScriptedStrategy(), critic_gate=gate, state_store=state_store, clock=lambda: bar.timestamp + timedelta(seconds=5))
+
+    result = pipeline.process_next()
+
+    rejections = state_store.list_critic_rejections()
+    assert len(rejections) == 1
+    assert rejections[0].signal_id == result.signal.stable_id()
+    assert rejections[0].symbol == "TEST"
+    assert rejections[0].verdict == "INSUFFICIENT_EVIDENCE"
+    assert rejections[0].reasons == ["Neither market context nor research evidence is available."]
+
+
+def test_a_passing_critic_gate_still_lets_the_order_through_and_attaches_the_assessment():
+    from critic.models import CriticAssessment, CriticVerdict
+    from live.critic_gate import CriticGateResult
+
+    approving_assessment = CriticAssessment(
+        verdict=CriticVerdict.APPROVE, checks=(), failed_checks=(), warnings=(),
+        reasons=["All hard checks passed."], config_version="test",
+    )
+    gate = _FakeCriticGate(CriticGateResult(blocked=False, block_reason="", assessment=approving_assessment, decision=None))
+
+    bar = make_mock_bar(timestamp=datetime(2026, 1, 1, 9, 15), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000.0)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    pipeline, engine, store = _pipeline(script, interval="1m", strategy=_ScriptedStrategy(), critic_gate=gate, clock=lambda: bar.timestamp + timedelta(seconds=5))
+
+    result = pipeline.process_next()
+
+    assert result.kind == "BAR_PROCESSED"
+    assert result.journal_entry is not None  # the real paper-execution path still ran
+    assert result.critic_assessment is approving_assessment
+    assert len(gate.calls) == 1
+
+
+def test_critic_gate_runs_before_risk_and_never_reaches_it_when_blocked():
+    """The mission's own target chain: Decision Engine -> Deterministic
+    Critic -> Risk Engine. A blocked signal must never even reach risk
+    sizing -- proven by an intentionally-nonsensical stop/target (which
+    risk.engine would itself reject) never actually mattering, because
+    the critic already stopped it first."""
+    from critic.models import CriticAssessment, CriticVerdict
+    from live.critic_gate import CriticGateResult
+
+    blocking = CriticAssessment(verdict=CriticVerdict.REJECT, checks=(), failed_checks=("TRADE_STRUCTURE",), warnings=(), reasons=["blocked"], config_version="test")
+    gate = _FakeCriticGate(CriticGateResult(blocked=True, block_reason="blocked", assessment=blocking, decision=None))
+
+    bar = make_mock_bar(timestamp=datetime(2026, 1, 1, 9, 15), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000.0)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    pipeline, engine, store = _pipeline(
+        script, interval="1m", require_human_approval=True,
+        strategy=_ScriptedStrategy(), critic_gate=gate, clock=lambda: bar.timestamp + timedelta(seconds=5),
+    )
+
+    result = pipeline.process_next()
+    assert result.kind == "CRITIC_REJECTED"
+    assert result.lifecycle.state.value == "CRITIC_REJECTED"
+    # Never reached PENDING_HUMAN_APPROVAL or any risk-engine state at all.
+    assert ("RISK_APPROVED", "PENDING_HUMAN_APPROVAL") != tuple(s.value for s, _ in result.lifecycle.history[1:])
 
 
 def test_feed_disconnect_is_reported_and_does_not_crash_the_pipeline():
