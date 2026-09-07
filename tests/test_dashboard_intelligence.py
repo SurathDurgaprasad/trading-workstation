@@ -584,6 +584,46 @@ def test_intelligence_page_shows_a_real_pending_paper_order(client, _isolated_in
     assert "Pending orders" in response.text
 
 
+def test_intelligence_page_journal_shows_the_decision_id_correlation(client, _isolated_intelligence_dbs):
+    # LIVE SYSTEM HARDENING mission, Issue 3/7: an operator must be able
+    # to see which decision produced a given order directly on the page,
+    # not just in the raw database.
+    from strategy.signal import ReasonCode, Side, Signal
+    from paper.engine import PaperTradingEngine
+    from paper.store import PaperStore
+
+    tmp_path = _isolated_intelligence_dbs
+    engine = PaperTradingEngine(PaperStore(tmp_path / "paper.db"), initial_capital=20_000.0)
+    signal_with_decision = Signal(
+        symbol="AAPL", generated_at=datetime(2024, 6, 1), side=Side.LONG,
+        reference_price=100.0, stop_price=95.0, target_price=110.0, risk_reward=2.0,
+        strategy_name="decision_engine_buy_bridge", reason_codes=[ReasonCode.DECISION_ENGINE_SCORED],
+        decision_id="dec-live-789",
+    )
+    engine.submit_signal(signal_with_decision)
+    engine.store.close()
+
+    response = client.get("/intelligence")
+    assert "Decision ID" in response.text
+    assert "dec-live-789" in response.text
+
+
+def test_intelligence_page_journal_shows_a_dash_when_no_decision_id(client, _isolated_intelligence_dbs):
+    # A signal that never went through decision_engine (decision_id=None)
+    # must show an honest placeholder, never a fabricated ID.
+    tmp_path = _isolated_intelligence_dbs
+    from paper.engine import PaperTradingEngine
+    from paper.store import PaperStore
+
+    engine = PaperTradingEngine(PaperStore(tmp_path / "paper.db"), initial_capital=20_000.0)
+    engine.submit_signal(_paper_signal("AAPL"))  # no decision_id
+    engine.store.close()
+
+    response = client.get("/intelligence")
+    assert "Decision ID" in response.text
+    assert "&mdash;" in response.text
+
+
 def test_intelligence_page_shows_a_real_open_paper_position(client, _isolated_intelligence_dbs):
     from paper.engine import Bar, PaperTradingEngine
     from paper.store import PaperStore

@@ -573,11 +573,24 @@ async def intelligence_page(request: Request) -> HTMLResponse:
         ) or "<tr><td colspan='5' class='muted'>(none)</td></tr>"
         closed_table = f"<table><tr><th>Symbol</th><th>Entry</th><th>Exit</th><th>Exit Reason</th><th>Exit Time</th></tr>{closed_rows}</table>"
 
+        def _decision_id_cell(entry) -> str:
+            if entry.decision_id:
+                return html.escape(entry.decision_id)
+            return "<span class='muted'>&mdash;</span>"
+
         journal_rows = "".join(
-            f"<tr><td>{html.escape(e.symbol)}</td><td>{html.escape(e.outcome.value)}</td><td>{html.escape(e.updated_at.isoformat())}</td></tr>"
+            f"<tr><td>{html.escape(e.symbol)}</td><td>{html.escape(e.outcome.value)}</td><td>{html.escape(e.updated_at.isoformat())}</td>"
+            f"<td>{_decision_id_cell(e)}</td></tr>"
             for e in paper_snapshot["journal_entries"]
-        ) or "<tr><td colspan='3' class='muted'>(none)</td></tr>"
-        journal_table = f"<table><tr><th>Symbol</th><th>Outcome</th><th>Last Updated</th></tr>{journal_rows}</table>"
+        ) or "<tr><td colspan='4' class='muted'>(none)</td></tr>"
+        journal_table = (
+            "<table><tr><th>Symbol</th><th>Outcome</th><th>Last Updated</th><th>Decision ID</th></tr>"
+            f"{journal_rows}</table>"
+            "<p class='muted'>Decision ID (LIVE SYSTEM HARDENING mission): traces this order back to the exact "
+            "decision_engine Decision that produced it -- cross-reference against a Decision Store lookup for "
+            "the full rationale/composite score. &mdash; means this signal never went through decision_engine "
+            "(e.g. a plain live/pipeline.py Strategy).</p>"
+        )
 
         paper_section = (
             f"<p class='muted'>Real, persisted paper.engine.PaperTradingEngine state at {html.escape(str(intelligence.PAPER_DB_PATH))} "
