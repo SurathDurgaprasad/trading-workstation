@@ -386,6 +386,29 @@ def test_banner_stays_not_connected_when_a_live_source_is_disconnected(client):
     assert "NOT connected to a live broker or feed" in response.text
 
 
+def test_banner_does_not_claim_connected_for_a_stale_row_still_marked_connected(client):
+    # AUTONOMOUS LIVE PAPER-TRADING HARDENING mission, real bug found live:
+    # a feed_status row's connection_state is whatever it was the LAST time
+    # a real session wrote it -- once that process exits, nothing ever
+    # updates the row again, so it can go on saying CONNECTED indefinitely.
+    # Observed live: RELIANCE.NS's own row said CONNECTED while its data was
+    # 3+ hours old and zero python processes were running. The banner must
+    # use the same staleness-aware grading as the feed status table below
+    # it, not just the row's last-written connection_state.
+    import live.workstation as workstation_module
+    from datetime import datetime, timedelta, timezone
+
+    state_store = workstation_module.new_live_state_store()
+    stale_time = datetime.now(timezone.utc) - timedelta(hours=3)
+    state_store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=stale_time, received_at=stale_time, connection_state="CONNECTED")
+    state_store.close()
+
+    response = client.get("/")
+    assert "A LIVE broker feed IS connected" not in response.text
+    assert "was connected but its last update is now stale" in response.text
+    assert "No real order can ever be placed here" in response.text
+
+
 def test_index_shows_a_pending_signal_with_approve_reject_buttons(client):
     signal_id = _drive_one_pending_approval()
     response = client.get("/")

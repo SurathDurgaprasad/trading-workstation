@@ -142,16 +142,52 @@ def _broker_connectivity_banner() -> str:
     "zero I/O to a live feed on page load" rule) to state the CURRENT
     truth instead of a fixed claim.
 
+    LIVE PAPER-TRADING HARDENING mission, real gap found via dashboard
+    truth audit: this fix's own OWN claim -- "a live feed IS connected"
+    -- was itself STALE-blind, exactly the bug it was written to close
+    for the OLD hardcoded-string version. A feed_status row's
+    connection_state is whatever it was the LAST time a real session
+    wrote it; once that session ends, the row is never updated again,
+    so this banner kept asserting "IS connected" for HOURS after the
+    process that connected it had exited (observed live: RELIANCE.NS's
+    own row said CONNECTED while its data was already 3+ hours old, with
+    zero python processes running). Now reuses _data_health_label() --
+    the SAME staleness-aware composite the MARKET FEED table itself
+    already uses -- so this banner can never claim "IS connected" for a
+    feed that is, by the very definition this page uses one table down,
+    not.
+
     "No real order can ever be placed here" stays unconditional -- that is
     a structural guarantee (no execute_trade/place_order/broker-credential
     path exists anywhere in this codebase, see this module's own
     docstring), true regardless of feed source, and is never the part that
     was wrong."""
     feed_status = workstation.get_feed_status()
-    live_connected = any(r.status == "LIVE" and (r.connection_state or "").upper() == "CONNECTED" for r in feed_status)
-    if live_connected:
+    now = datetime.now(timezone.utc)
+    healths = []
+    for r in feed_status:
+        if r.status != "LIVE":
+            continue
+        try:
+            age_seconds = (now - datetime.fromisoformat(r.received_at)).total_seconds()
+        except ValueError:
+            age_seconds = None
+        healths.append(_data_health_label(connection_state=r.connection_state, age_seconds=age_seconds)[0])
+
+    if "CONNECTED" in healths:
         connectivity_text = "A LIVE broker feed IS connected (see the feed status table below)."
+    elif "DEGRADED" in healths or "STALE" in healths:
+        # Ambiguous case, distinct from an EXPLICIT disconnect signal below:
+        # the row's own connection_state was CONNECTED, just aging -- a real
+        # session likely ended without the process cleanly marking itself
+        # disconnected, not a live signal of "currently disconnected".
+        connectivity_text = (
+            "A broker feed was connected but its last update is now stale "
+            "(see the feed status table's own Data Health column below) -- no active live session appears to be running."
+        )
     else:
+        # No LIVE rows at all, or every one explicitly signals RECONNECTING/
+        # DISCONNECTED/SOURCE_UNAVAILABLE -- an explicit, not merely aged, signal.
         connectivity_text = "NOT connected to a live broker or feed."
     return f'<div class="banner">SIMULATED PAPER TRADING &mdash; {connectivity_text} No real order can ever be placed here.</div>'
 
