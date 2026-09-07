@@ -2622,11 +2622,152 @@ def run_readiness_check_command(args: argparse.Namespace) -> None:
         else:
             print(f"[PASS] Historical cache data for all {len(records)} given symbol(s) is <=7 days old.")
 
+    # --- LIVE SYSTEM HARDENING mission additions: always-on, local-only, fast ---
+
+    import tempfile
+    from pathlib import Path as _Path
+
+    try:
+        probe = _Path(tempfile.gettempdir()) / "tradingagents_readiness_write_probe.tmp"
+        probe.write_text("ok")
+        probe.unlink()
+        print("[PASS] Disk write capability confirmed (temp-directory probe).")
+    except OSError as exc:
+        print(f"[FAIL] Disk write probe failed: {exc}")
+        exit_code = 1
+
+    try:
+        DEFAULT_LIVE_SIM_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        import sqlite3
+
+        conn = sqlite3.connect(str(DEFAULT_LIVE_SIM_DB_PATH))
+        conn.execute("SELECT 1")
+        conn.close()
+        print(f"[PASS] Database reachable: {DEFAULT_LIVE_SIM_DB_PATH}")
+    except sqlite3.Error as exc:
+        print(f"[FAIL] Database at {DEFAULT_LIVE_SIM_DB_PATH} not reachable: {exc}")
+        exit_code = 1
+
+    from strategy.baseline import TrendMomentumBaseline
+
+    print(f"[INFO] Active strategy: {TrendMomentumBaseline.name} v{TrendMomentumBaseline.version} -- "
+          f"SCIENTIFIC VERDICT: NO DEMONSTRATED EDGE (see docs/STRATEGY_EDGE_DISCOVERY_FINAL_OUTPUT.md). "
+          f"This readiness check assesses PLATFORM reliability only, never trading profitability.")
+
+    scheduler_db = DEFAULT_SCHEDULER_DB_PATH
+    if scheduler_db.exists():
+        from scheduler.store import SchedulerRunStore
+
+        run_store = SchedulerRunStore(str(scheduler_db))
+        active = run_store.active_lock()
+        if active is not None:
+            print(f"[WARN] Scheduler shows an ACTIVE run lock (run_id={active.run_id[:12]}, slot={active.slot_name!r}, started {active.started_at.isoformat()}) -- a genuinely running scheduler, or a crashed one that hasn't been reclaimed yet.")
+        else:
+            print("[PASS] Scheduler has no active run lock.")
+    else:
+        print("[INFO] No scheduler run history found yet (scheduler has never run in this environment).")
+
+    # --- --deep: real network calls (opt-in; off by default per this command's original contract) ---
+
+    if args.deep:
+        print()
+        print("=" * 70)
+        print(f"DEEP CHECK (--deep): real Dhan REST + WebSocket calls, bounded to {args.deep_timeout_seconds:.0f}s for the live-tick portion")
+        print("=" * 70)
+        _run_deep_readiness_checks(deep_timeout_seconds=args.deep_timeout_seconds, deep_symbol=args.deep_symbol)
+
     print()
-    print("This is a STRUCTURAL check only. It does NOT verify the live WebSocket feed, order")
-    print("routing, or fill behavior -- those can only be verified during an actual market session.")
+    if args.deep:
+        print("This check made REAL network calls (REST + WebSocket) in addition to the structural checks above --")
+        print("order routing and fill behavior can still only be verified by actually running a live session.")
+    else:
+        print("This is a STRUCTURAL check only. It does NOT verify the live WebSocket feed, order")
+        print("routing, or fill behavior (pass --deep for real REST/WebSocket/clock-skew/live-quote checks).")
     if exit_code:
         sys.exit(exit_code)
+
+
+def _run_deep_readiness_checks(*, deep_timeout_seconds: float, deep_symbol: str) -> None:
+    """LIVE SYSTEM HARDENING mission: the REAL, network-touching half of
+    readiness-check --deep. Read-only Dhan calls only (REST GET,
+    WebSocket subscribe to receive -- never places an order). Every
+    finding here is REAL LIVE DATA evidence, not a simulation, if
+    credentials are configured and a real session is reachable."""
+    from datetime import datetime, timezone
+    from email.utils import parsedate_to_datetime
+
+    from live.dhan.config import DhanCredentialsMissingError, load_dhan_credentials
+    from live.dhan.rest_client import DhanRestClient, DhanRestError
+
+    try:
+        credentials = load_dhan_credentials()
+    except DhanCredentialsMissingError as exc:
+        print(f"[FAIL] Cannot run deep checks: {exc}")
+        return
+
+    try:
+        import requests
+
+        from live.dhan.config import DHAN_REST_BASE_URL
+
+        headers = {"Content-Type": "application/json", "access-token": credentials.access_token}
+        before = datetime.now(timezone.utc)
+        response = requests.get(f"{DHAN_REST_BASE_URL}/fundlimit", headers=headers, timeout=10)
+        after = datetime.now(timezone.utc)
+        if response.status_code < 200 or response.status_code >= 300:
+            print(f"[FAIL] Dhan REST connectivity: HTTP {response.status_code}")
+        else:
+            print(f"[PASS] Dhan REST connectivity confirmed (real HTTP {response.status_code} from /fundlimit, round-trip {(after - before).total_seconds():.2f}s).")
+        server_date_header = response.headers.get("Date")
+        if server_date_header:
+            server_time = parsedate_to_datetime(server_date_header)
+            if server_time.tzinfo is None:
+                server_time = server_time.replace(tzinfo=timezone.utc)
+            midpoint_local = before + (after - before) / 2
+            skew_seconds = (midpoint_local - server_time).total_seconds()
+            if abs(skew_seconds) < 5:
+                print(f"[PASS] Clock skew: {skew_seconds:+.1f}s (local vs Dhan server time) -- within 5s tolerance.")
+            elif abs(skew_seconds) < 60:
+                print(f"[WARNING] Clock skew: {skew_seconds:+.1f}s (local vs Dhan server time) -- exceeds 5s. "
+                      f"Freshness/staleness checks on THIS machine are biased by this amount. Recommended: sync "
+                      f"this machine's clock (Windows: run 'w32tm /resync' as Administrator, or enable "
+                      f"'Set time automatically' in Settings). This is an environment issue, not application code.")
+            else:
+                print(f"[FAIL] Clock skew: {skew_seconds:+.1f}s (local vs Dhan server time) -- exceeds 60s, a full "
+                      f"candle interval. Freshness/staleness logic cannot be trusted on this machine until the "
+                      f"clock is corrected (see WARNING guidance above).")
+        else:
+            print("[WARNING] Could not measure clock skew -- no Date header in the Dhan REST response.")
+    except Exception as exc:  # noqa: BLE001 -- a deep-check failure must be reported, never crash the whole command
+        print(f"[FAIL] Dhan REST connectivity/clock-skew check raised {type(exc).__name__}: {exc}")
+
+    try:
+        from live.dhan.instruments import DhanInstrumentMap
+        from market_data.adapters.dhan import build_dhan_adapter
+
+        instrument_map = DhanInstrumentMap.download()
+        adapter = build_dhan_adapter(
+            credentials=credentials, instrument_map=instrument_map, interval="1m", warmup_seconds=deep_timeout_seconds,
+        )
+        snapshot = adapter.get_snapshot(deep_symbol)
+        state = adapter._source.state  # noqa: SLF001 -- read-only introspection for this diagnostic output only
+        if state != "CONNECTED":
+            print(f"[FAIL] WebSocket did not reach CONNECTED within {deep_timeout_seconds:.0f}s (state={state}).")
+        else:
+            print(f"[PASS] WebSocket connected (state=CONNECTED).")
+        if snapshot.latest_bar is not None:
+            print(f"[PASS] Live quote overlay for {deep_symbol}: HEALTHY -- real close={snapshot.latest_bar.close}, "
+                  f"age={snapshot.health.age_seconds:.1f}s. LIVE PRICE -> Dhan confirmed working end-to-end just now.")
+        else:
+            print(f"[INFO] Live quote overlay for {deep_symbol}: {snapshot.health.status.value} within the "
+                  f"{deep_timeout_seconds:.0f}s budget -- NOT a failure by itself: a freshly-subscribed symbol's "
+                  f"first live quote is only available once its own current 1-minute candle completes, which can "
+                  f"legitimately take up to 60s from a cold start (see market_data/adapters/dhan.py's own "
+                  f"documented, live-verified finding). Re-run with a longer --deep-timeout-seconds, or accept "
+                  f"that this specific check's own timing was unlucky.")
+        adapter.close()
+    except Exception as exc:  # noqa: BLE001 -- same posture as the REST check above
+        print(f"[FAIL] WebSocket/live-quote check raised {type(exc).__name__}: {exc}")
 
 
 # --------------------------------------------------------------------------
@@ -3157,6 +3298,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     readiness_check_parser.add_argument("--symbols", type=str, default=None, help="Optional comma-separated symbols to also check historical cache freshness for.")
     readiness_check_parser.add_argument("--schedule-config", type=str, default=None, help="Optional path to the SAME YAML schedule/holiday config used with `schedule --config` (scheduler/config.py's ScheduleConfig, top-level `holidays:` key). When given, the market-session check is cross-checked against it instead of only warning that no holiday calendar was consulted.")
+    readiness_check_parser.add_argument(
+        "--deep", action="store_true",
+        help=(
+            "LIVE SYSTEM HARDENING mission: also make REAL network calls -- a live Dhan REST request (proves "
+            "REST connectivity AND measures clock skew against Dhan's own HTTP Date header in one call), and a "
+            "REAL WebSocket connect/subscribe/tick-reception attempt (bounded to --deep-timeout-seconds; a "
+            "symbol newly subscribed may legitimately have no live quote within any bound under a full candle "
+            "interval -- see market_data/adapters/dhan.py's own documented finding -- so a timeout here is "
+            "reported as INFO, not FAIL). Off by default: this command's own original contract (structural-only, "
+            "no live-feed verification) is preserved exactly for any existing caller that doesn't pass this flag.",
+        ),
+    )
+    readiness_check_parser.add_argument("--deep-timeout-seconds", type=float, default=20.0, help="Bound for the --deep WebSocket/tick-reception check (default: 20s).")
+    readiness_check_parser.add_argument("--deep-symbol", type=str, default="RELIANCE.NS", help="Symbol to use for the --deep WebSocket check (default: RELIANCE.NS).")
 
     scan_parser = subparsers.add_parser(
         "scan",

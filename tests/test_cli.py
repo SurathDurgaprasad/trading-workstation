@@ -217,6 +217,75 @@ def test_readiness_check_command_warns_on_an_active_kill_switch(monkeypatch, cap
     assert "left on from last session" in captured.out
 
 
+# --- readiness-check: LIVE SYSTEM HARDENING mission additions ---------------
+
+
+def test_readiness_check_reports_disk_write_db_reachability_and_strategy_version(monkeypatch, capsys, tmp_path):
+    import main as main_module
+
+    monkeypatch.setenv("DHAN_CLIENT_ID", "fake-client-id")
+    monkeypatch.setenv("DHAN_ACCESS_TOKEN", "fake-access-token")
+    monkeypatch.setattr(main_module, "DEFAULT_LIVE_SIM_DB_PATH", tmp_path / "live_sim.db")
+    monkeypatch.setattr(main_module, "DEFAULT_SCHEDULER_DB_PATH", tmp_path / "scheduler_runs.db")
+    import live.workstation as workstation_module
+
+    monkeypatch.setattr(workstation_module, "LIVE_STATE_DB_PATH", tmp_path / "live_state.db")
+    args = parse_args(["readiness-check"])
+
+    run_readiness_check_command(args)
+
+    captured = capsys.readouterr()
+    assert "[PASS] Disk write capability confirmed" in captured.out
+    assert f"[PASS] Database reachable: {tmp_path / 'live_sim.db'}" in captured.out
+    assert "Active strategy: trend_momentum_baseline" in captured.out
+    assert "SCIENTIFIC VERDICT: NO DEMONSTRATED EDGE" in captured.out
+    assert "[INFO] No scheduler run history found yet" in captured.out
+
+
+def test_readiness_check_deep_flag_reports_missing_credentials_gracefully(monkeypatch, capsys, tmp_path):
+    # --deep must never crash the whole command even if it can't run --
+    # a clean [FAIL] line, not a traceback.
+    import main as main_module
+
+    monkeypatch.delenv("DHAN_CLIENT_ID", raising=False)
+    monkeypatch.delenv("DHAN_ACCESS_TOKEN", raising=False)
+    monkeypatch.setattr(main_module, "DEFAULT_LIVE_SIM_DB_PATH", tmp_path / "live_sim.db")
+    monkeypatch.setattr(main_module, "DEFAULT_SCHEDULER_DB_PATH", tmp_path / "scheduler_runs.db")
+    import live.workstation as workstation_module
+
+    monkeypatch.setattr(workstation_module, "LIVE_STATE_DB_PATH", tmp_path / "live_state.db")
+    args = parse_args(["readiness-check", "--deep"])
+
+    with pytest.raises(SystemExit):  # top-level credentials FAIL still exits 1, same as without --deep
+        run_readiness_check_command(args)
+
+    captured = capsys.readouterr()
+    assert "DEEP CHECK (--deep)" in captured.out
+    assert "[FAIL] Cannot run deep checks:" in captured.out
+
+
+def test_readiness_check_without_deep_flag_never_attempts_network_calls(monkeypatch, capsys, tmp_path):
+    # The default (no --deep) behavior must stay exactly what it always
+    # was: structural only, zero network calls, zero risk of hanging on
+    # a slow/unavailable connection.
+    import main as main_module
+
+    monkeypatch.setenv("DHAN_CLIENT_ID", "fake-client-id")
+    monkeypatch.setenv("DHAN_ACCESS_TOKEN", "fake-access-token")
+    monkeypatch.setattr(main_module, "DEFAULT_LIVE_SIM_DB_PATH", tmp_path / "live_sim.db")
+    monkeypatch.setattr(main_module, "DEFAULT_SCHEDULER_DB_PATH", tmp_path / "scheduler_runs.db")
+    monkeypatch.setattr(main_module, "_run_deep_readiness_checks", lambda **_: pytest.fail("must not be called without --deep"))
+    import live.workstation as workstation_module
+
+    monkeypatch.setattr(workstation_module, "LIVE_STATE_DB_PATH", tmp_path / "live_state.db")
+    args = parse_args(["readiness-check"])
+
+    run_readiness_check_command(args)  # must not raise via the monkeypatched fail()
+
+    captured = capsys.readouterr()
+    assert "This is a STRUCTURAL check only." in captured.out
+
+
 # --- readiness-check: holiday-calendar cross-check (live-market-readiness audit) ---
 
 
