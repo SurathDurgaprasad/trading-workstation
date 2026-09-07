@@ -144,3 +144,113 @@ def test_volume_signal_strategy_never_fires_without_valid_atr():
 
     for i in range(len(mutated)):
         assert strategy.generate_signal(mutated, i, "TEST") is None
+
+
+# --- run_universe_volume_filter_experiment (H_ENTRY_002 universe runner) ------
+
+
+def _trending_ohlcv(symbol, n=260):
+    """A real uptrend (so TrendMomentumBaseline's SMA20>SMA50/RSI/MACD
+    conditions are reachable, not guaranteed to fire every bar) with
+    genuinely varying volume (so dev_fit_volume_thresholds sees real
+    dispersion, not a degenerate p20==p80)."""
+    from market.data_provider import OHLCV
+
+    bars = []
+    for i in range(n):
+        close = 100.0 + i * 0.35 + (2.0 if i % 17 == 0 else 0.0)
+        volume = 1_000_000 * (1 + ((i * 7) % 23) / 10)
+        bars.append({
+            "Open": close - 0.2, "High": close + 1.5, "Low": close - 1.5, "Close": close, "Volume": volume,
+        })
+    frame = pd.DataFrame(bars, index=pd.date_range("2024-01-01", periods=n, freq="D"))
+    return OHLCV.from_dataframe(symbol=symbol, interval="1d", frame=frame)
+
+
+@pytest.fixture
+def _fake_volume_universe_provider(monkeypatch):
+    from market.data_provider import MarketDataError
+
+    class _Provider:
+        def __init__(self, good_symbols):
+            self._good = good_symbols
+
+        def fetch_ohlcv(self, symbol, *, period="5y", interval="1d"):
+            if symbol not in self._good:
+                raise MarketDataError(f"no data for {symbol}")
+            return _trending_ohlcv(symbol)
+
+    def _apply(good_symbols):
+        import market.data_provider as market_data_provider_module
+
+        monkeypatch.setattr(market_data_provider_module, "get_market_data_provider", lambda: _Provider(good_symbols))
+
+        # Bypass the real on-disk cache entirely -- "AAA"/"BBB"/"BADSYMBOL"
+        # are not real cached symbols, so a cache MISS would otherwise
+        # WRITE a real file under data/market/ as a side effect (same
+        # concern/fix already established for exit_experiments' own
+        # universe tests in test_backtest_exit_experiments.py).
+        import backtesting.cache as cache_module
+
+        monkeypatch.setattr(cache_module, "CachedMarketDataProvider", lambda inner: inner)
+
+    return _apply
+
+
+def test_run_universe_volume_filter_experiment_pools_across_symbols_and_candidates(_fake_volume_universe_provider):
+    _fake_volume_universe_provider({"AAA", "BBB"})
+
+    from quant_research.volume_signal import CANDIDATES, UniverseVolumeFilterExperimentResult, run_universe_volume_filter_experiment
+
+    result = run_universe_volume_filter_experiment(["AAA", "BBB"], initial_capital=100_000.0)
+
+    assert isinstance(result, UniverseVolumeFilterExperimentResult)
+    assert result.failed_symbols == {}
+    assert result.insufficient_threshold_symbols == {}
+    assert set(result.development_trades) == set(CANDIDATES)
+    assert set(result.validation_trades) == set(CANDIDATES)
+    assert set(result.out_of_sample_trades) == set(CANDIDATES)
+    for candidate_name in CANDIDATES:
+        assert isinstance(result.development_trades[candidate_name], list)
+        assert isinstance(result.validation_trades[candidate_name], list)
+        assert isinstance(result.out_of_sample_trades[candidate_name], list)
+
+
+def test_run_universe_volume_filter_experiment_isolates_a_failing_symbol(_fake_volume_universe_provider):
+    _fake_volume_universe_provider({"AAA"})
+
+    from quant_research.volume_signal import run_universe_volume_filter_experiment
+
+    result = run_universe_volume_filter_experiment(["AAA", "BADSYMBOL"], initial_capital=100_000.0)
+
+    assert "BADSYMBOL" in result.failed_symbols
+    assert "AAA" not in result.failed_symbols
+
+
+def test_run_universe_volume_filter_experiment_flags_insufficient_threshold_data(monkeypatch):
+    """A symbol with too few development-period bars for
+    dev_fit_volume_thresholds's own 50-row floor must be excluded
+    honestly (insufficient_threshold_symbols), never silently dropped
+    into failed_symbols (a different failure mode) or crash."""
+    from market.data_provider import MarketDataError
+
+    class _Provider:
+        def fetch_ohlcv(self, symbol, *, period="5y", interval="1d"):
+            if symbol != "SHORT":
+                raise MarketDataError(f"no data for {symbol}")
+            return _trending_ohlcv(symbol, n=60)  # 60 * 0.6 = 36 dev rows, below the 50-row floor
+
+    import market.data_provider as market_data_provider_module
+
+    monkeypatch.setattr(market_data_provider_module, "get_market_data_provider", lambda: _Provider())
+    import backtesting.cache as cache_module
+
+    monkeypatch.setattr(cache_module, "CachedMarketDataProvider", lambda inner: inner)
+
+    from quant_research.volume_signal import run_universe_volume_filter_experiment
+
+    result = run_universe_volume_filter_experiment(["SHORT"], initial_capital=100_000.0)
+
+    assert "SHORT" in result.insufficient_threshold_symbols
+    assert "SHORT" not in result.failed_symbols
+    assert result.insufficient_threshold_symbols["SHORT"] < 50

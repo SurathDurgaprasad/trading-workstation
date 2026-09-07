@@ -59,6 +59,27 @@ def test_h_entry_005_is_inconclusive_not_falsely_rejected_or_supported():
     assert "283" in h.evidence  # the real dominant-bucket trade count
 
 
+def test_h_entry_002_is_rejected_with_the_real_dev_val_oos_evidence():
+    """BUILD THE REAL TRADING BRAIN mission: the volume-confirmation-filter
+    candidates (quant_research/volume_signal.py) were finally run through
+    the full universe dev/val/oos protocol via the new
+    run_universe_volume_filter_experiment(). A_high_volume and
+    C_extreme_volume both show a confident NEGATIVE_PERFORMANCE
+    development verdict (disqualifying per this project's own promotion
+    rule); B_low_volume never clears the 30-trade floor in any split.
+    None of the three improves on the frozen baseline's own already-
+    negative performance -- REJECTED, not OPEN and not SUPPORTED."""
+    registry = build_hypothesis_registry()
+    h = next(h for h in registry if h.hypothesis_id == "H_ENTRY_002")
+
+    assert h.status == HypothesisStatus.REJECTED
+    assert "REJECTED" in h.evidence
+    # Spot-check the real, actually-measured figures are present verbatim.
+    assert "171/69/88" in h.evidence
+    assert "174/73/91" in h.evidence
+    assert "INSUFFICIENT_DATA" in h.evidence
+
+
 def test_all_exit_hypotheses_have_now_been_implemented_and_tested():
     """H_EXIT_001 through H_EXIT_004 have all been implemented and run
     against the real 41-symbol universe this session (see the dedicated

@@ -87,12 +87,52 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
             description="Volume confirmation improves continuation probability beyond trend+momentum alone.",
             rationale="Rising volume is commonly cited as confirming genuine participation behind a move rather than a low-conviction drift.",
             expected_effect="A strategy requiring trend+momentum+volume should outperform one requiring only trend+momentum.",
-            dataset_restrictions="Same 41-symbol universe.",
-            experiment_design="Not yet built: would require an isolated 'trend+momentum, no volume filter' strategy variant, backtested and compared against TrendMomentumBaseline with dev/val/OOS splits.",
+            dataset_restrictions=(
+                "Same 41-symbol universe (32 NSE, 9 US), 5 years daily bars. Honest scope note: "
+                "TrendMomentumBaseline already requires its own binary volume_trend==\"increasing\" condition -- "
+                "this tests whether a STRICTER, continuous, development-period-quantile-based volume_ratio bar "
+                "(quant_research/alpha_features.py's Phase 10 feature) adds further value beyond that existing "
+                "loose gate, not \"volume vs. no volume at all\"."
+            ),
+            experiment_design=(
+                "BUILD THE REAL TRADING BRAIN mission: quant_research/volume_signal.py's Phase 11 candidates "
+                "(A_high_volume, B_low_volume, C_extreme_volume -- each a FilteredStrategy wrapping the frozen "
+                "TrendMomentumBaseline with a volume_ratio quantile predicate, per-symbol thresholds frozen from "
+                "that symbol's OWN development-period data only) had existed, unit-tested, since Phase 11 but "
+                "were never run through the full universe dev/val/oos protocol. This mission added "
+                "run_universe_volume_filter_experiment() to close that gap and ran it for real against the full "
+                "41-symbol universe via backtesting.runner.run_full_backtest (unchanged -- no new engine code, "
+                "this experiment touches no exit mechanics)."
+            ),
             success_criteria="Adding the volume condition improves validation/out-of-sample expectancy without collapsing sample size below the statistical floor (30 trades).",
             failure_criteria="Adding volume either has no measurable effect or worsens expectancy.",
-            status=HypothesisStatus.OPEN,
-            evidence="Not yet tested this session.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Run against the real 41-symbol universe, all 41 backtested successfully (0 failed, 0 excluded "
+                "for insufficient development-period volume_ratio data). "
+                "A_high_volume (171/69/88 dev/val/oos trades): Development expectancy -0.72% "
+                "(mean-return 95% CI [-1.34%, -0.10%], entirely negative) -> NEGATIVE_PERFORMANCE. Validation "
+                "expectancy -0.70% -> STATISTICALLY_MEANINGLESS. Out-of-sample expectancy -0.32% -> "
+                "STATISTICALLY_MEANINGLESS. PROMOTION VERDICT: REJECTED (development alone is decisive evidence "
+                "against, per this project's own promotion rule -- any confidently NEGATIVE_PERFORMANCE split is "
+                "disqualifying). "
+                "C_extreme_volume (174/73/91 trades): Development expectancy -0.80% (CI [-1.42%, -0.19%]) -> "
+                "NEGATIVE_PERFORMANCE. Validation -0.70% and out-of-sample -0.28%, both STATISTICALLY_MEANINGLESS. "
+                "REJECTED for the same reason -- and its trade count (174 dev) is close to A_high_volume's own "
+                "(171), confirming the 'extreme' candidate is dominated by its high-volume tail, not its low-volume one. "
+                "B_low_volume (17/13/11 trades): every split below this project's own 30-trade minimum sample "
+                "floor -- INSUFFICIENT_DATA, not evidence for or against; low-volume days are simply too rare "
+                "under this filter to test with the available data. "
+                "Bonferroni correction (family_size=3, applied to out-of-sample returns, corrected z=2.394): no "
+                "candidate survives correction as positive -- unsurprising, since none was even directionally "
+                "positive before correction. "
+                "REJECTED overall: unlike H_EXIT_002's real directional improvement, none of these three volume-"
+                "filter candidates shows any improvement over the frozen baseline's own already-negative "
+                "performance (baseline development expectancy -0.78%, per H_EXIT_001's own evidence -- "
+                "A_high_volume's -0.72% and C_extreme_volume's -0.80% are statistically indistinguishable from "
+                "that, not better). A stricter, continuous volume bar on top of the baseline's existing binary "
+                "volume gate does not improve continuation probability on this evidence."
+            ),
         ),
         HypothesisRecord(
             hypothesis_id="H_ENTRY_003",
