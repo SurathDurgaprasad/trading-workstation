@@ -89,6 +89,7 @@ class CriticGate:
         benchmark_symbol: str | None,
         config: CriticConfig | None = None,
         refresh_seconds: float = DEFAULT_REFRESH_SECONDS,
+        max_staleness_seconds: float | None = None,
         period: str = "1y",
         interval: str = "1d",
         clock=time.monotonic,
@@ -98,6 +99,18 @@ class CriticGate:
         self._benchmark_symbol = benchmark_symbol
         self._config = config or CriticConfig()
         self._refresh_seconds = refresh_seconds
+        self._max_staleness_seconds = max_staleness_seconds if max_staleness_seconds is not None else refresh_seconds * 3
+        """LIVE SYSTEM HARDENING mission, adversarial self-review finding:
+        _refresh_if_needed()'s own retry timer advances on EVERY attempt,
+        success or failure -- without a separate staleness bound, a
+        persistent data-provider outage would leave whatever evidence was
+        cached from BEFORE the outage in place indefinitely, with nothing
+        tracking how old it has actually become. Default 3x
+        refresh_seconds: generous enough that one or two transient
+        failures in a row don't spuriously block a real live session, but
+        bounded -- evidence this old is treated as unavailable (fail
+        closed), never used forever on the strength of one long-ago
+        successful fetch."""
         self._period = period
         self._interval = interval
         self._clock = clock
@@ -107,6 +120,7 @@ class CriticGate:
         self._benchmark_context: BenchmarkContext | None = None
         self._last_refresh: float | None = None
         self._last_refresh_error: str | None = None
+        self._last_successful_refresh: float | None = None
 
     @property
     def last_refresh_error(self) -> str | None:
@@ -122,17 +136,33 @@ class CriticGate:
                 universe, provider=self._provider, benchmark_symbol=self._benchmark_symbol,
                 period=self._period, interval=self._interval,
             )
-            self._candidate = report.get(self._symbol)
-            self._exclusion_reason = next(
-                (e.reason for e in report.excluded if e.symbol == self._symbol), None
-            ) if self._candidate is None else None
-            self._benchmark_context = compute_benchmark_context(
+            benchmark_context = compute_benchmark_context(
                 self._benchmark_symbol, provider=self._provider, period=self._period, interval=self._interval,
             )
+            # Atomic: both real fetches must succeed before EITHER cached
+            # field is updated. Adversarial self-review finding: the
+            # original version updated self._candidate immediately after
+            # run_scan() succeeded, then could still raise from the
+            # SEPARATE compute_benchmark_context() call below it -- caught
+            # by the same except block, but by then self._candidate had
+            # already changed while self._benchmark_context (and
+            # _last_refresh_error, which would then be misleadingly
+            # non-None) had not, an inconsistent partial-update a caller
+            # reading these fields mid-refresh could observe.
+            candidate = report.get(self._symbol)
+            self._candidate = candidate
+            self._exclusion_reason = next(
+                (e.reason for e in report.excluded if e.symbol == self._symbol), None
+            ) if candidate is None else None
+            self._benchmark_context = benchmark_context
             self._last_refresh_error = None
+            self._last_successful_refresh = now
         except Exception as exc:  # noqa: BLE001 -- fail closed, never crash the live loop over a data refresh
             self._last_refresh_error = f"{type(exc).__name__}: {exc}"
         self._last_refresh = now
+
+    def _is_stale(self) -> bool:
+        return self._last_successful_refresh is None or (self._clock() - self._last_successful_refresh) > self._max_staleness_seconds
 
     def evaluate(
         self,
@@ -146,8 +176,15 @@ class CriticGate:
     ) -> CriticGateResult:
         self._refresh_if_needed()
 
-        if self._candidate is None:
-            if self._last_refresh_error:
+        if self._candidate is None or self._is_stale():
+            if self._candidate is not None:
+                age = self._clock() - self._last_successful_refresh if self._last_successful_refresh is not None else None
+                reason = (
+                    f"Scanner evidence for {self._symbol} is stale (last successful refresh "
+                    f"{age:.0f}s ago, exceeding the {self._max_staleness_seconds:.0f}s limit) -- "
+                    f"most recent refresh attempt: {self._last_refresh_error or 'still failing'}."
+                )
+            elif self._last_refresh_error:
                 reason = f"No real scanner evidence available for {self._symbol} -- {self._last_refresh_error}"
             elif self._exclusion_reason:
                 reason = f"No real scanner evidence available for {self._symbol} -- {self._exclusion_reason}"

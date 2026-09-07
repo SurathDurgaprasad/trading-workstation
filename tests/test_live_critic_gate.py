@@ -43,6 +43,34 @@ class _FakeProvider:
         return OHLCV(symbol=symbol, interval=interval, bars=self._bars)
 
 
+class _SelectiveFailureProvider:
+    """Succeeds for every symbol except those named in `fail_for`, which
+    raise a bare RuntimeError -- deliberately NOT MarketDataError.
+    market_intelligence.scanner._screen_symbol/_fetch_benchmark and
+    market_intelligence.regime.compute_benchmark_context all narrowly
+    catch MarketDataError/ValueError themselves and degrade gracefully
+    (an excluded candidate, an UNKNOWN-flavored BenchmarkContext) rather
+    than raising -- a real, reassuring finding from adversarial
+    self-review, but it means a MarketDataError never actually reaches
+    CriticGate's own try/except at all. A genuinely unexpected exception
+    type is what's needed to exercise CriticGate's OWN fail-closed
+    handling (its atomic-update and staleness-bound behavior) rather
+    than the underlying functions' already-graceful degradation."""
+
+    def __init__(self, bars: list[OHLCVBar], *, fail_for: frozenset[str] = frozenset()):
+        self._bars = bars
+        self._fail_for = fail_for
+        self.fetch_count = 0
+        self.fetched_symbols: list[str] = []
+
+    def fetch_ohlcv(self, symbol, *, period="1y", interval="1d"):
+        self.fetch_count += 1
+        self.fetched_symbols.append(symbol)
+        if symbol in self._fail_for:
+            raise RuntimeError(f"simulated unexpected failure for {symbol}")
+        return OHLCV(symbol=symbol, interval=interval, bars=self._bars)
+
+
 def _buy_signal(**overrides) -> Signal:
     base = dict(
         symbol="AAPL", generated_at=_START + timedelta(days=249), side=Side.LONG,
@@ -181,3 +209,107 @@ def test_evidence_refreshes_after_the_configured_window_elapses():
 
 def test_default_refresh_seconds_is_fifteen_minutes():
     assert DEFAULT_REFRESH_SECONDS == 900.0
+
+
+# --- adversarial self-review findings: atomic update + staleness bound ------
+
+
+def test_a_benchmark_fetch_failure_does_not_leave_a_partially_updated_candidate():
+    """Real gap found and fixed via self-review: a benchmark-symbol
+    fetch failure (here, run_scan()'s own internal benchmark fetch --
+    run_scan() calls that before screening the main symbol, so it never
+    even reaches CriticGate's separate compute_benchmark_context() call
+    in this exact scenario, though the same all-or-nothing guarantee
+    covers either one raising) must not leave self._candidate set from
+    a partial/inconsistent state. Both real fetches must succeed
+    together, or neither cached field changes -- fail closed, not a
+    partial pass."""
+    provider = _SelectiveFailureProvider(_uptrend_bars(), fail_for=frozenset({"^NSEI"}))
+    gate = CriticGate(symbol="AAPL", provider=provider, benchmark_symbol="^NSEI", clock=lambda: 0.0)
+
+    result = gate.evaluate(
+        _buy_signal(), indicators=None, kill_switch_active=False,
+        existing_pending_order=False, existing_open_position=False,
+    )
+
+    # The failed refresh must be fail-closed -- no partial candidate silently accepted.
+    assert result.blocked is True
+    assert result.assessment is None
+
+
+def test_a_transient_failure_does_not_block_forever_once_a_later_refresh_succeeds():
+    """Companion to the atomic-update test: once a refresh genuinely
+    succeeds (both real fetches), the gate must recover normally -- the
+    earlier failure must not leave any lingering inconsistent state."""
+    clock_value = [0.0]
+    provider = _SelectiveFailureProvider(_uptrend_bars(), fail_for=frozenset({"^NSEI"}))
+    gate = CriticGate(symbol="AAPL", provider=provider, benchmark_symbol="^NSEI", refresh_seconds=60.0, clock=lambda: clock_value[0])
+
+    first = gate.evaluate(_buy_signal(), indicators=None, kill_switch_active=False, existing_pending_order=False, existing_open_position=False)
+    assert first.blocked is True  # benchmark fetch failed
+
+    provider._fail_for = frozenset()  # simulate the transient issue clearing
+    clock_value[0] = 61.0  # past the refresh window -- triggers a fresh attempt
+    second = gate.evaluate(
+        _buy_signal(), indicators=_real_indicators(), now=_START + timedelta(days=249, hours=1),
+        kill_switch_active=False, existing_pending_order=False, existing_open_position=False,
+    )
+    assert second.blocked is False
+    assert second.decision.scanner_evidence is not None
+
+
+def test_evidence_is_treated_as_stale_after_max_staleness_seconds_of_repeated_failure():
+    """Real gap found and fixed via self-review: _refresh_if_needed()'s
+    own retry timer advances on every attempt, success or failure --
+    without a separate staleness bound, cached evidence from before a
+    persistent outage began would be used forever. Once
+    max_staleness_seconds has elapsed since the LAST successful refresh,
+    the gate must fail closed even though self._candidate is still
+    technically set from a long-ago success. Uses _SelectiveFailureProvider
+    (RuntimeError, not MarketDataError) so the failure genuinely reaches
+    CriticGate's own exception handling instead of being absorbed as a
+    plain scanner exclusion -- see that class's own docstring."""
+    clock_value = [0.0]
+    provider = _SelectiveFailureProvider(_uptrend_bars(), fail_for=frozenset())
+    gate = CriticGate(symbol="AAPL", provider=provider, benchmark_symbol=None, refresh_seconds=10.0, max_staleness_seconds=30.0, clock=lambda: clock_value[0])
+
+    first = gate.evaluate(
+        _buy_signal(), indicators=_real_indicators(), now=_START + timedelta(days=249, hours=1),
+        kill_switch_active=False, existing_pending_order=False, existing_open_position=False,
+    )
+    assert first.blocked is False  # a real, successful first refresh
+
+    provider._fail_for = frozenset({"AAPL"})
+    for elapsed in (11.0, 22.0, 33.0):  # repeated refresh attempts, all now failing
+        clock_value[0] = elapsed
+        result = gate.evaluate(
+            _buy_signal(), indicators=_real_indicators(), now=_START + timedelta(days=249, hours=1),
+            kill_switch_active=False, existing_pending_order=False, existing_open_position=False,
+        )
+
+    # 33s since the LAST SUCCESSFUL refresh (at t=0) exceeds max_staleness_seconds=30s.
+    assert result.blocked is True
+    assert "stale" in result.block_reason.lower()
+
+
+def test_evidence_stays_usable_within_the_staleness_window_despite_a_single_failed_retry():
+    """The staleness bound must not be so aggressive that one failed
+    retry immediately blocks -- only genuinely prolonged unavailability
+    should."""
+    clock_value = [0.0]
+    provider = _SelectiveFailureProvider(_uptrend_bars(), fail_for=frozenset())
+    gate = CriticGate(symbol="AAPL", provider=provider, benchmark_symbol=None, refresh_seconds=10.0, max_staleness_seconds=100.0, clock=lambda: clock_value[0])
+
+    first = gate.evaluate(
+        _buy_signal(), indicators=_real_indicators(), now=_START + timedelta(days=249, hours=1),
+        kill_switch_active=False, existing_pending_order=False, existing_open_position=False,
+    )
+    assert first.blocked is False
+
+    provider._fail_for = frozenset({"AAPL"})
+    clock_value[0] = 11.0  # one failed retry, well within the 100s staleness bound
+    second = gate.evaluate(
+        _buy_signal(), indicators=_real_indicators(), now=_START + timedelta(days=249, hours=1),
+        kill_switch_active=False, existing_pending_order=False, existing_open_position=False,
+    )
+    assert second.blocked is False  # still using the good evidence from t=0
