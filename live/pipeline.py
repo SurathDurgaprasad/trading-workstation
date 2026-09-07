@@ -185,6 +185,30 @@ class LiveSimPipeline:
     def is_kill_switch_active(self) -> bool:
         return self.state_store is not None and self.state_store.is_kill_switch_active()
 
+    def _connection_state_label(self) -> str:
+        """LIVE SYSTEM HARDENING mission, Part 3 (data-source health):
+        real gap found -- this pipeline only ever asked is_connected()
+        (a bool), collapsing a richer connection-state some sources track
+        internally (e.g. a distinct CONNECTING / RECONNECTING / FAILED /
+        CLOSED, not just CONNECTED/DISCONNECTED) down to a coarse
+        boolean before it ever reached feed_status/the dashboard -- an
+        operator could not tell "actively retrying" from "gave up" from
+        "never connected".
+
+        `source.state` is an OPTIONAL extra some MarketDataSource
+        implementations expose beyond the generic live.contracts.
+        MarketDataSource Protocol (which only requires is_connected()) --
+        this stays a soft, getattr-based capability check, never a hard
+        dependency on any one implementation, so a source without it
+        (like the mock replay source) is completely unaffected. No new
+        persisted column: connection_state was always a plain TEXT
+        field; this only changes what value it can receive, which the
+        dashboard already knows how to display as-is."""
+        state = getattr(self.source, "state", None)
+        if state is not None:
+            return state
+        return "CONNECTED" if self.source.is_connected() else "DISCONNECTED"
+
     def latest_indicators(self, symbol: str) -> TechnicalIndicators | None:
         """Read-only accessor for the most recently computed indicator
         snapshot (same rolling/ewm math as the signal-generating series,
@@ -234,7 +258,7 @@ class LiveSimPipeline:
             self.state_store.save_feed_status(
                 symbol=symbol, source=bar.source.value, status=bar.status.value,
                 bar_timestamp=bar.timestamp, received_at=bar.received_at or self._clock(),
-                connection_state="CONNECTED" if self.source.is_connected() else "DISCONNECTED",
+                connection_state=self._connection_state_label(),
             )
 
         engine_bar = Bar(timestamp=bar.timestamp, open=bar.open, high=bar.high, low=bar.low, close=bar.close, volume=bar.volume)

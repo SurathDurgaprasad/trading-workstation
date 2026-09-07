@@ -158,6 +158,45 @@ def test_fresh_bar_is_not_suppressed():
 # --- 5/6. feed disconnect / reconnect ------------------------------------------
 
 
+# --- richer connection-state in feed_status (LIVE SYSTEM HARDENING mission, Part 3) ---
+
+
+def test_feed_status_connection_state_falls_back_to_the_coarse_boolean_without_a_state_attribute():
+    """MockMarketDataSource has no `.state` attribute -- must fall back to
+    the original CONNECTED/DISCONNECTED boolean-derived value exactly,
+    the pre-existing behavior every other test in this file already
+    relies on."""
+    from live.state_store import LiveStateStore
+
+    state_store = LiveStateStore(":memory:")
+    bar = _qualifying_bar(1)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    pipeline, engine, store = _pipeline(script, clock=lambda: bar.timestamp, state_store=state_store)
+    pipeline.process_next()
+
+    record = state_store.get_feed_status("TEST")
+    assert record.connection_state == "CONNECTED"
+
+
+def test_feed_status_connection_state_uses_a_richer_value_when_the_source_exposes_one():
+    """A source MAY expose an optional `.state` attribute richer than the
+    generic Protocol's is_connected() bool (e.g. a distinct
+    RECONNECTING, not just CONNECTED/DISCONNECTED) -- when present, it
+    must reach feed_status verbatim, not be collapsed back down."""
+    from live.state_store import LiveStateStore
+
+    state_store = LiveStateStore(":memory:")
+    bar = _qualifying_bar(1)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    pipeline, engine, store = _pipeline(script, clock=lambda: bar.timestamp, state_store=state_store)
+    pipeline.source.state = "RECONNECTING"  # simulates an optional capability MockMarketDataSource does not normally have
+
+    pipeline.process_next()
+
+    record = state_store.get_feed_status("TEST")
+    assert record.connection_state == "RECONNECTING"
+
+
 # --- critic gate integration (LIVE SYSTEM HARDENING mission) -----------------
 
 

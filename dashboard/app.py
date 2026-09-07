@@ -282,6 +282,48 @@ def _fmt_money(value: float) -> str:
     return f"{value:,.2f}"
 
 
+def _data_health_label(*, connection_state: str | None, age_seconds: float | None) -> tuple[str, str]:
+    """LIVE SYSTEM HARDENING mission, Part 3 (live-data degradation
+    policy): composes the mission's own desired operator-facing
+    vocabulary -- CONNECTED / DEGRADED / STALE / RECONNECTING /
+    DISCONNECTED / SOURCE_UNAVAILABLE -- purely from what feed_status
+    ALREADY records (connection_state, now richer than a plain bool when
+    the source exposes one -- see LiveSimPipeline._connection_state_label;
+    and received_at, already shown as "Data Age"). No new persisted
+    state, no new enforcement: the REAL gate against stale data acting
+    on a new decision remains live/freshness.py's FreshnessPolicy inside
+    the pipeline itself (proven live: a genuine STALE_SIGNAL_SUPPRESSED
+    event was observed this session) -- this function is DISPLAY ONLY,
+    a second, cruder read of the same underlying signal for an operator
+    glancing at the dashboard, not a competing decision-maker.
+
+    Thresholds are honest approximations, not a claim of matching the
+    pipeline's own exact interval-derived threshold (feed_status does
+    not record which interval a symbol is running at): 30s is
+    FreshnessPolicy's own minimum_threshold floor (meaningful regardless
+    of interval); 120s is that floor's default multiplier=2.0 applied to
+    paper-live's own --interval default (1m) -- both real, existing
+    numbers from live/freshness.py, not fabricated here. A caller
+    running a longer interval will see DEGRADED/STALE reported more
+    eagerly than their actual configured threshold -- erring toward
+    caution, never toward hiding a real problem."""
+    conn = (connection_state or "").upper()
+    if conn == "FAILED":
+        return "SOURCE_UNAVAILABLE", "tag-short"
+    if conn == "RECONNECTING":
+        return "RECONNECTING", "tag-warn"
+    if conn in ("DISCONNECTED", "CONNECTING", "CLOSED", ""):
+        return "DISCONNECTED", "tag-short"
+    # conn == "CONNECTED" from here.
+    if age_seconds is None:
+        return "CONNECTED", "tag-long"
+    if age_seconds > 120:
+        return "STALE", "tag-short"
+    if age_seconds > 30:
+        return "DEGRADED", "tag-warn"
+    return "CONNECTED", "tag-long"
+
+
 def _decision_id_cell(entry) -> str:
     if entry.decision_id:
         return html.escape(entry.decision_id)
@@ -368,20 +410,23 @@ async def index(request: Request) -> HTMLResponse:
             age_seconds = (datetime.now(timezone.utc) - datetime.fromisoformat(record.received_at)).total_seconds()
             age_text = f"{age_seconds:,.1f}s"
         except ValueError:
+            age_seconds = None
             age_text = "unknown"
         conn = record.connection_state or "UNKNOWN"
         conn_class = "tag-long" if conn == "CONNECTED" else "tag-short"
+        health_label, health_class = _data_health_label(connection_state=record.connection_state, age_seconds=age_seconds)
         return (
             f"<tr><td>{html.escape(record.symbol)}</td>"
             f"<td><span class='tag {source_class}'>{html.escape(record.source)}</span></td>"
             f"<td><span class='tag {status_class}'>{html.escape(record.status)}</span></td>"
             f"<td><span class='tag {conn_class}'>{html.escape(conn)}</span></td>"
+            f"<td><span class='tag {health_class}'>{html.escape(health_label)}</span></td>"
             f"<td>{html.escape(record.bar_timestamp)}</td>"
             f"<td>{age_text}</td></tr>"
         )
 
     feed_rows = "".join(_feed_row(r) for r in feed_status) or (
-        "<tr><td colspan='6' class='muted'>No market data processed yet in this session &mdash; "
+        "<tr><td colspan='7' class='muted'>No market data processed yet in this session &mdash; "
         "run <code>python main.py paper-live ...</code> to start a feed.</td></tr>"
     )
 
@@ -393,8 +438,8 @@ async def index(request: Request) -> HTMLResponse:
 {kill_form}
 
 <h2>MARKET FEED</h2>
-<p class="muted">The last bar actually delivered by whatever is driving the feed (the paper-live CLI, in another process) &mdash; never fabricated here.</p>
-<table><tr><th>Symbol</th><th>Source</th><th>Status</th><th>Connection</th><th>Last Bar</th><th>Data Age</th></tr>{feed_rows}</table>
+<p class="muted">The last bar actually delivered by whatever is driving the feed (the paper-live CLI, in another process) &mdash; never fabricated here. Data Health is a display-only approximation (see its own tooltip in the source); the real gate against acting on stale data is the live pipeline's own freshness check, not this label.</p>
+<table><tr><th>Symbol</th><th>Source</th><th>Status</th><th>Connection</th><th>Data Health</th><th>Last Bar</th><th>Data Age</th></tr>{feed_rows}</table>
 
 <h2>SIGNALS <span class="tag tag-mock">from pending approvals</span></h2>
 <p class="muted">Derived from the latest signal seen for each symbol currently awaiting approval.</p>

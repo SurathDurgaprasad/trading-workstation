@@ -137,6 +137,68 @@ def test_index_shows_real_feed_status_once_written(client):
     assert "CONNECTED" in response.text
 
 
+# --- _data_health_label (LIVE SYSTEM HARDENING mission, Part 3) -- pure unit tests ---
+
+
+def test_data_health_label_maps_every_connection_state():
+    from dashboard.app import _data_health_label
+
+    assert _data_health_label(connection_state="FAILED", age_seconds=0.0)[0] == "SOURCE_UNAVAILABLE"
+    assert _data_health_label(connection_state="RECONNECTING", age_seconds=0.0)[0] == "RECONNECTING"
+    assert _data_health_label(connection_state="DISCONNECTED", age_seconds=0.0)[0] == "DISCONNECTED"
+    assert _data_health_label(connection_state="CONNECTING", age_seconds=0.0)[0] == "DISCONNECTED"
+    assert _data_health_label(connection_state="CLOSED", age_seconds=0.0)[0] == "DISCONNECTED"
+    assert _data_health_label(connection_state=None, age_seconds=0.0)[0] == "DISCONNECTED"
+
+
+def test_data_health_label_grades_a_connected_source_by_age():
+    from dashboard.app import _data_health_label
+
+    assert _data_health_label(connection_state="CONNECTED", age_seconds=5.0)[0] == "CONNECTED"
+    assert _data_health_label(connection_state="CONNECTED", age_seconds=45.0)[0] == "DEGRADED"
+    assert _data_health_label(connection_state="CONNECTED", age_seconds=150.0)[0] == "STALE"
+    assert _data_health_label(connection_state="CONNECTED", age_seconds=None)[0] == "CONNECTED"  # unknown age is not assumed stale
+
+
+def test_data_health_label_boundaries_are_exclusive():
+    from dashboard.app import _data_health_label
+
+    assert _data_health_label(connection_state="CONNECTED", age_seconds=30.0)[0] == "CONNECTED"  # exactly the floor -- not yet degraded
+    assert _data_health_label(connection_state="CONNECTED", age_seconds=120.0)[0] == "DEGRADED"  # exactly the default threshold -- not yet stale
+
+
+def test_index_shows_reconnecting_and_source_unavailable_data_health(client):
+    """LIVE SYSTEM HARDENING mission, Part 3: proves the dashboard's new
+    Data Health column genuinely reflects a richer connection_state
+    (not collapsed to plain CONNECTED/DISCONNECTED) for two symbols in
+    the SAME response."""
+    import live.workstation as workstation_module
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    state_store = workstation_module.new_live_state_store()
+    state_store.save_feed_status(symbol="RECONNECT.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, connection_state="RECONNECTING")
+    state_store.save_feed_status(symbol="FAILED.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, connection_state="FAILED")
+    state_store.close()
+
+    response = client.get("/")
+    assert "RECONNECTING" in response.text
+    assert "SOURCE_UNAVAILABLE" in response.text
+
+
+def test_index_shows_stale_data_health_for_an_old_bar(client):
+    import live.workstation as workstation_module
+    from datetime import datetime, timedelta, timezone
+
+    old = datetime.now(timezone.utc) - timedelta(seconds=300)
+    state_store = workstation_module.new_live_state_store()
+    state_store.save_feed_status(symbol="OLD.NS", source="DHAN", status="LIVE", bar_timestamp=old, received_at=old, connection_state="CONNECTED")
+    state_store.close()
+
+    response = client.get("/")
+    assert "STALE" in response.text
+
+
 def test_index_shows_no_critic_rejections_when_none_ever_recorded(client):
     response = client.get("/")
     assert "No signal has ever been rejected by the deterministic critic." in response.text
