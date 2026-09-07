@@ -80,6 +80,25 @@ def test_h_entry_002_is_rejected_with_the_real_dev_val_oos_evidence():
     assert "INSUFFICIENT_DATA" in h.evidence
 
 
+def test_h_meanrev_001_is_rejected_as_directionless_not_confidently_negative():
+    """BUILD THE REAL TRADING BRAIN mission, Family B (mean reversion) --
+    the first hypothesis testing a genuinely independent market mechanism
+    from every H_ENTRY_*/H_EXIT_* trend-continuation variant. All three
+    candidates (quant_research/mean_reversion_signal.py) landed close to
+    zero with inconsistent sign across splits -- REJECTED for being
+    directionless, unlike H_ENTRY_002/004's own confidently negative
+    results."""
+    registry = build_hypothesis_registry()
+    h = next(h for h in registry if h.hypothesis_id == "H_MEANREV_001")
+
+    assert h.status == HypothesisStatus.REJECTED
+    assert "REJECTED" in h.evidence
+    # Spot-check the real, actually-measured figures are present verbatim.
+    assert "288/94/96" in h.evidence
+    assert "452/160/157" in h.evidence
+    assert "INSUFFICIENT_DATA" in h.evidence
+
+
 def test_h_entry_004_is_rejected_with_the_real_dev_val_oos_evidence():
     """BUILD THE REAL TRADING BRAIN mission: the momentum-acceleration
     candidates (strategy/momentum_acceleration.py) were run through the

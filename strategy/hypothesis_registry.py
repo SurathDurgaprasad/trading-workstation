@@ -5,6 +5,16 @@ based on evidence gathered so far, might not) change that. Mission's own
 explicit instruction: "every strategy modification must be treated as an
 experiment" and "do not implement all hypotheses at once."
 
+BUILD THE REAL TRADING BRAIN mission: as of H_MEANREV_001, this registry
+also covers hypotheses for genuinely INDEPENDENT strategy families
+(mean reversion, breakout quality, cross-sectional relative strength --
+the new mission's own Family B/C/D), not only modifications of
+TrendMomentumBaseline -- the H_ENTRY_*/H_EXIT_* id prefixes stay scoped
+to the baseline itself (Family A + its own exit-management variants);
+a new family gets its own id prefix (e.g. H_MEANREV_*) so the id alone
+signals which market mechanism is under test, never conflated with "one
+more TrendMomentumBaseline tweak."
+
 This is a plain, honest ledger, not a claim of completeness: most
 entries are OPEN (not yet tested) by design -- populating a hypothesis
 with a status of SUPPORTED/REJECTED/INCONCLUSIVE requires the
@@ -394,6 +404,69 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "genuine winners are still developing, offsetting whatever benefit it has against slow-bleeding "
                 "losers. Net effect across all three splits is negligible-to-mixed, not a consistent improvement: "
                 "REJECTED. Does not meet even H_EXIT_002's lower bar of a directionally consistent, growing signal."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_MEANREV_001",
+            description=(
+                "Short-term mean reversion: a symbol trading unusually far BELOW its own recent 20-day average "
+                "(a large negative close z-score) tends to partially revert toward that average in the near term, "
+                "independent of the symbol's longer-term trend direction."
+            ),
+            rationale=(
+                "A genuinely INDEPENDENT market mechanism from Family A (trend continuation), which every "
+                "H_ENTRY_*/H_EXIT_* hypothesis tested so far has been some variant of, all now resolved with zero "
+                "promotions (see each record above). Overreaction correction, forced-seller exhaustion, and "
+                "short-term liquidity-provider bargain-hunting are commonly cited economic reasons a sharp, "
+                "short-term downside deviation partially reverts rather than persisting -- the opposite behavioral "
+                "claim from momentum's own 'a move that has started tends to continue.'"
+            ),
+            expected_effect=(
+                "A LONG-only strategy entering when zscore_close_20 is very negative should show a positive "
+                "expectancy, distinct from (and not explained by) TrendMomentumBaseline's own trend-continuation logic."
+            ),
+            dataset_restrictions=(
+                "Same 41-symbol universe (32 NSE, 9 US), 5 years daily bars. LONG-only, matching every other "
+                "strategy in this project (no short-side mechanics exist or are introduced here)."
+            ),
+            experiment_design=(
+                "Reuses quant_research/alpha_features.py's own zscore_close_20 (Phase 10, already causal, already "
+                "unit-tested -- rolling 20-bar mean/std of close) rather than recomputing it. Three candidates, "
+                "thresholds fixed a priori (not searched): A_oversold_2std (zscore_close_20 < -2.0, the standard "
+                "textbook threshold), B_oversold_1_5std (< -1.5, a less extreme, more frequently-firing bar), "
+                "C_oversold_within_uptrend (< -2.0 AND close > sma_200, reusing strategy/regime_filters.py's own "
+                "broad-trend column -- 'buy a sharp dip, but only in a stock whose longer-term trend is still up', "
+                "avoiding the 'catching a falling knife' failure mode a pure oversold-anywhere rule risks). Exit "
+                "structure deliberately reuses TrendMomentumBaseline's own frozen stop/target constants (same "
+                "isolation posture as quant_research/volume_signal.py's VolumeSignalStrategy) -- this experiment "
+                "tests the ENTRY signal only, not a new exit design, which would confound two variables at once."
+            ),
+            success_criteria="Development AND validation AND out-of-sample all show a confident POSITIVE_PERFORMANCE verdict with sufficient sample size (>=30 trades pooled).",
+            failure_criteria="Any split shows a confident NEGATIVE_PERFORMANCE verdict, or results are mixed/inconclusive across splits.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Run against the real 41-symbol universe, all 41 backtested successfully (0 failed). "
+                "A_oversold_2std (288/94/96 dev/val/oos trades -- ample sample size in every split): development "
+                "expectancy +0.09% and validation +0.13% (both STATISTICALLY_MEANINGLESS, point estimates barely "
+                "positive), out-of-sample -0.26% (STATISTICALLY_MEANINGLESS, flips negative). PROMOTION VERDICT: "
+                "REJECTED -- mixed, not consistently positive. "
+                "B_oversold_1_5std (452/160/157 trades): development -0.16%, validation +0.22%, out-of-sample "
+                "-0.10% -- also mixed. REJECTED. "
+                "C_oversold_within_uptrend (54/23/29 trades): validation and out-of-sample both fall below the "
+                "30-trade floor -- INSUFFICIENT_DATA. "
+                "Bonferroni correction (family_size=3, out-of-sample returns, corrected z=2.394): no candidate "
+                "survives as positive. "
+                "Honest characterization, distinct from every other REJECTED verdict in this registry: A and B "
+                "are NOT confidently negative like H_ENTRY_002/H_ENTRY_004/H_EXIT_001 were -- every point estimate "
+                "sits close to zero with a wide confidence interval, and the specific pattern (positive in "
+                "development/validation, negative out-of-sample) is the OPPOSITE of H_EXIT_002's own reassuring "
+                "'effect growing out-of-sample' shape. This is far more consistent with pure sampling noise around "
+                "a TRUE zero effect than with a real, suppressed signal -- REJECTED for being genuinely "
+                "directionless, not for showing measurable harm. Family B (mean reversion) opens with a clean "
+                "null result on this first, simplest operationalization of the mechanism; it does not by itself "
+                "rule out every possible mean-reversion formulation (different lookback windows, different exit "
+                "structure tied to reversion-to-mean rather than the baseline's fixed R:R, or a shorter holding "
+                "horizon were not tested here and remain genuinely open questions, not evidence against)."
             ),
         ),
     )
