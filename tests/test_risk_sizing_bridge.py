@@ -54,6 +54,16 @@ def test_build_signal_for_buy_uses_the_exact_baseline_stop_target_formula():
     assert signal.generated_at == market_context.as_of
 
 
+def test_build_signal_for_buy_carries_the_decision_id_forward():
+    # LIVE SYSTEM HARDENING mission, Issue 3 (correlation/traceability):
+    # the decision_id must flow onto the resulting Signal so a real,
+    # live-generated paper order can be traced back to the Decision that
+    # produced it -- a real gap this same mission found and closed.
+    decision = _decision(DecisionLabel.BUY)
+    signal = build_signal_for_buy(decision, _market_context())
+    assert signal.decision_id == "dec-1" == decision.decision_id
+
+
 @pytest.mark.parametrize("label", [DecisionLabel.WATCH, DecisionLabel.AVOID, DecisionLabel.EXIT, DecisionLabel.NO_ACTION])
 def test_build_signal_for_buy_rejects_every_non_buy_label(label):
     decision = _decision(label)

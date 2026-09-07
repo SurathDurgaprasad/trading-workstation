@@ -63,6 +63,23 @@ class Signal(BaseModel):
     risk_reward: float = Field(gt=0)
     strategy_name: str
     reason_codes: list[ReasonCode]
+    decision_id: str | None = Field(
+        default=None,
+        description=(
+            "LIVE SYSTEM HARDENING mission, Issue 3 (correlation/traceability) -- the "
+            "decision_engine.models.Decision.decision_id this signal was built for, when it came "
+            "from that path (risk.sizing.build_signal_for_buy). None for a signal that never went "
+            "through decision_engine (e.g. a plain strategy.contracts.Strategy in live/pipeline.py's "
+            "LiveSimPipeline, or a backtest) -- honestly absent, never fabricated. Optional/additive: "
+            "every pre-existing persisted Signal (paper/store.py's own model_dump_json() rows) "
+            "deserializes with decision_id=None automatically, no migration needed. This is the "
+            "smallest correlation key that closes a REAL, live-confirmed gap: a real paper "
+            "JournalEntry had no stored link back to the Decision/PredictionRecord that produced it "
+            "-- decision_id, already present on both Decision and PredictionRecord, now also flows "
+            "through Signal -> JournalEntry (paper/models.py), making it the de facto correlation ID "
+            "across the whole chain without inventing a second, parallel ID scheme."
+        ),
+    )
 
     def stable_id(self) -> str:
         """A deterministic identity for THIS exact signal occurrence — same

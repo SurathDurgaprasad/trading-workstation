@@ -162,6 +162,7 @@ class PaperTradingEngine:
                 execution_model_version=EXECUTION_MODEL_VERSION,
                 created_at=now,
                 updated_at=now,
+                decision_id=signal.decision_id,
             )
 
             # Step 6: one open position per symbol. RiskEngine's own

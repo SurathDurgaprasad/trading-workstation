@@ -76,6 +76,7 @@ def build_signal_for_buy(decision: Decision, market_context: MarketContext) -> S
         risk_reward=TARGET_RISK_REWARD,
         strategy_name="decision_engine_buy_bridge",
         reason_codes=[ReasonCode.DECISION_ENGINE_SCORED],
+        decision_id=decision.decision_id,
     )
 
 

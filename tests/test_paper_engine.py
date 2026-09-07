@@ -39,6 +39,44 @@ def test_submit_signal_creates_a_pending_order(engine):
     assert order.status == OrderStatus.PENDING
 
 
+# --- decision_id correlation (LIVE SYSTEM HARDENING mission, Issue 3) -------
+
+
+def test_submit_signal_with_no_decision_id_is_honestly_none(engine):
+    # A signal that never went through decision_engine (e.g. a plain
+    # Strategy in live/pipeline.py) must carry decision_id=None through
+    # to the journal entry -- never fabricated.
+    journal = engine.submit_signal(_signal())
+    assert journal.decision_id is None
+
+
+def test_submit_signal_carries_the_decision_id_into_the_journal_entry(engine):
+    journal = engine.submit_signal(_signal(decision_id="dec-live-123"))
+    assert journal.decision_id == "dec-live-123"
+
+    # Re-read from the store fresh (not the in-memory return value) --
+    # proves it is genuinely PERSISTED, not just present on this one object.
+    reloaded = engine.store.find_journal_entry_by_signal_id(_signal(decision_id="dec-live-123").stable_id())
+    assert reloaded is not None
+    assert reloaded.decision_id == "dec-live-123"
+
+
+def test_decision_id_survives_a_fill_and_close_lifecycle(engine):
+    # The two journal.model_copy(update={...}) calls in paper/engine.py
+    # (on fill, on close) must preserve decision_id -- it is never one of
+    # the fields those updates explicitly override.
+    engine.submit_signal(_signal(decision_id="dec-live-456", stop_price=95.0, target_price=110.0))
+    engine.process_bar("TEST", Bar(timestamp=datetime(2026, 1, 2), open=101.0, high=101.5, low=100.5, close=101.0))
+    journal = engine.store.find_journal_entry_by_signal_id(_signal(decision_id="dec-live-456").stable_id())
+    assert journal.outcome == JournalOutcome.APPROVED_FILLED_OPEN
+    assert journal.decision_id == "dec-live-456"
+
+    engine.process_bar("TEST", Bar(timestamp=datetime(2026, 1, 3), open=101.0, high=120.0, low=100.0, close=115.0))
+    journal = engine.store.find_journal_entry_by_signal_id(_signal(decision_id="dec-live-456").stable_id())
+    assert journal.outcome == JournalOutcome.APPROVED_FILLED_CLOSED
+    assert journal.decision_id == "dec-live-456"
+
+
 def test_pending_order_fills_at_the_next_bars_open_not_the_signal_bars_price(engine):
     engine.submit_signal(_signal(reference_price=100.0))
     engine.process_bar("TEST", Bar(timestamp=datetime(2026, 1, 2), open=103.0, high=103.5, low=102.5, close=103.2))

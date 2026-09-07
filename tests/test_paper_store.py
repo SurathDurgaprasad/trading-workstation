@@ -73,3 +73,37 @@ def test_successful_transaction_actually_commits(monkeypatch):
     engine.submit_signal(_signal())
     assert store.get_pending_order("TEST") is not None
     assert store.get_signal(_signal().stable_id()) is not None
+
+
+# --- decision_id backward compatibility (LIVE SYSTEM HARDENING mission) -----
+
+
+def test_journal_entry_deserializes_an_old_pre_decision_id_json_blob():
+    """A row persisted before this mission added JournalEntry.decision_id
+    has no `decision_id` key in its stored data_json at all -- must
+    deserialize cleanly with decision_id=None, not raise a validation
+    error. Simulates that exact old shape directly (no migration script
+    exists or is needed, matching this project's own established
+    additive-optional-field convention)."""
+    from paper.models import JournalEntry, JournalOutcome
+
+    old_style_json = (
+        '{"journal_entry_id": "j1", "signal_id": "s1", "symbol": "TEST", '
+        '"risk_decision_id": "r1", "order_id": "o1", "position_id": null, "trade_id": null, '
+        '"outcome": "APPROVED_PENDING", "strategy_name": "unit-test", "strategy_version": "1.0", '
+        '"risk_config_version": "cfg1", "execution_model_version": "1.0", '
+        '"created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}'
+    )
+    entry = JournalEntry.model_validate_json(old_style_json)
+    assert entry.decision_id is None
+    assert entry.outcome == JournalOutcome.APPROVED_PENDING
+
+
+def test_signal_deserializes_an_old_pre_decision_id_json_blob():
+    old_style_json = (
+        '{"symbol": "TEST", "generated_at": "2026-01-01T00:00:00", "side": "LONG", '
+        '"reference_price": 100.0, "stop_price": 95.0, "target_price": 110.0, "risk_reward": 2.0, '
+        '"strategy_name": "unit-test", "reason_codes": ["TREND_CONFIRMED"]}'
+    )
+    signal = Signal.model_validate_json(old_style_json)
+    assert signal.decision_id is None

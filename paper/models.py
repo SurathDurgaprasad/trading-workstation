@@ -141,3 +141,10 @@ class JournalEntry(BaseModel):
     execution_model_version: str
     created_at: datetime
     updated_at: datetime
+    decision_id: str | None = None
+    """LIVE SYSTEM HARDENING mission, Issue 3 -- carried forward verbatim
+    from Signal.decision_id (see that field's own docstring for the full
+    rationale). None for a journal entry whose originating signal never
+    went through decision_engine. Optional/additive: every pre-existing
+    persisted JournalEntry deserializes with decision_id=None, no
+    migration needed."""
