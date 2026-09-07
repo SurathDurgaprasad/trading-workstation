@@ -119,6 +119,26 @@ def test_h_relstrength_001_is_rejected_with_a_reversed_dose_response():
     assert "REVERSED" in h.evidence
 
 
+def test_h_breakout_001_is_rejected_with_context_filters_making_it_worse():
+    """BUILD THE REAL TRADING BRAIN mission, Family C (breakout quality)
+    -- the last of the four named families. All three candidates
+    REJECTED/NEGATIVE, and notably the volume-confirmation candidate
+    (C) performs WORSE than the raw, unfiltered breakout (A) -- the
+    reverse of the hypothesis's own predicted effect, stated honestly
+    rather than omitted, matching H_RELSTRENGTH_001's own reversed-
+    dose-response pattern."""
+    registry = build_hypothesis_registry()
+    h = next(h for h in registry if h.hypothesis_id == "H_BREAKOUT_001")
+
+    assert h.status == HypothesisStatus.REJECTED
+    assert "REJECTED" in h.evidence
+    # Spot-check the real, actually-measured figures are present verbatim.
+    assert "313/111/123" in h.evidence
+    assert "139/76/79" in h.evidence
+    assert "136/44/57" in h.evidence
+    assert "REVERSED" in h.evidence
+
+
 def test_h_entry_004_is_rejected_with_the_real_dev_val_oos_evidence():
     """BUILD THE REAL TRADING BRAIN mission: the momentum-acceleration
     candidates (strategy/momentum_acceleration.py) were run through the

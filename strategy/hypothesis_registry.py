@@ -543,4 +543,69 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "own dataset_restrictions for why), which remains a genuinely open question."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_BREAKOUT_001",
+            description=(
+                "A Donchian-style breakout (close exceeds the prior 20-bar high) shows better forward continuation "
+                "when accompanied by CONTEXT -- prior volatility contraction, or volume expansion on the breakout "
+                "bar -- than a raw, unfiltered breakout."
+            ),
+            rationale=(
+                "Family C (breakout quality) per the BUILD THE REAL TRADING BRAIN mission's own explicit family "
+                "list: 'Test whether BREAKOUT + CONTEXT + LIQUIDITY + VOLATILITY produces better results than raw "
+                "breakout.' A volatility squeeze preceding a breakout (the premise behind Bollinger/TTM squeeze "
+                "indicators) and volume confirmation on the breakout bar itself are both commonly cited as "
+                "distinguishing a genuine range expansion from a low-conviction false breakout."
+            ),
+            expected_effect=(
+                "Candidates with CONTEXT (B: preceded by volatility contraction, C: accompanied by volume "
+                "expansion) should show improved expectancy over the raw, unfiltered breakout (Candidate A)."
+            ),
+            dataset_restrictions="Same 41-symbol universe (32 NSE, 9 US), 5 years daily bars. LONG-only, matching every other strategy in this project.",
+            experiment_design=(
+                "quant_research/breakout_signal.py -- a STANDALONE Strategy (ignores SMA/RSI/MACD entirely) with "
+                "a new, genuinely causal Donchian-high column (highest HIGH of the PRIOR 20 bars, shift(1) before "
+                "rolling so today's own high never counts toward today's own ceiling) plus reuse of "
+                "atr_pct_of_price (quant_research/alpha_features.py) and volume_ratio (already standard in "
+                "market.indicators.compute_indicator_series's own output). Three a-priori candidates: "
+                "A_raw_breakout (the baseline this hypothesis's own B/C are measured against -- no context "
+                "filter), B_breakout_after_volatility_contraction (A AND atr_pct_of_price below its own trailing "
+                "60-bar median), C_breakout_with_volume_expansion (A AND volume_ratio>1.5 on the breakout bar -- "
+                "volume in a DIFFERENT role than H_ENTRY_002's own already-tested, already-REJECTED trend-"
+                "continuation filter use). Exit structure reuses TrendMomentumBaseline's own frozen stop/target, "
+                "isolating the entry signal only. Run via run_universe_breakout_experiment() -- a self-contained "
+                "fetch/compute/split/run loop, same reason as every other new-family runner this session."
+            ),
+            success_criteria="B and/or C show a confident POSITIVE_PERFORMANCE verdict (all three splits) with sufficient sample size, and outperform A (the context genuinely adds value).",
+            failure_criteria="Any candidate shows a confident NEGATIVE_PERFORMANCE verdict, or B/C show no improvement over A.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Run against the real 41-symbol universe, all 41 backtested successfully (0 failed). "
+                "A_raw_breakout (313/111/123 dev/val/oos trades): development expectancy -0.49% (mean-return 95% "
+                "CI [-0.95%, -0.02%], entirely negative) -> NEGATIVE_PERFORMANCE. Validation -0.38%, out-of-sample "
+                "-0.56%, both STATISTICALLY_MEANINGLESS but still negative point estimates. PROMOTION VERDICT: "
+                "NEGATIVE. "
+                "B_breakout_after_volatility_contraction (139/76/79 trades): development -0.49%, validation "
+                "-0.28%, out-of-sample -0.65% -- all three negative point estimates, none confidently so "
+                "(STATISTICALLY_MEANINGLESS throughout). REJECTED (mixed) -- essentially IDENTICAL to A's own "
+                "development expectancy, not an improvement. "
+                "C_breakout_with_volume_expansion (136/44/57 trades): development expectancy -0.86% (CI [-1.54%, "
+                "-0.17%]) -> NEGATIVE_PERFORMANCE, the WORST of the three candidates. PROMOTION VERDICT: NEGATIVE. "
+                "Bonferroni correction (family_size=3, out-of-sample returns, corrected z=2.394): no candidate "
+                "survives as positive. "
+                "NOTABLE FINDING, stated honestly rather than omitted: the hypothesis's own expected effect (B/C "
+                "context should IMPROVE on A's raw breakout) is REVERSED -- B is statistically indistinguishable "
+                "from A, and C (volume-confirmed breakout) is measurably WORSE than A, not better. Neither "
+                "'quiet before the breakout' nor 'real participation on the breakout bar' rescues the underlying "
+                "signal; if anything the volume-confirmation filter selects a WORSE subset. REJECTED across all "
+                "three candidates. "
+                "CROSS-HYPOTHESIS PATTERN worth naming explicitly: this is the THIRD of this session's four new "
+                "hypotheses (alongside H_ENTRY_002/004 and H_RELSTRENGTH_001) where 'buying into strength' -- by "
+                "trend+volume confirmation, momentum acceleration, relative strength, or now breakout -- shows a "
+                "confidently negative or reversed-from-expected result on this specific 41-symbol/5-year dataset, "
+                "while H_MEANREV_001 (buying weakness) was merely directionless, not negative. Stated as an "
+                "honest observation across this session's own evidence, not a new claim requiring its own "
+                "dedicated statistical test."
+            ),
+        ),
     )
