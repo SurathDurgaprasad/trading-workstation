@@ -154,6 +154,15 @@ per-reason bad-tick counts. Clock skew now carries its own
 "measured at" timestamp, so staleness of the measurement itself is
 honest, not just staleness of the underlying data.
 
+No latency instrumentation exists anywhere in the pipeline (tick-received
+→ candle-completed → signal-generated → risk-evaluated timing is not
+measured at any stage — confirmed by search). Noted rather than built:
+this strategy trades 1-minute candles, not sub-second moves, so latency
+in the hundreds-of-milliseconds-to-seconds range this pipeline actually
+operates in has no material bearing on correctness or safety for this
+specific system — building instrumentation for it now would be effort
+disproportionate to its value here, not an oversight.
+
 Gap found this session: when the critic *does* run (`shadow-run` only),
 its per-check HARD/SOFT breakdown is tallied into an in-memory
 run-level summary but never persisted per-decision alongside the
