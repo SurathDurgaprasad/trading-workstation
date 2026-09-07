@@ -22,12 +22,22 @@ from market_data.quality import SourceStatus
 class _FakeStreamingSource:
     """Matches live.contracts.MarketDataSource exactly."""
 
-    def __init__(self):
+    def __init__(self, connect_after_calls: int | None = None):
         self.subscribed: list[tuple[list[str], str]] = []
         self.closed = False
         self._connected = True
         self._queue: list[MarketBarEvent | object | None] = []
         self._raise_disconnected = False
+        self._connect_after_calls = connect_after_calls
+        """LIVE SYSTEM HARDENING mission: simulates a real, ASYNCHRONOUS
+        connection -- is_connected() returns False for this many calls,
+        then True forever after, mirroring a real WebSocket handshake
+        that completes a moment after subscribe() returns rather than
+        instantly. None (default) preserves the original fake's
+        always-whatever-was-set behavior."""
+        self._is_connected_calls = 0
+        if connect_after_calls is not None:
+            self._connected = False
 
     def subscribe(self, symbols, interval):
         self.subscribed.append((list(symbols), interval))
@@ -43,6 +53,9 @@ class _FakeStreamingSource:
         return NO_NEW_BAR
 
     def is_connected(self):
+        self._is_connected_calls += 1
+        if self._connect_after_calls is not None and self._is_connected_calls > self._connect_after_calls:
+            self._connected = True
         return self._connected
 
     def set_connected(self, value: bool):
@@ -136,6 +149,79 @@ def test_streaming_adapter_close_delegates_to_the_underlying_source():
     adapter = StreamingSnapshotAdapter(source, interval="1m")
     adapter.close()
     assert source.closed is True
+
+
+# --- StreamingSnapshotAdapter: warmup_seconds (LIVE SYSTEM HARDENING mission) --
+#
+# Real live-market finding: a real shadow-run reported "0/3 live quote
+# overlays succeeded". Reproduced live (instrumented get_snapshot() calls
+# against the real Dhan feed) and root-caused to a pure timing gap: a
+# real WebSocket connection is asynchronous, and a freshly-subscribed
+# symbol's first tick is not reliably available within a single,
+# unbudgeted poll. Given a real, bounded warm-up wait, live data
+# consistently succeeded. These tests prove the fix without any real
+# network dependency, using a fake source that simulates the same
+# asynchronous-connection shape.
+
+
+def test_warmup_zero_by_default_reproduces_original_instant_behavior():
+    # No warmup_seconds passed at all -- must be indistinguishable from
+    # the pre-fix adapter: instant NO_DATA, no waiting.
+    source = _FakeStreamingSource()
+    adapter = StreamingSnapshotAdapter(source, interval="1m")
+    import time as _time
+
+    t0 = _time.monotonic()
+    snapshot = adapter.get_snapshot("RELIANCE.NS")
+    assert _time.monotonic() - t0 < 0.05  # effectively instant
+    assert snapshot.health.status == SourceStatus.NO_DATA
+
+
+def test_warmup_waits_for_an_asynchronous_connection_to_complete():
+    # Source is not yet connected on the first couple of polls (a real
+    # WebSocket handshake in flight) but has a bar queued and waiting --
+    # a bounded warm-up wait must let the connection catch up rather
+    # than giving up immediately as DISCONNECTED.
+    source = _FakeStreamingSource(connect_after_calls=2)
+    now = datetime.now(timezone.utc)
+    source.queue_bar("RELIANCE.NS", _bar(now, close=1318.5))
+    adapter = StreamingSnapshotAdapter(source, interval="1m", warmup_seconds=2.0, warmup_poll_seconds=0.02)
+
+    snapshot = adapter.get_snapshot("RELIANCE.NS")
+
+    assert snapshot.health.status == SourceStatus.HEALTHY
+    assert snapshot.latest_bar.close == 1318.5
+
+
+def test_warmup_gives_up_after_its_budget_and_reports_no_data():
+    # Connection never completes within the budget -- must give up
+    # cleanly (DISCONNECTED, since is_connected() never becomes True)
+    # rather than hanging indefinitely.
+    source = _FakeStreamingSource(connect_after_calls=10_000)  # effectively never, within this test's budget
+    adapter = StreamingSnapshotAdapter(source, interval="1m", warmup_seconds=0.15, warmup_poll_seconds=0.02)
+    import time as _time
+
+    t0 = _time.monotonic()
+    snapshot = adapter.get_snapshot("RELIANCE.NS")
+    elapsed = _time.monotonic() - t0
+
+    assert snapshot.health.status == SourceStatus.DISCONNECTED
+    assert elapsed < 0.5  # bounded -- did not hang past its own budget by an unreasonable margin
+
+
+def test_warmup_only_applies_to_a_symbols_own_first_call():
+    # A second get_snapshot() call for an ALREADY-subscribed symbol must
+    # not re-invoke the warm-up wait -- matches the existing "subscribe
+    # lazily, only once" contract exactly.
+    source = _FakeStreamingSource(connect_after_calls=10_000)
+    adapter = StreamingSnapshotAdapter(source, interval="1m", warmup_seconds=0.15, warmup_poll_seconds=0.02)
+    adapter.get_snapshot("RELIANCE.NS")  # pays the warm-up cost once
+
+    import time as _time
+
+    t0 = _time.monotonic()
+    adapter.get_snapshot("RELIANCE.NS")  # must NOT pay it again
+    assert _time.monotonic() - t0 < 0.05
 
 
 # --- YahooSnapshotAdapter -------------------------------------------------
