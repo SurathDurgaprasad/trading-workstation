@@ -1,5 +1,17 @@
 # Live System Hardening — Final Report
 
+**Update (same day, continuation session): EXECUTION SAFETY + REAL MARKET
+INTELLIGENCE HARDENING mission.** Sections 1–13 below are the original
+report, unchanged. This update adds Part II, covering five further
+commits landed the same day after market close: wiring the deterministic
+critic into `paper-live`, threading real benchmark context into
+`shadow-run`'s critic call, dashboard visibility for connection/
+staleness health, a real corporate-actions provider, and a deterministic
+event-risk assessment module. See Part II's own executive verdict for
+the updated picture — it does not repeat Part I's findings, only what
+changed.
+
+
 Continuous, adversarial audit-and-fix session against the live Dhan
 paper-trading pipeline, conducted with real credentials during a real
 NSE session (2026-09-07, Monday). Every claim below is labeled by its
@@ -308,3 +320,272 @@ gate a real decision, and that is a choice for the user to make
 deliberately, not one to make unilaterally under time pressure. If the
 system cannot yet be fully trusted in those specific, named ways, this
 report says so plainly rather than implying otherwise.
+
+---
+
+# Part II — Execution Safety + Real Market Intelligence Hardening
+
+Continuation, same day, after market close (NSE closed 15:30 IST; this
+work is entirely offline — no live Dhan session was open while it was
+built). Verified against actual repository state before touching
+anything, per this mission's own explicit instruction, not against
+memory of the prior session.
+
+## 14. Executive Verdict (Part II)
+
+- **PLATFORM TRUST: B+ — MOSTLY RELIABLE, ONE NAMED GAP CLOSED.** The
+  single most consequential finding from Part I — `paper-live
+  --auto-approve` could execute unattended with risk.engine as the only
+  gate — is now closed. The critic runs by default for `--source dhan`
+  and independently re-examines every live-generated BUY signal against
+  real scanner and market-context evidence before risk sizing even runs.
+  Not a full letter grade jump to A: the critic's rule set is exactly
+  what Part I already knew (kill switch, duplicate exposure, structure,
+  evidence completeness, regime conflict, ...), and event risk — a real,
+  tested, new capability — is deliberately not yet wired into anything
+  that can block a trade.
+- **DATA TRUST: C — unchanged from Part I.** Nothing about live price
+  data changed this session; the connection-state richness fix and
+  dashboard health composite are visibility improvements over the same
+  underlying data, not new data.
+- **STRATEGY TRUST: F by design — unchanged, untouched.**
+- **MARKET INTELLIGENCE TRUST: C — WORKING BUT SIGNIFICANT GAPS (new
+  grade, per this mission's own instruction to report it separately).**
+  Real progress from a standing start: corporate actions (dividends,
+  splits, forward earnings estimate) and India VIX are now confirmed,
+  live-verified, available through the same `yfinance` dependency this
+  project already trusts — zero new external risk. But NSE/BSE bulk &
+  block deals, ASM/GSM surveillance status, and SEBI regulatory
+  circulars remain entirely unavailable (no fabricated substitute was
+  built for any of them), and none of what IS now available — corporate
+  actions, event risk, benchmark regime — reaches a real paper-trading
+  decision yet except benchmark regime via the critic's own
+  `REGIME_CONFLICT` check.
+
+These four scores are reported separately, as before, and must never be
+averaged into one number.
+
+## 15. What Was Found
+
+1. **`LiveSimPipeline` never constructed a `decision_engine.models.
+   Decision` at all** — confirmed by reading `live/pipeline.py` before
+   changing it, not assumed from Part I's own summary. It calls
+   `strategy.generate_signal()` directly; no scanner evidence, no
+   `decision_engine`-shaped market context, nothing `critic.engine.
+   evaluate()` requires ever existed on that path.
+2. **`decision_engine.rules.classify()`'s label is independent of any
+   live strategy's own signal** — it derives BUY/WATCH/AVOID/NO_ACTION
+   purely from scanner `candidate`/`risk_context`. Calling
+   `decision_engine.engine.make_decision()` from inside the live
+   pipeline could have silently produced a DIFFERENT label than the BUY
+   the live strategy already, separately decided — and
+   `critic.engine.evaluate()` raises if `label != BUY`. This is why
+   `live/critic_gate.py` builds its `Decision` directly instead.
+3. **Scanner evidence requires its own historical fetch**, incompatible
+   with per-live-tick computation (confirmed by reading `market_intelligence.
+   scanner._screen_symbol`, which calls `provider.fetch_ohlcv` itself,
+   ignoring whatever indicator series the caller already has) — this is
+   why `CriticGate` refreshes evidence on a bounded 15-minute timer
+   rather than every bar.
+4. **`shadow-run`'s own critic call never passed `benchmark_context`**,
+   despite the parameter existing since the critic was first built —
+   confirmed by reading the exact call site, not inferred.
+5. **`LiveSimPipeline` only ever asked `is_connected()` (a bool)**,
+   collapsing a richer connection state some sources track internally
+   down to CONNECTED/DISCONNECTED before it ever reached `feed_status`
+   or the dashboard.
+6. **NSE, BSE, and SEBI have no officially-documented, self-service
+   developer API** for corporate announcements, bulk/block deals,
+   ASM/GSM surveillance status, or regulatory circulars — real web
+   research (not assumption), confirmed the same conclusion from three
+   independent searches: official access, where it exists at all, runs
+   through licensed data vendors, not a public endpoint. NSE/BSE do
+   publish some of this on their own public web pages, which is a
+   different, higher-risk category (no documented terms for
+   programmatic access) this project has consistently declined to
+   scrape, and continues to decline.
+7. **`yfinance` — already a direct dependency this project trusts for
+   price history, news, and sector data — exposes real dividend
+   history, split history, a forward earnings-date estimate, AND India
+   VIX (`^INDIAVIX`)**, all confirmed via real, live calls against this
+   project's own existing `YahooFinanceProvider`/`yf.Ticker`, not
+   assumed from documentation.
+8. **The critic's assessment is persisted for rejected signals but not
+   for approved ones** passing through `paper-live` — the trade itself
+   stays fully traceable via existing `decision_id`/`signal_id`
+   machinery; the critic's own specific verdict for that one trade
+   simply isn't additionally persisted. A real, minor, honestly-named
+   gap, not a broken chain.
+9. **The learning/promotion pipeline is genuinely human-gated** —
+   verified by reading `learning/adaptation.py` and its one real caller
+   in `main.py` directly: `compare_and_recommend` never touches any
+   config file, is reachable only through a manual CLI command
+   (`experiment recommend`) requiring explicit human-supplied experiment
+   IDs, and prints "ADVISORY ONLY, NO CONFIGURATION IS CHANGED". The
+   scheduler never calls it (confirmed: zero references in
+   `scheduler/runner.py`).
+10. **Clock-skew consequences separate cleanly into two categories**:
+    comparisons entirely within the local clock (age calculations,
+    internal lifecycle durations, dashboard "Data Age") are self-
+    consistent and immune to skew, since both sides of the comparison
+    share the same bias. Skew only matters where a local timestamp is
+    compared against something external — confirmed one concrete,
+    previously-undocumented instance: `scheduler/runner.py`'s `run_tick`
+    uses real local wall-clock time (`datetime.now(IST)`) against a
+    configured schedule, so a scheduled run fires ~130s late relative to
+    the operator's real-world intent. Candle boundaries are provably
+    unaffected (bucketing uses the tick's own exchange timestamp, never
+    local receipt time — unchanged from Part I's own finding).
+
+## 16. What Was Actually Broken
+
+- The core gap this mission was created to close: `paper-live
+  --auto-approve` could run fully unattended with `risk.engine` as the
+  only gate between a live-generated signal and a real (paper) order —
+  confirmed, then fixed (§17).
+- A real bug in the new event-risk module, caught by its own test suite
+  before commit, never shipped: the `UPCOMING_EARNINGS` check hardcoded
+  `UNKNOWN` when corporate-actions evidence was unavailable, ignoring
+  the caller's own configured `treat_missing_corporate_actions_as`
+  policy — inconsistent with the sibling `CORPORATE_ACTIONS_AVAILABILITY`
+  check, which respected it correctly. Fixed same-session; both checks
+  now honor the same policy.
+
+## 17. What Was Fixed (5 commits, `74b1846` → `d34c3e0`)
+
+| # | Commit | What | Evidence |
+|---|---|---|---|
+| 1 | `74b1846` | `shadow-run` now computes real `benchmark_context` once per run and passes it into the existing critic call | INTEGRATION TEST: a new test forces a real (fake-provider) benchmark fetch and confirms `REGIME_CONFLICT` flips from "not evaluated" to evaluated |
+| 2 | `498e18f` | `live/critic_gate.py` (new) bridges `LiveSimPipeline`'s live signals to `critic.engine.evaluate()` with real, independently-fetched scanner/market-context evidence; wired into `paper-live` by default for `--source dhan` (`--skip-critic` opts out); a blocking verdict (REJECT/INSUFFICIENT_EVIDENCE) prevents any paper order and is persisted (new `critic_rejections` table) and shown on the dashboard | UNIT TEST (9 tests against real `run_scan`/`compute_benchmark_context` with a fake provider) + INTEGRATION TEST (5 tests proving the pipeline wiring blocks/passes correctly) + full regression (1589 passed) |
+| 3 | `f119a65` | `LiveSimPipeline._connection_state_label()` surfaces a richer connection state when a source exposes one (soft capability check, zero effect on sources that don't); dashboard's new `_data_health_label()` composes CONNECTED/DEGRADED/STALE/RECONNECTING/DISCONNECTED/SOURCE_UNAVAILABLE from existing `feed_status` fields, display-only, honestly documented as an approximation | UNIT TEST (7 tests covering every state + boundary conditions) + full regression (1596 passed) |
+| 4 | `100e3d7` | `market_intelligence/corporate_actions.py` (new): real dividend/split/earnings-estimate data via `yfinance` | UNIT TEST (6 tests, fake `yf.Ticker`) + REAL LIVE DATA (verified against RELIANCE.NS: real 2024/2025/2026 dividends, real splits, real 2026-10-16 earnings estimate) |
+| 5 | `d34c3e0` | `market_intelligence/event_risk.py` (new): deterministic ALLOW/CAUTION/BLOCK/UNKNOWN assessment from corporate-actions evidence, policy-configurable, never silently treats missing evidence as safe | UNIT TEST (13 tests, one real bug found and fixed before commit) |
+
+## 18. What Was Deliberately Not Fixed
+
+- **Event risk is not wired into `live/critic_gate.py` or `paper-live`'s
+  blocking path.** `paper-live` already gained one new blocking layer
+  (the critic) this session, with its own dedicated regression cycle.
+  Adding event risk as a *second* new blocking layer to live execution
+  in the same pass — on a still-narrow rule set, since Part 4's own
+  audit found only earnings-date proximity as a real, reliable,
+  forward-looking signal — was deferred rather than rushed. The module
+  is complete, real, and tested; wiring it in is a small, well-defined
+  follow-up, not a redesign.
+- **India VIX is not wired into `market_intelligence/regime.py`'s
+  volatility read.** Confirmed real and fetchable; `compute_benchmark_context`
+  still derives `volatility_regime` from the trend-benchmark's own ATR,
+  not a direct VIX read. A genuine design choice (which volatility
+  measure to trust more, and how to combine them) deserves more
+  consideration than this session had budget for — documented, not
+  hidden.
+- **Bulk/block deals, ASM/GSM surveillance, SEBI circulars, and official
+  NSE/BSE announcements remain entirely unbuilt.** No real,
+  officially-sanctioned, low-risk source was found for any of them this
+  session. `market_intelligence/event_risk.py`'s own docstring states
+  this explicitly: a future check for any of these categories should
+  raise the same honest "not evaluated" this module already uses for
+  corporate actions, never invent a verdict from nothing.
+- **The critic's assessment is not persisted for approved signals**,
+  only rejected ones (§15, item 8) — the safety-critical case is fully
+  covered; extending persistence to the approved case is a nice-to-have,
+  not a blocking traceability failure, and was not built to keep this
+  session's scope from creeping into a fourth new table.
+- **`FreshnessPolicy`'s own enforcement threshold was not changed.** The
+  dashboard's new DEGRADED/STALE distinction is display-only, explicitly
+  documented as an approximation (feed_status does not record which
+  interval a symbol runs at) — it does not become a second, competing
+  gate against the one that already exists and is already proven live
+  (§12's own `STALE_SIGNAL_SUPPRESSED` event, Part I).
+
+## 19. What Remains Unproven
+
+- **The critic in `paper-live` has not yet been exercised against a real
+  live Dhan session.** Built, unit-tested, integration-tested, and
+  regression-clean — but the market was closed (15:30 IST) before this
+  work landed. Genuinely PARTIALLY PROVEN, not PROVEN, stated as such.
+- **The richer connection-state surfacing has only been proven with a
+  simulated `RECONNECTING` value** (a real capability the mock source
+  does not naturally have, set directly on the test double) — not yet
+  observed from an actual Dhan reconnect event, for the same reason (no
+  live session ran after this landed).
+- **The corporate-actions provider and event-risk module have real live
+  verification for their own data fetch** (§17, row 4) but have never
+  been exercised end-to-end inside an actual live paper-trading loop,
+  since neither is wired into one yet.
+
+## 20. Test Results
+
+1561 → **1615 passed, 0 failed** across the 5 commits in §17, full
+regression clean at the two commits that touched the live execution
+path (critic gate: 1589 passed; connection-state/dashboard: 1596
+passed) and a final milestone full regression after all five landed
+(1615 passed, exactly matching total test collection — nothing skipped,
+nothing uncounted). Safety suite (`test_dhan_no_real_orders.py`,
+`test_broker.py`) green at every commit.
+
+## 21. For the Next Live Market Session
+
+Per this mission's own instruction: do not force trades, do not loosen
+thresholds to generate activity. A successful validation can legitimately
+produce zero signals and zero trades — that remains valid evidence.
+Specifically capture, with real evidence:
+
+- Does `paper-live --source dhan` print `DETERMINISTIC CRITIC: ACTIVE`
+  at startup, and does a real critic evaluation actually occur for any
+  signal the live strategy generates?
+- If a signal is critic-rejected, does it appear correctly in the
+  dashboard's CRITIC REJECTIONS table with a real, accurate reason?
+- If a signal passes the critic and proceeds, does the rest of the
+  chain (risk → approval → paper execution) work exactly as it did
+  before this session, unaffected?
+- Does `feed_status.connection_state` show a real, richer value (not
+  just CONNECTED/DISCONNECTED) if any connection hiccup occurs, and does
+  the dashboard's Data Health column reflect it correctly?
+- Does the deep readiness check / session startup still correctly
+  measure and report clock skew, unaffected by any of this session's
+  changes?
+
+## 22. Final Answer — the Mission's Own Nine Questions
+
+1. **Can the platform safely operate as an autonomous PAPER trading
+   system?** More safely than at the start of this mission: unattended
+   `paper-live` now has a real, independent, deterministic check before
+   risk sizing, not just risk.engine alone. Not fully proven yet — the
+   critic has no live-session evidence behind it.
+2. **Can it receive and correctly distinguish real-time market data,
+   live price, partial candles, and completed candles?** Yes — proven in
+   Part I, unchanged this session.
+3. **Can it safely degrade when live data fails?** The real enforcement
+   (no new signals on stale data, bounded reconnect) was already real
+   and proven in Part I. This session added honest, better-labeled
+   operator visibility into that same degradation — not new enforcement.
+4. **Does every unattended paper trade pass deterministic critic +
+   market context + risk controls?** For `--source dhan` without
+   `--skip-critic` (the default): yes, structurally, as of this session
+   — pending live confirmation. Market context reaches the critic via
+   `REGIME_CONFLICT`; event risk does not yet reach any decision.
+5. **Does the system understand relevant market context rather than
+   only symbol-level candles?** More than at the start: benchmark regime
+   now reaches the critic in both `shadow-run` and `paper-live`. Still
+   narrow: no sector, breadth, or India-VIX-derived signal reaches a
+   real decision yet.
+6. **Does it have a reliable architecture for NSE/BSE/SEBI/corporate/
+   event intelligence?** Partially, and honestly scoped: corporate
+   actions and India VIX, yes, via a source this project already trusts.
+   Regulatory/surveillance/bulk-deal intelligence: no real source
+   exists, and none was fabricated.
+7. **Can every paper trade be traced from market data to final
+   evaluation?** Yes, for the core chain (decision_id/signal_id through
+   to JournalEntry/PredictionRecord, proven in Part I). One honest gap:
+   critic assessments for approved (non-rejected) live-pipeline signals
+   aren't additionally persisted.
+8. **Is learning measurement-driven rather than uncontrolled self-
+   modification?** Yes, verified directly in this session's own code
+   reading, not just trusted from a docstring — promotion is manual,
+   advisory, and never touches configuration.
+9. **What remains unsafe, unproven, or incomplete?** Named precisely in
+   §18 and §19 above, not summarized away: event risk unwired, India VIX
+   unwired, three whole intelligence categories genuinely unavailable,
+   and the critic/connection-state work awaiting its first real live
+   session.
