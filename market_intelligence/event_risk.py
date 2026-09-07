@@ -35,6 +35,20 @@ narrow rule set (earnings-date proximity is the only real, reliable,
 forward-looking signal Part 4 found), is deferred rather than rushed --
 this module is complete, real, and tested, ready to wire in as a
 follow-up once it has been reviewed on its own.
+
+KNOWN GAP, found via adversarial self-review of this module (found here,
+not fixed here -- this module is not live-wired, so the urgency that
+justified fixing the analogous gap in live/critic_gate.py's own evidence
+cache does not apply yet): `assess_event_risk` never checks how old
+`corporate_actions.as_of` is relative to `as_of` -- a caller could hand
+it a `CorporateActionsSnapshot` fetched hours or days ago and this
+module would evaluate it as if current, with no staleness check of its
+own (mirroring critic.engine.evaluate()'s own DATA_FRESHNESS check for
+`market_context.as_of`, which THIS module has no equivalent of). Before
+this module is wired into anything live, it should either gain that
+check directly or the caller supplying `corporate_actions` must be
+relied upon to enforce freshness itself -- a real design decision, not
+yet made.
 """
 
 from dataclasses import dataclass
