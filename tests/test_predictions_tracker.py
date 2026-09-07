@@ -166,6 +166,36 @@ def test_evaluate_prediction_stop_hit():
     assert evaluation.actual_return == pytest.approx(-0.05)
 
 
+def test_evaluate_prediction_with_a_timezone_aware_entry_time_does_not_crash():
+    # LIVE SYSTEM HARDENING mission: reproduces a REAL crash hit live
+    # today. When a live Dhan price overlay successfully attaches,
+    # market.context._apply_live_overlay sets context.as_of to the
+    # live bar's own timestamp -- which live/dhan/market_data_source.py's
+    # _decode_last_trade_time always returns as tz-AWARE UTC. That value
+    # flows straight into Signal.generated_at -> PredictionRecord.entry_time.
+    # evaluate_prediction's own frame (from ohlcv.to_dataframe(), naive --
+    # matching Yahoo's own established naive-timestamp convention) then
+    # crashed comparing frame.index (naive datetime64) against a
+    # tz-AWARE entry_time: "Invalid comparison between dtype=datetime64[us]
+    # and datetime". Before this fix, this scenario was untested because
+    # every existing fixture's entry_time was naive (matching the
+    # NO-live-overlay case only) -- this test uses a tz-aware one, matching
+    # the real, live-observed case a successful overlay now produces more
+    # often (see this mission's own overlay warmup fix).
+    tz_aware_signal = Signal(
+        symbol="AAPL", generated_at=datetime(2024, 1, 2, 10, 0, 0, tzinfo=timezone.utc), side=Side.LONG,
+        reference_price=100.0, stop_price=95.0, target_price=110.0, risk_reward=2.0,
+        strategy_name="decision_engine_buy_bridge", reason_codes=[ReasonCode.DECISION_ENGINE_SCORED],
+    )
+    prediction = create_prediction(_decision(), tz_aware_signal, horizon_bars=5)
+    provider = _FakeProvider(_ohlcv("AAPL", [(101.0, 99.0), (112.0, 101.0)]))  # naive-indexed, like a real Yahoo fetch
+
+    evaluation = evaluate_prediction(prediction, provider=provider)  # must not raise
+
+    assert evaluation.outcome == PredictionOutcomeState.TARGET_HIT
+    assert evaluation.bars_observed == 1
+
+
 def test_evaluate_prediction_same_bar_ambiguity_reuses_check_exits_stop_wins_rule():
     # A single bar whose range spans BOTH target and stop -- proves this
     # module reuses backtesting.execution.check_exit's own conservative

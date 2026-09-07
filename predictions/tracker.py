@@ -110,7 +110,33 @@ def evaluate_prediction(
         )
 
     frame = ohlcv.to_dataframe()
-    subsequent = frame[frame.index > prediction.entry_time]
+    # LIVE SYSTEM HARDENING mission, real live-market finding: frame.index
+    # is always tz-NAIVE (market.data_provider's own established Yahoo
+    # convention -- see that module's own _to_timestamp), but
+    # prediction.entry_time can be tz-AWARE UTC when it was carried
+    # forward (Signal.generated_at -> PredictionRecord.entry_time) from a
+    # market.context market_context.as_of that a successful live Dhan
+    # price overlay set (live/dhan/market_data_source.py's own LTT decode
+    # always returns tz-aware UTC). Comparing the two directly crashes
+    # pandas outright (TypeError: Invalid comparison between
+    # dtype=datetime64[us] and datetime) -- reproduced live today once
+    # this mission's own overlay warmup fix made a successful overlay
+    # more common. Stripping tzinfo here (not converting) matches this
+    # project's own existing, already-documented naive-timestamp
+    # convention elsewhere (see market.data_provider._to_timestamp's own
+    # docstring) rather than inventing a second one -- an intentional,
+    # scoped fix for the crash, NOT a claim of full timezone precision:
+    # frame.index's naive values are exchange-local wall-clock digits,
+    # not UTC, so a tz-aware entry_time converted this way can be off by
+    # the exchange's own UTC offset (already a known, previously-flagged,
+    # unfixed limitation -- see docs/LIVE_MARKET_READINESS_REPORT.md
+    # section 2, "latent Yahoo timestamp footgun"). At the DAILY bar
+    # granularity every real caller of this function uses today, an
+    # offset of a few hours can only misclassify a bar right at a
+    # day-boundary edge case -- a real, disclosed residual risk, not a
+    # silent one.
+    entry_time = prediction.entry_time.replace(tzinfo=None) if prediction.entry_time.tzinfo is not None else prediction.entry_time
+    subsequent = frame[frame.index > entry_time]
 
     if subsequent.empty:
         return _evaluation(
