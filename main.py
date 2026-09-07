@@ -894,6 +894,37 @@ def _build_market_data_source(args: argparse.Namespace):
     return source, "MOCK (replaying cached history)", "SIMULATED"
 
 
+def _measure_and_persist_clock_skew_once(state_store) -> None:
+    """LIVE SYSTEM HARDENING mission, Part 11: `readiness-check --deep` is
+    something an operator has to remember to run; a real `paper-live
+    --source dhan` session should leave a FRESH clock-skew reading behind
+    on its own, at startup, so the dashboard's health section (reading
+    this same state_store, zero I/O) reflects the actual session in
+    progress rather than whatever a past manual readiness-check happened
+    to measure. Best-effort and non-fatal by design: a failure to measure
+    skew must never prevent an otherwise-healthy live session from
+    starting -- see live/dhan/clock_skew.py's own module docstring for
+    the real, live-confirmed ~130s skew this project already lives with
+    on this machine."""
+    from live.dhan.clock_skew import ClockSkewUnavailable, measure_clock_skew
+    from live.dhan.config import load_dhan_credentials
+
+    try:
+        credentials = load_dhan_credentials()
+        result = measure_clock_skew(credentials)
+    except ClockSkewUnavailable as exc:
+        print(f"CLOCK SKEW: could not measure ({exc}) -- dashboard will show the last known reading, if any.")
+        return
+    except Exception as exc:  # noqa: BLE001 -- must never block a live session from starting
+        print(f"CLOCK SKEW: could not measure ({type(exc).__name__}: {exc}) -- dashboard will show the last known reading, if any.")
+        return
+    print(f"CLOCK SKEW: [{result.classification}] {result.detail}")
+    state_store.save_clock_skew(
+        skew_seconds=result.skew_seconds, classification=result.classification,
+        detail=result.detail, measured_at=result.measured_at,
+    )
+
+
 def run_paper_live_command(args: argparse.Namespace) -> None:
     from live.freshness import FreshnessPolicy
     from live.pipeline import DEFAULT_APPROVAL_TIMEOUT_SECONDS, LiveSimPipeline
@@ -953,6 +984,7 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
             if session.holiday_calendar_consulted else "does NOT account for exchange holidays -- pass --schedule-config to cross-check"
         )
         print(f"MARKET SESSION: {session.state.value} (as of {session.as_of_ist.strftime('%H:%M:%S IST')}, {holiday_note})")
+        _measure_and_persist_clock_skew_once(state_store)
     print("This process places NO real orders and holds NO broker connection for execution.")
     if pipeline.is_kill_switch_active():
         print("\n*** KILL SWITCH ACTIVE *** -- no new signal will be approved or executed.")
@@ -2694,10 +2726,11 @@ def _run_deep_readiness_checks(*, deep_timeout_seconds: float, deep_symbol: str)
     finding here is REAL LIVE DATA evidence, not a simulation, if
     credentials are configured and a real session is reachable."""
     from datetime import datetime, timezone
-    from email.utils import parsedate_to_datetime
 
+    from live.dhan.clock_skew import ClockSkewUnavailable, measure_clock_skew
     from live.dhan.config import DhanCredentialsMissingError, load_dhan_credentials
     from live.dhan.rest_client import DhanRestClient, DhanRestError
+    from live.state_store import LiveStateStore
 
     try:
         credentials = load_dhan_credentials()
@@ -2706,38 +2739,24 @@ def _run_deep_readiness_checks(*, deep_timeout_seconds: float, deep_symbol: str)
         return
 
     try:
-        import requests
-
-        from live.dhan.config import DHAN_REST_BASE_URL
-
-        headers = {"Content-Type": "application/json", "access-token": credentials.access_token}
         before = datetime.now(timezone.utc)
-        response = requests.get(f"{DHAN_REST_BASE_URL}/fundlimit", headers=headers, timeout=10)
+        result = measure_clock_skew(credentials)
         after = datetime.now(timezone.utc)
-        if response.status_code < 200 or response.status_code >= 300:
-            print(f"[FAIL] Dhan REST connectivity: HTTP {response.status_code}")
+        if 200 <= result.http_status < 300:
+            print(f"[PASS] Dhan REST connectivity confirmed (real HTTP {result.http_status} from /fundlimit, round-trip {(after - before).total_seconds():.2f}s).")
         else:
-            print(f"[PASS] Dhan REST connectivity confirmed (real HTTP {response.status_code} from /fundlimit, round-trip {(after - before).total_seconds():.2f}s).")
-        server_date_header = response.headers.get("Date")
-        if server_date_header:
-            server_time = parsedate_to_datetime(server_date_header)
-            if server_time.tzinfo is None:
-                server_time = server_time.replace(tzinfo=timezone.utc)
-            midpoint_local = before + (after - before) / 2
-            skew_seconds = (midpoint_local - server_time).total_seconds()
-            if abs(skew_seconds) < 5:
-                print(f"[PASS] Clock skew: {skew_seconds:+.1f}s (local vs Dhan server time) -- within 5s tolerance.")
-            elif abs(skew_seconds) < 60:
-                print(f"[WARNING] Clock skew: {skew_seconds:+.1f}s (local vs Dhan server time) -- exceeds 5s. "
-                      f"Freshness/staleness checks on THIS machine are biased by this amount. Recommended: sync "
-                      f"this machine's clock (Windows: run 'w32tm /resync' as Administrator, or enable "
-                      f"'Set time automatically' in Settings). This is an environment issue, not application code.")
-            else:
-                print(f"[FAIL] Clock skew: {skew_seconds:+.1f}s (local vs Dhan server time) -- exceeds 60s, a full "
-                      f"candle interval. Freshness/staleness logic cannot be trusted on this machine until the "
-                      f"clock is corrected (see WARNING guidance above).")
-        else:
-            print("[WARNING] Could not measure clock skew -- no Date header in the Dhan REST response.")
+            print(f"[FAIL] Dhan REST connectivity: HTTP {result.http_status}")
+        print(f"[{result.classification}] Clock skew: {result.detail}")
+        state_store = LiveStateStore(DEFAULT_LIVE_STATE_DB_PATH)
+        try:
+            state_store.save_clock_skew(
+                skew_seconds=result.skew_seconds, classification=result.classification,
+                detail=result.detail, measured_at=result.measured_at,
+            )
+        finally:
+            state_store.close()
+    except ClockSkewUnavailable as exc:
+        print(f"[WARNING] Could not measure clock skew: {exc}")
     except Exception as exc:  # noqa: BLE001 -- a deep-check failure must be reported, never crash the whole command
         print(f"[FAIL] Dhan REST connectivity/clock-skew check raised {type(exc).__name__}: {exc}")
 

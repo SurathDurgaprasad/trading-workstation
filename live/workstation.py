@@ -186,6 +186,22 @@ def get_feed_status() -> list:
         state_store.close()
 
 
+def get_clock_skew():
+    """LIVE SYSTEM HARDENING mission, Part 11: returns
+    live.state_store.ClockSkewRecord, or None if no measurement has ever
+    been persisted (a fresh environment, or one where neither
+    `readiness-check --deep` nor a real `paper-live --source dhan`
+    session has ever run) -- never fabricated, matching get_feed_status()'s
+    own honesty rule. Read-only, local SQLite only: this function itself
+    makes no network call, so it is safe to call on every dashboard page
+    load."""
+    state_store = new_live_state_store()
+    try:
+        return state_store.get_clock_skew()
+    finally:
+        state_store.close()
+
+
 def approve_pending_signal(signal_id: str, reason: str | None = None) -> dict:
     state_store = new_live_state_store()
     try:

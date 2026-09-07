@@ -190,3 +190,43 @@ def test_feed_status_survives_a_reopened_connection(tmp_path):
     record = store2.get_feed_status("RELIANCE.NS")
     assert record is not None
     assert record.source == "DHAN"
+
+
+def test_get_clock_skew_returns_none_when_never_measured(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    assert store.get_clock_skew() is None
+
+
+def test_save_and_get_clock_skew(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    now = datetime.now(timezone.utc)
+    store.save_clock_skew(skew_seconds=-130.0, classification="FAIL", detail="-130.0s -- exceeds 60s", measured_at=now)
+    record = store.get_clock_skew()
+    assert record is not None
+    assert record.skew_seconds == -130.0
+    assert record.classification == "FAIL"
+    assert record.measured_at == now.isoformat()
+
+
+def test_save_clock_skew_overwrites_the_single_row_in_place(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    now = datetime.now(timezone.utc)
+    store.save_clock_skew(skew_seconds=-130.0, classification="FAIL", detail="first", measured_at=now)
+    later = now + timedelta(minutes=5)
+    store.save_clock_skew(skew_seconds=2.0, classification="PASS", detail="second", measured_at=later)
+    record = store.get_clock_skew()
+    assert record.classification == "PASS"
+    assert record.measured_at == later.isoformat()
+
+
+def test_clock_skew_survives_a_reopened_connection(tmp_path):
+    db_path = tmp_path / "state.db"
+    now = datetime.now(timezone.utc)
+    store1 = LiveStateStore(db_path)
+    store1.save_clock_skew(skew_seconds=-130.0, classification="FAIL", detail="d", measured_at=now)
+    store1.close()
+
+    store2 = LiveStateStore(db_path)
+    record = store2.get_clock_skew()
+    assert record is not None
+    assert record.skew_seconds == -130.0

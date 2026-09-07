@@ -137,6 +137,62 @@ def test_index_shows_real_feed_status_once_written(client):
     assert "CONNECTED" in response.text
 
 
+def test_clock_skew_banner_says_unknown_when_never_measured(client):
+    """LIVE SYSTEM HARDENING mission, Part 11: absence of a clock_skew row
+    must never be silently filled in with a fabricated 0.0s/PASS default
+    -- the dashboard must say it was never measured, matching the same
+    honesty rule feed_status already follows."""
+    response = client.get("/")
+    assert "Clock skew" in response.text
+    assert "UNKNOWN" in response.text
+    assert "Never measured in this environment" in response.text
+
+
+def test_clock_skew_banner_shows_a_real_persisted_fail_reading(client):
+    """Directly exercises live.workstation.get_clock_skew() through the
+    dashboard, using the real, live-confirmed skew value observed on this
+    machine (~130s behind Dhan's server clock) -- proving the FAIL
+    classification and the Windows remediation hint both actually reach
+    the rendered page, not just the CLI's readiness-check --deep output."""
+    import live.workstation as workstation_module
+    from datetime import datetime, timezone
+
+    state_store = workstation_module.new_live_state_store()
+    state_store.save_clock_skew(
+        skew_seconds=-130.0, classification="FAIL",
+        detail="-130.0s -- exceeds 60s, a full candle interval. Freshness/staleness logic cannot be trusted on "
+               "this machine until the clock is corrected (Windows: run 'w32tm /resync' as Administrator, or "
+               "enable 'Set time automatically' in Settings).",
+        measured_at=datetime.now(timezone.utc),
+    )
+    state_store.close()
+
+    response = client.get("/")
+    assert "Clock skew" in response.text
+    assert "FAIL" in response.text
+    assert "-130.0s" in response.text
+    assert "w32tm /resync" in response.text
+
+
+def test_clock_skew_banner_notes_when_the_reading_itself_is_stale(client):
+    """A skew reading is taken once per readiness-check/session start, not
+    continuously -- an operator looking at a 45-minute-old reading during
+    a long-running session must be told it may not reflect current
+    conditions, not shown it as if it were live."""
+    import live.workstation as workstation_module
+    from datetime import datetime, timedelta, timezone
+
+    state_store = workstation_module.new_live_state_store()
+    state_store.save_clock_skew(
+        skew_seconds=1.0, classification="PASS", detail="+1.0s -- within 5s tolerance.",
+        measured_at=datetime.now(timezone.utc) - timedelta(minutes=45),
+    )
+    state_store.close()
+
+    response = client.get("/")
+    assert "may not reflect current conditions" in response.text
+
+
 def test_banner_says_not_connected_when_no_feed_status_exists(client):
     response = client.get("/")
     assert "NOT connected to a live broker or feed" in response.text

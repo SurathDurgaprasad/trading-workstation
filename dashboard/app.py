@@ -156,6 +156,51 @@ def _broker_connectivity_banner() -> str:
     return f'<div class="banner">SIMULATED PAPER TRADING &mdash; {connectivity_text} No real order can ever be placed here.</div>'
 
 
+def _clock_skew_banner() -> str:
+    """LIVE SYSTEM HARDENING mission, Part 11: real gap found -- clock skew
+    (local machine vs Dhan server time) was measurable ONLY via the CLI's
+    `readiness-check --deep`, never visible on the dashboard an operator
+    would actually be watching during a live session. A live-confirmed
+    ~130s skew on this machine silently biases every freshness/staleness
+    check (see market_data/quality.py's from_bar_timestamp), so hiding it
+    from the primary operator surface was a real observability gap.
+
+    Reads live.workstation.get_clock_skew() -- a local SQLite read only,
+    consistent with _market_status_banner()'s/_broker_connectivity_banner()'s
+    own "zero network I/O on page load" rule. The actual measurement is
+    taken elsewhere (readiness-check --deep, or paper-live --source dhan
+    at session startup) and persisted; this function only ever displays
+    the last-known reading, honestly labeled with how long ago it was
+    taken so an operator can judge whether it's still representative."""
+    record = workstation.get_clock_skew()
+    if record is None:
+        return (
+            '<div class="kv" style="max-width:640px;">'
+            '<div>Clock skew</div><div><span class="tag tag-sim">UNKNOWN</span></div>'
+            "</div>"
+            '<p class="muted">Never measured in this environment. Run <code>readiness-check --deep</code> or start a '
+            "<code>paper-live --source dhan</code> session to measure real local-vs-Dhan-server clock skew.</p>"
+        )
+    measured_at = datetime.fromisoformat(record.measured_at)
+    if measured_at.tzinfo is None:
+        measured_at = measured_at.replace(tzinfo=timezone.utc)
+    age_seconds = (datetime.now(timezone.utc) - measured_at).total_seconds()
+    age_text = f"{age_seconds:,.0f}s ago" if age_seconds < 120 else f"{age_seconds / 60:,.1f} min ago"
+    staleness_note = (
+        " -- this reading itself is over 30 minutes old and may not reflect current conditions; skew is measured "
+        "once per session/check, not continuously." if age_seconds > 1800 else ""
+    )
+    tag_class = {"PASS": "tag-long", "WARNING": "tag-warn", "FAIL": "tag-short"}.get(record.classification, "tag-sim")
+    return (
+        '<div class="kv" style="max-width:640px;">'
+        f'<div>Clock skew</div><div><span class="tag {tag_class}">{html.escape(record.classification)}</span> '
+        f"{html.escape(f'{record.skew_seconds:+.1f}s')}</div>"
+        f"<div>Measured</div><div>{html.escape(age_text)}{html.escape(staleness_note)}</div>"
+        "</div>"
+        f'<p class="muted">{html.escape(record.detail)}</p>'
+    )
+
+
 def _scientific_verdict_banner() -> str:
     """Live-market-readiness audit finding: nowhere on this dashboard
     stated the actual, already-completed strategy research conclusion.
@@ -209,6 +254,7 @@ def _page(body: str) -> str:
   .tag-sim {{ background: #33415c; color: #a9c1ff; }}
   .tag-long {{ background: #14432a; color: #7be8a4; }}
   .tag-short {{ background: #4a1f1f; color: #ff9d9d; }}
+  .tag-warn {{ background: #4a3a1f; color: #f0c078; }}
   form.inline {{ display: inline; }}
   button {{ padding: 6px 14px; border-radius: 4px; border: none; font-weight: bold; cursor: pointer; }}
   button.approve {{ background: #1f7a3f; color: #fff; }}
@@ -222,6 +268,7 @@ def _page(body: str) -> str:
 </head>
 <body>
 {_broker_connectivity_banner()}
+{_clock_skew_banner()}
 {_scientific_verdict_banner()}
 {_market_status_banner()}
 {body}

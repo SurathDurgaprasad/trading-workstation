@@ -20,6 +20,14 @@ Three tables:
     last bar seen, without polling the feed itself. This is deliberately
     NOT fabricated from the dashboard side; if no bar has ever been
     written here, the dashboard says so rather than guessing.
+  - clock_skew (LIVE SYSTEM HARDENING mission, Part 11): a single row
+    (like kill_switch), holding the last REAL measurement of local-vs-
+    Dhan-server clock skew (see live/dhan/clock_skew.py). Written by
+    `readiness-check --deep` and by `paper-live --source dhan` at session
+    startup — never by the dashboard itself, which only reads this table
+    (zero I/O on page load, same rule feed_status already follows). If no
+    measurement has ever been taken, the table is empty and the dashboard
+    must say "UNKNOWN", never fabricate a value or silently omit the row.
 """
 
 import sqlite3
@@ -67,6 +75,15 @@ CREATE TABLE IF NOT EXISTS feed_status (
     connection_state TEXT,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS clock_skew (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    skew_seconds REAL NOT NULL,
+    classification TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    measured_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -91,6 +108,15 @@ class PendingApprovalRecord:
     decision_reason: str | None = None
     approved_quantity: int | None = None
     final_execution_result: str | None = None
+
+
+@dataclass
+class ClockSkewRecord:
+    skew_seconds: float
+    classification: str  # "PASS" | "WARNING" | "FAIL"
+    detail: str
+    measured_at: str  # when the underlying REAL measurement was taken (UTC isoformat)
+    updated_at: str  # when this row was last written (UTC isoformat) -- lets the dashboard tell a fresh row from a stale one
 
 
 @dataclass
@@ -234,6 +260,27 @@ class LiveStateStore:
     def list_feed_status(self) -> list["FeedStatusRecord"]:
         rows = self._conn.execute("SELECT symbol, source, status, bar_timestamp, received_at, connection_state, updated_at FROM feed_status ORDER BY symbol").fetchall()
         return [FeedStatusRecord(symbol=r[0], source=r[1], status=r[2], bar_timestamp=r[3], received_at=r[4], connection_state=r[5], updated_at=r[6]) for r in rows]
+
+    # --- clock skew (LIVE SYSTEM HARDENING mission, Part 11) --------------------
+
+    def save_clock_skew(
+        self, *, skew_seconds: float, classification: str, detail: str, measured_at: datetime,
+    ) -> None:
+        self._conn.execute(
+            "INSERT INTO clock_skew (id, skew_seconds, classification, detail, measured_at, updated_at) "
+            "VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET "
+            "skew_seconds=excluded.skew_seconds, classification=excluded.classification, "
+            "detail=excluded.detail, measured_at=excluded.measured_at, updated_at=excluded.updated_at",
+            (skew_seconds, classification, detail, measured_at.isoformat(), _now()),
+        )
+
+    def get_clock_skew(self) -> "ClockSkewRecord | None":
+        row = self._conn.execute(
+            "SELECT skew_seconds, classification, detail, measured_at, updated_at FROM clock_skew WHERE id = 1"
+        ).fetchone()
+        if row is None:
+            return None
+        return ClockSkewRecord(skew_seconds=row[0], classification=row[1], detail=row[2], measured_at=row[3], updated_at=row[4])
 
 
 def _serialize_history(history: list[tuple]) -> str:
