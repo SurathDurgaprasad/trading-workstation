@@ -59,6 +59,19 @@ class OHLCVBar(BaseModel):
     source_timestamp: datetime | None = Field(
         default=None, description="The upstream source's own timestamp for this bar, if it can differ from `timestamp` (e.g. late/delayed delivery). None when not applicable."
     )
+    is_partial: bool = Field(
+        default=False,
+        description=(
+            "True ONLY for a still-accumulating candle deliberately surfaced before its interval has closed "
+            "(see live/dhan/candle_builder.py's flush()) -- open/high/low/close/volume reflect ticks seen SO FAR, "
+            "not the full interval, and close is NOT the interval's final price. Every other producer of an "
+            "OHLCVBar (Yahoo, historical, mock, and a naturally-completed Dhan candle) leaves this False, its "
+            "default -- additive, matching every pre-existing call site exactly. Consumers that must never act "
+            "on unsettled data (signal generation, risk sizing, prediction evaluation) MUST check this before "
+            "trusting a bar's OHLC as final; nothing in the current live pipeline sets it True yet (flush() has "
+            "no production caller as of this field's introduction) -- see that module's own docstring."
+        ),
+    )
 
 
 class OHLCV(BaseModel):

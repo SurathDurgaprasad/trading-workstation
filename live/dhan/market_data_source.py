@@ -247,6 +247,40 @@ class DhanMarketDataSource:
         instance, never reset here."""
         return {symbol: dict(builder.rejected_tick_counts) for symbol, builder in self._candle_builders.items()}
 
+    def last_known_price(self, symbol: str) -> tuple[float, datetime] | None:
+        """LIVE SYSTEM HARDENING mission, Part 2: the finest-grained live
+        price this source can offer -- (price, exchange_timestamp) from
+        the subscribed symbol's own CandleBuilder.last_known_price/
+        last_known_timestamp, updated on every accepted tick regardless
+        of candle boundaries. None if `symbol` was never subscribed, or
+        no valid tick has arrived for it yet -- never fabricated. This is
+        a DELIBERATELY separate capability from next_bar()/the bar queue:
+        it never advances or is consumed by the pipeline's own bar
+        processing, so calling it (e.g. for a dashboard/monitoring poll)
+        has no effect on signal generation, which continues to see only
+        genuinely completed candles via next_bar()."""
+        builder = self._candle_builders.get(symbol)
+        if builder is None or builder.last_known_price is None:
+            return None
+        return builder.last_known_price, builder.last_known_timestamp
+
+    def partial_candle(self, symbol: str):
+        """Returns the subscribed symbol's CURRENT in-progress candle
+        (OHLCVBar with is_partial=True -- see that field's own docstring)
+        without waiting for it to close, or None if never subscribed or
+        no tick has started a bucket yet. Delegates to CandleBuilder.
+        flush() -- a pure peek, no side effects on the real candle this
+        bucket will eventually become via next_bar()'s own natural
+        rollover. Like last_known_price(), this is display/monitoring-
+        only: nothing in this project's signal-generation path calls
+        this, and it must stay that way -- see OHLCVBar.is_partial's own
+        docstring for why unsettled data must never be mistaken for a
+        completed candle."""
+        builder = self._candle_builders.get(symbol)
+        if builder is None:
+            return None
+        return builder.flush()
+
     def is_connected(self) -> bool:
         return self.state == DhanConnectionState.CONNECTED
 

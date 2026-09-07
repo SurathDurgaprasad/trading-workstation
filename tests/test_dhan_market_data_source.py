@@ -238,6 +238,84 @@ def test_rejected_tick_counts_by_symbol_aggregates_across_the_real_wire_path(ins
     assert source.next_bar() is NO_NEW_BAR  # the bad tick never started/completed a bar
 
 
+def test_last_known_price_is_none_before_any_tick_or_subscription(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials)
+    assert source.last_known_price("RELIANCE.NS") is None  # never subscribed
+    source.subscribe(["RELIANCE.NS"], "1m")
+    assert source.last_known_price("RELIANCE.NS") is None  # subscribed, but no tick has arrived yet
+
+
+def test_last_known_price_reflects_the_most_recent_tick_even_mid_bucket(instrument_map, credentials):
+    # LIVE SYSTEM HARDENING mission, Part 2: this is the sub-candle-
+    # granularity live price that previously existed only as
+    # CandleBuilder's own private _last_known_price, never reachable from
+    # outside -- the exact gap the architecture investigation found.
+    # Real wire-encoded ticks, same as the rejected-tick-counts test above.
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    factory.current.simulate_message(_ticker_packet(2885, 1428.5, epoch=10))
+
+    result = source.last_known_price("RELIANCE.NS")
+    assert result is not None
+    price, timestamp = result
+    assert price == pytest.approx(1428.5)
+    assert timestamp is not None
+
+    # A second tick, still within the SAME bucket, updates it -- this is
+    # finer granularity than next_bar(), which would report nothing new
+    # until the bucket actually closes.
+    factory.current.simulate_message(_ticker_packet(2885, 1429.0, epoch=15))
+    price, _ = source.last_known_price("RELIANCE.NS")
+    assert price == pytest.approx(1429.0)
+    assert source.next_bar() is NO_NEW_BAR  # confirms the bucket genuinely has not closed yet
+
+
+def test_partial_candle_is_none_before_any_tick_or_subscription(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials)
+    assert source.partial_candle("RELIANCE.NS") is None  # never subscribed
+    source.subscribe(["RELIANCE.NS"], "1m")
+    assert source.partial_candle("RELIANCE.NS") is None  # subscribed, but no tick has started a bucket yet
+
+
+def test_partial_candle_carries_real_ohlc_so_far_and_is_marked_partial(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    factory.current.simulate_message(_ticker_packet(2885, 1428.5, epoch=10))
+    factory.current.simulate_message(_ticker_packet(2885, 1431.0, epoch=15))  # new high, still same bucket
+    factory.current.simulate_message(_ticker_packet(2885, 1429.0, epoch=20))
+
+    bar = source.partial_candle("RELIANCE.NS")
+    assert bar is not None
+    assert bar.is_partial is True
+    assert bar.open == pytest.approx(1428.5)
+    assert bar.high == pytest.approx(1431.0)
+    assert bar.close == pytest.approx(1429.0)  # the most recent tick, NOT the bucket's eventual final close
+    assert bar.source == DataSource.DHAN
+    assert bar.status == DataStatus.LIVE  # provenance is still "real Dhan data" -- is_partial is the settled/unsettled distinction
+
+
+def test_partial_candle_peek_does_not_disturb_the_bar_that_later_completes_via_next_bar(instrument_map, credentials):
+    # Proves partial_candle() is a true peek: calling it mid-bucket must
+    # not change what next_bar() eventually delivers once the bucket
+    # genuinely closes -- a monitoring/display read must never perturb
+    # the real candle-building pipeline signal generation depends on.
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    factory.current.simulate_message(_ticker_packet(2885, 1428.5, epoch=10))
+
+    peeked = source.partial_candle("RELIANCE.NS")
+    assert peeked.is_partial is True
+    peeked_again = source.partial_candle("RELIANCE.NS")  # repeated peek, still no mutation
+    assert peeked_again.is_partial is True
+
+    factory.current.simulate_message(_ticker_packet(2885, 1430.0, epoch=121))  # crosses into the next 1m bucket
+    event = source.next_bar()
+    assert event is not None
+    assert event.bar.is_partial is False  # a genuinely completed candle, never mislabeled
+    assert event.bar.open == pytest.approx(1428.5)
+    assert event.bar.close == pytest.approx(1428.5)  # unaffected by the peeks above
+
+
 def test_duplicate_ticks_at_the_same_timestamp_do_not_each_complete_a_bar(instrument_map, credentials):
     source, factory = _source(instrument_map, credentials)
     source.subscribe(["RELIANCE.NS"], "1m")

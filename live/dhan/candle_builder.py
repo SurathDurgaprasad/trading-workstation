@@ -243,7 +243,7 @@ class CandleBuilder:
             return None
 
         if self._state is not None and bucket_start > self._state.bucket_start:
-            completed = self._finalize(self._state)
+            completed = self._finalize(self._state, is_partial=False)
             self._state = None
 
         if not price_is_valid:
@@ -276,20 +276,49 @@ class CandleBuilder:
 
         return completed
 
-    def _finalize(self, state: _BucketState) -> OHLCVBar:
+    def _finalize(self, state: _BucketState, *, is_partial: bool) -> OHLCVBar:
         return OHLCVBar(
             timestamp=state.bucket_start, open=state.open, high=state.high, low=state.low, close=state.close, volume=state.volume,
-            source=DataSource.DHAN, status=DataStatus.LIVE, received_at=state.last_received_at, source_timestamp=state.last_source_timestamp,
+            source=DataSource.DHAN, status=DataStatus.LIVE, received_at=state.last_received_at,
+            source_timestamp=state.last_source_timestamp, is_partial=is_partial,
         )
 
     def flush(self) -> OHLCVBar | None:
-        """Returns the CURRENT in-progress bucket as a bar without waiting
-        for a tick from the next bucket -- for an explicit, deliberate
-        "close out whatever we have" call (e.g. on a clean shutdown). Does
-        NOT get called automatically by on_tick; an in-progress bucket is
-        never silently finalized by a timer, matching the "do not
-        manufacture a price" posture for every other partial-data case in
-        this project."""
+        """Returns the CURRENT in-progress bucket as a bar (is_partial=True
+        -- see OHLCVBar's own field docstring) without waiting for a tick
+        from the next bucket -- for an explicit, deliberate "give me
+        what we have so far" call (e.g. a live-price display, or a clean
+        shutdown). Does NOT get called automatically by on_tick; an
+        in-progress bucket is never silently finalized by a timer,
+        matching the "do not manufacture a price" posture for every other
+        partial-data case in this project. Pure peek: does not clear or
+        otherwise mutate the accumulating bucket, so calling this
+        repeatedly (e.g. once per dashboard poll) never disturbs the real
+        candle this same bucket will eventually finalize into via
+        on_tick's own natural rollover."""
         if self._state is None:
             return None
-        return self._finalize(self._state)
+        return self._finalize(self._state, is_partial=True)
+
+    @property
+    def last_known_price(self) -> float | None:
+        """The most recent VALID tick price accepted by on_tick, updated
+        on every accepted tick regardless of bucket boundaries -- the
+        finest-grained live price this class can offer, sub-candle. None
+        until the first valid tick this instance has ever seen. LIVE
+        SYSTEM HARDENING mission, Part 2: this data already existed
+        internally (used for the tick-deviation plausibility check, see
+        __init__'s own docstring) but was never exposed publicly until
+        now -- the exact gap identified in the live-data-architecture
+        investigation."""
+        return self._last_known_price
+
+    @property
+    def last_known_timestamp(self) -> "datetime | None":
+        """The exchange timestamp of the tick `last_known_price` came
+        from -- None until the first valid tick. Paired with
+        last_known_price so a caller can judge its own freshness (via
+        market_data.quality.SourceHealth.from_bar_timestamp, the same
+        freshness math every other bar in this project is judged by)
+        rather than assuming it is always "now"."""
+        return self._last_known_timestamp

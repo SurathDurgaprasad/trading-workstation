@@ -147,6 +147,64 @@ def test_flush_does_not_double_emit_after_natural_completion():
     assert second.open == 101.0
 
 
+# --- is_partial labeling + last_known_price/timestamp (LIVE SYSTEM HARDENING
+# mission, Part 2: raw tick / last-known-price / partial-candle / completed-
+# candle must be genuinely distinguishable, not just internally computed and
+# never exposed) ------------------------------------------------------------
+
+
+def test_flush_marks_the_returned_bar_as_partial():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+    bar = builder.flush()
+    assert bar.is_partial is True
+
+
+def test_a_naturally_completed_bar_via_on_tick_is_never_marked_partial():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+    bar = builder.on_tick(price=101.0, volume=5, timestamp=_ts(61), received_at=_ts(61))
+    assert bar is not None
+    assert bar.is_partial is False
+
+
+def test_last_known_price_is_none_before_any_tick():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    assert builder.last_known_price is None
+    assert builder.last_known_timestamp is None
+
+
+def test_last_known_price_updates_on_every_accepted_tick_even_mid_bucket():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+    assert builder.last_known_price == 100.0
+    assert builder.last_known_timestamp == _ts(0)
+
+    builder.on_tick(price=102.0, volume=5, timestamp=_ts(10), received_at=_ts(10))  # same bucket, no bar completed
+    assert builder.last_known_price == 102.0
+    assert builder.last_known_timestamp == _ts(10)
+
+
+def test_last_known_price_is_unchanged_by_a_rejected_invalid_tick():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+    builder.on_tick(price=-5.0, volume=1, timestamp=_ts(10), received_at=_ts(10))  # rejected: non-positive
+    assert builder.last_known_price == 100.0  # the bad tick's price never touched it
+
+
+def test_flush_is_a_pure_peek_and_does_not_disturb_the_bucket_or_last_known_price():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+    builder.flush()
+    builder.flush()  # repeated peek -- must not mutate anything
+    assert builder.last_known_price == 100.0
+
+    completed = builder.on_tick(price=105.0, volume=1, timestamp=_ts(61), received_at=_ts(61))
+    assert completed is not None
+    assert completed.close == 100.0  # the peeks above never altered the real bucket's own close
+    assert completed.is_partial is False
+
+
 # --- tick-level sanity validation (Phase 13, live data stress testing) ------
 
 
