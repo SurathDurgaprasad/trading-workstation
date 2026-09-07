@@ -99,6 +99,26 @@ def test_h_meanrev_001_is_rejected_as_directionless_not_confidently_negative():
     assert "INSUFFICIENT_DATA" in h.evidence
 
 
+def test_h_relstrength_001_is_rejected_with_a_reversed_dose_response():
+    """BUILD THE REAL TRADING BRAIN mission, Family D (relative
+    strength) -- the largest-sample-size hypothesis in the whole
+    registry (395 development trades for candidate A alone). All three
+    candidates REJECTED/NEGATIVE, and notably the strictest candidate
+    (C_strong_outperformance) shows a WORSE result than the loosest
+    (A_any_outperformance) -- the reverse of the hypothesis's own
+    predicted dose-response, stated honestly rather than omitted."""
+    registry = build_hypothesis_registry()
+    h = next(h for h in registry if h.hypothesis_id == "H_RELSTRENGTH_001")
+
+    assert h.status == HypothesisStatus.REJECTED
+    assert "REJECTED" in h.evidence
+    # Spot-check the real, actually-measured figures are present verbatim.
+    assert "395/165/266" in h.evidence
+    assert "251/108/133" in h.evidence
+    assert "99/35/49" in h.evidence
+    assert "REVERSED" in h.evidence
+
+
 def test_h_entry_004_is_rejected_with_the_real_dev_val_oos_evidence():
     """BUILD THE REAL TRADING BRAIN mission: the momentum-acceleration
     candidates (strategy/momentum_acceleration.py) were run through the

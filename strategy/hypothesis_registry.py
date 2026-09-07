@@ -469,4 +469,78 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "horizon were not tested here and remain genuinely open questions, not evidence against)."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_RELSTRENGTH_001",
+            description=(
+                "A stock's own relative strength versus its market (trailing 20-bar return minus its benchmark "
+                "index's own trailing 20-bar return) predicts forward continuation -- strong stocks keep "
+                "outperforming weak ones."
+            ),
+            rationale=(
+                "Family D (cross-sectional relative strength) per the BUILD THE REAL TRADING BRAIN mission's own "
+                "explicit family list -- a genuinely independent mechanism from Family A (trend continuation, now "
+                "fully exhausted, 9/9 hypotheses, zero promotions) and Family B (mean reversion, H_MEANREV_001, "
+                "REJECTED). Relative-strength/cross-sectional-momentum effects are among the most widely "
+                "replicated findings in the academic factor-investing literature."
+            ),
+            expected_effect=(
+                "A LONG-only strategy entering when a symbol's relative_strength_20 is positive should show "
+                "positive expectancy, and a STRONGER relative strength reading should show a stronger effect "
+                "(monotonic dose-response across the three candidates)."
+            ),
+            dataset_restrictions=(
+                "Same 41-symbol universe (32 NSE, 9 US), 5 years daily bars, plus each symbol's own benchmark "
+                "index (^NSEI for .NS/.BO symbols, ^GSPC otherwise -- quant_research/alpha_features.py's own "
+                "documented convention). LONG-only, matching every other strategy in this project. HONEST SCOPE "
+                "NOTE: this tests SINGLE-SYMBOL relative strength as a standalone entry signal, NOT the mission's "
+                "own 'Potential structure' for Family D (rank the whole universe, select the strongest "
+                "percentile -- true cross-sectional selection). That needs a portfolio-level, shared-calendar "
+                "backtesting engine this project's existing single-symbol backtesting/engine.py does not have; "
+                "building one was judged out of proportion to test ONE hypothesis first ('do not add a giant "
+                "feature blindly'). This narrower, still-independent question is tested first; the cross-sectional "
+                "engine becomes a justified follow-up only if this shows real promise."
+            ),
+            experiment_design=(
+                "quant_research/relative_strength_signal.py -- a STANDALONE Strategy (ignores SMA/RSI/MACD/volume "
+                "entirely) reusing quant_research/alpha_features.py's own relative_strength_20 (Phase 10, already "
+                "causal, already tested). Three candidates, thresholds fixed a priori as a monotonic dose-response "
+                "ladder: A_any_outperformance (>0.0), B_meaningful_outperformance (>0.05), "
+                "C_strong_outperformance (>0.10). Exit structure reuses TrendMomentumBaseline's own frozen "
+                "stop/target, isolating the entry signal only. Run via "
+                "run_universe_relative_strength_experiment() -- a self-contained fetch/compute/split/run loop "
+                "(same reason as strategy/momentum_acceleration.py's and quant_research/mean_reversion_signal.py's "
+                "own runners: needs a column-injection step run_full_backtest exposes no hook for -- here, also "
+                "fetching a second series, the benchmark, which run_full_backtest has no concept of at all)."
+            ),
+            success_criteria="Development AND validation AND out-of-sample all show a confident POSITIVE_PERFORMANCE verdict with sufficient sample size (>=30 trades pooled), ideally with C > B > A (dose-response).",
+            failure_criteria="Any split shows a confident NEGATIVE_PERFORMANCE verdict, or results are mixed/inconclusive across splits.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Run against the real 41-symbol universe plus each symbol's own benchmark (^NSEI/^GSPC), all 41 "
+                "backtested successfully (0 failed). "
+                "A_any_outperformance (395/165/266 dev/val/oos trades -- the LARGEST sample size of any hypothesis "
+                "tested in this entire registry): development expectancy -0.67% (mean-return 95% CI [-1.12%, "
+                "-0.23%], entirely negative) -> NEGATIVE_PERFORMANCE. Validation -0.43%, out-of-sample -0.36%, "
+                "both STATISTICALLY_MEANINGLESS but both still negative point estimates. PROMOTION VERDICT: "
+                "NEGATIVE. "
+                "B_meaningful_outperformance (251/108/133 trades): all three splits STATISTICALLY_MEANINGLESS, "
+                "point estimates -0.51%/-0.29%/-0.32% -- consistently negative but not confidently so. REJECTED "
+                "(mixed, per the promotion rule -- no split confidently negative, but none positive either). "
+                "C_strong_outperformance (99/35/49 trades): development expectancy -1.07% (CI [-2.02%, -0.12%]) "
+                "-> NEGATIVE_PERFORMANCE, the MOST negative of the three candidates. PROMOTION VERDICT: NEGATIVE. "
+                "Bonferroni correction (family_size=3, out-of-sample returns, corrected z=2.394): no candidate "
+                "survives as positive -- unsurprising, none was directionally positive to begin with. "
+                "NOTABLE FINDING, stated honestly rather than omitted: the hypothesis's own expected dose-response "
+                "(C should show a STRONGER positive effect than A/B if the mechanism were real) is REVERSED in "
+                "this data -- C's development expectancy (-1.07%) is roughly 60% worse than A's (-0.67%), meaning "
+                "MORE extreme relative-strength readings correlate with WORSE forward performance, not better, on "
+                "this evidence. This is consistent with buying already-extended relative strength being a form of "
+                "buying exhaustion/overextension (echoing H_ENTRY_001's own finding that trend-confirmation entry "
+                "timing underperforms random) rather than genuine continuation. REJECTED: on the single-symbol "
+                "approximation tested here, relative strength shows no positive edge and the strongest readings "
+                "are the worst performers, not the best -- the opposite of the hypothesis's own prediction. Does "
+                "not test the mission's own true cross-sectional ranking/selection structure (see this record's "
+                "own dataset_restrictions for why), which remains a genuinely open question."
+            ),
+        ),
     )
