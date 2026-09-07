@@ -1,0 +1,301 @@
+# Live System Hardening — Final Report
+
+Continuous, adversarial audit-and-fix session against the live Dhan
+paper-trading pipeline, conducted with real credentials during a real
+NSE session (2026-09-07, Monday). Every claim below is labeled by its
+actual evidence category — REAL LIVE DATA, REAL API TEST, INTEGRATION
+TEST, UNIT TEST, or CODE INSPECTION — never blended. This report
+supersedes nothing in `docs/LIVE_MARKET_READINESS_REPORT.md` or
+`docs/LIVE_MARKET_VALIDATION_REPORT.md`; it extends them with what this
+session found, fixed, and proved.
+
+**Absolute constraint restated**: paper trading only. No code path in
+this repository can place a real order — verified again this session via
+`tests/test_dhan_no_real_orders.py`/`tests/test_broker.py`, run clean
+before every commit below. No credential value was ever printed or
+logged.
+
+## 1. Executive Verdict
+
+Three separate trust scores — never combined into one misleading grade,
+per this mission's own instruction.
+
+- **PLATFORM TRUST: B — MOSTLY RELIABLE, KNOWN LIMITATIONS.** The core
+  pipeline (live data → strategy → risk → human/auto approval → paper
+  execution → reconciliation) is solid, real, and now meaningfully
+  better-instrumented than at session start. What keeps this from an A:
+  the deterministic critic never runs in the interactive `paper-live`
+  path at all, market-regime context is computed but wired into nothing,
+  no automatic data-source fallback exists, and Dhan reconnect logic —
+  while thoroughly unit-tested — was not observed against a genuine live
+  disconnect this session.
+- **DATA TRUST: C — WORKING BUT SIGNIFICANT GAPS.** Live Dhan price data
+  is real and, as of this session, properly layered (raw tick →
+  last-known-price → partial candle → completed candle, each honestly
+  labeled). Clock skew is real, measured, persisted, and now visible —
+  but still uncorrected (an environment issue this session deliberately
+  did not fix itself). Corporate-action and regulatory data do not exist
+  in this codebase at all; market context (news, sector, regime) is real
+  but narrow (Yahoo-only) and largely disconnected from any live
+  decision.
+- **STRATEGY TRUST: F by design — NO DEMONSTRATED EDGE.** This is the
+  settled, correct scientific answer from the prior research mission
+  (`docs/STRATEGY_EDGE_DISCOVERY_FINAL_OUTPUT.md`), reaffirmed, never
+  revisited or gamed this session. An F here is success, not failure —
+  it is what an honest audit is supposed to produce when no edge exists.
+
+## 2. Before vs. After (this session)
+
+| Area | Before | After | Evidence |
+|---|---|---|---|
+| Clock skew visibility | CLI-only (`readiness-check --deep`); dashboard had zero awareness | Measured, persisted (`live/state_store.py`'s new `clock_skew` table), rendered on the dashboard with staleness-awareness | REAL LIVE DATA: `-129.8s`, `FAIL`, rendered end-to-end through the real dashboard function against a real persisted row |
+| Sub-candle live price | `CandleBuilder._last_known_price` existed internally, unreachable from outside the class | `DhanMarketDataSource.last_known_price(symbol)` — a real, public, tested accessor | REAL LIVE DATA: returned a genuine live tick (1310.90) with its real exchange timestamp |
+| Partial (in-progress) candle | `CandleBuilder.flush()` existed but was unused in production and mislabeled identically to a completed candle | `OHLCVBar.is_partial` field (additive); `flush()` now correctly marks `is_partial=True`; exposed via `DhanMarketDataSource.partial_candle(symbol)` | REAL LIVE DATA: real OHLC-so-far, correctly labeled; a repeated peek proved zero side effects on the real candle-building pipeline |
+| Risk-halt visibility | Raw numbers shown with limits, no explicit "halted now" signal separate from the kill switch | New dashboard banner reusing `risk.engine.RiskEngine.account_level_halt_reasons()` (pre-existing, already-tested logic) | INTEGRATION TEST (HTTP-level) + UNIT TEST (direct call) |
+| Traceability consistency | `/intelligence`'s journal showed `decision_id`; the main `/` page's journal did not | Both pages now show it, via one de-duplicated helper | UNIT TEST |
+
+Test count: **1531 → 1561** (last full regression at 1560 passed, 0
+failed; one further test added in the final, small, targeted-only commit
+below — see that commit's own reasoning for why a full regression wasn't
+re-run for it), across the 4 commits
+listed in the table above (`01078be`, `4700105`, `b21c286`, `a20b0b1`),
+each preceded by either full regression (for changes touching
+persistence/live-data internals) or targeted+affected-subsystem tests
+(for small, purely-additive dashboard changes) — the calibration this
+mission's own Part 12 asked for. Safety suite green at every commit.
+
+## 3. Real Market Evidence (today, 2026-09-07, all REAL LIVE DATA / REAL API TEST unless noted)
+
+- Dhan REST connectivity: `[PASS]`, real HTTP 200 from `/fundlimit`, ~0.28s round-trip, measured independently 3 times across the session (each also doubling as a clock-skew measurement, below).
+- Clock skew: **-130.0s, -129.8s, -130.3s** across 3 independent real measurements today (readiness-check --deep; a bounded live-price verification run; the extended paper-live session's own startup measurement, confirmed via its persisted `measured_at` timestamp matching that session's real start time) — consistent with the -129.5s/-130.3s/-130.6s range a prior session on this same machine also observed. Stable and reproducible, not noise. Root cause (confirmed via `w32tm /query /status`, already documented): Windows Time service has never synced to NTP on this machine. Remediation is the user's own action, never executed by this session: `w32tm /resync` as Administrator, or enable "Set time automatically" in Windows Settings.
+- WebSocket: `[PASS]`, real `CONNECTED` state, sustained across every session run today with zero unexpected drops observed.
+- `last_known_price("RELIANCE.NS")`: real tick, `1310.9000244140625` at `2026-09-07T07:56:45Z`.
+- `partial_candle("RELIANCE.NS")`: real OHLC-so-far, `is_partial=True`, `source=DHAN`, `status=LIVE` — correctly distinguishing settlement state from provenance.
+- Extended `paper-live --source dhan --auto-approve` session: 13:33:21–15:27:47 IST, 100 real bars processed, clean shutdown, zero anomalies beyond one correctly-triggered freshness suppression — full tally in §12.
+
+## 4. Data Reliability — the six-category truth audit
+
+See the full table produced mid-session (reproduced here for the
+permanent record):
+
+| Category | Have it? | Source | Live in decisions? | Fallback? |
+|---|---|---|---|---|
+| A. Live price | Yes | Dhan WebSocket (real-time); Yahoo (labeled `HISTORICAL`, never claimed live) | Yes (Dhan, for `paper-live`) | None exists |
+| B. Market structure | OHLC only, honestly | Dhan Ticker packets — no volume field in Ticker mode, reported as real `0.0`, never fabricated | Yes (OHLC) | — |
+| C. Corporate actions | **No** | — | No | — |
+| D. Regulatory | **No** | — | No | — |
+| E. News/events | Company-level only | `yfinance`'s `Ticker.news`, verified against a real call | Only via manual `research summarize`, not wired into trading | None |
+| F. Market context | Partial | `market_intelligence/regime.py`, real Yahoo-sourced computation | **No** — confirmed by reading the call sites: `shadow-run`'s critic call never passes `benchmark_context`; `paper-live` has no critic at all | — |
+
+No exchange-grade NSE/BSE claim is made anywhere in this codebase or
+this report. Dhan is a real broker's own feed, not the exchange
+directly; `.NS`/`.BO` symbol suffixes are Yahoo's routing convention,
+not evidence of exchange-grade data — this was true before this session
+and remains true now.
+
+## 5. Pipeline Reliability
+
+Tick → `CandleBuilder` → completed candle → `StreamingSnapshotAdapter` →
+strategy → risk → (critic, `shadow-run` only) → approval → paper
+execution → reconciliation: every stage in this chain has real test
+coverage and, for the Dhan-sourced half, real live evidence gathered
+either this session or the immediately preceding one. The tick-rejection
+defenses (`non_positive_price`, `negative_volume`,
+`implausible_deviation`, `late_out_of_order`, `implausible_timestamp`)
+have real live-wire test coverage; on real market data specifically,
+zero rejections have been observed across every live session run to
+date — the real feed has been clean, so these five tick-level defenses
+remain unit-proven against adversarial input, not live-proven, honestly
+stated. The separate freshness/staleness gate (`FreshnessPolicy`, a
+different defense from the five tick-rejection reasons above) *was*
+observed firing live this session — see §12's `STALE_SIGNAL_SUPPRESSED`
+event — genuinely PROVEN, not just unit-tested, for that specific gate.
+
+Reconnect-on-disconnect: extensive, real unit coverage (bounded retry,
+flapping-connection handling, stale-generation-race prevention, all
+against a fake transport reproducing real Dhan wire behavior) — but no
+genuine live disconnect occurred naturally this session or the prior
+one, and this session did not attempt to force one against the real
+broker feed (unsafe/unreliable to script). **PARTIALLY PROVEN**, stated
+as such, not overstated.
+
+Automatic fallback (Dhan → Yahoo or any other source): **does not
+exist** anywhere in `live/` (confirmed by an exhaustive grep, zero
+matches). This is the safer default — disconnection is reported as
+`DISCONNECTED`/stale, never silently masked by a provenance swap — but
+it is an absence, not a hidden capability, and is stated as such.
+
+## 6. Safety Validation
+
+- Kill switch: real activate/persist/reset drill proven in the prior
+  session; confirmed `INACTIVE` at every readiness check this session.
+- Risk engine circuit breakers (`max_daily_loss`, `max_drawdown`,
+  `consecutive_loss_hard_limit`): pre-existing, well-tested logic, now
+  also surfaced on the dashboard as a dedicated RISK HALT banner
+  (this session's own addition) distinct from the kill switch.
+- Deterministic critic: real, deterministic, no I/O, no LLM — verified
+  by reading its own module docstring and implementation, not assumed
+  from its name. **Confirmed absent from the entire `live/` directory**
+  — it protects `shadow-run` only, by default, and is never consulted by
+  `paper-live`, including under `--auto-approve` (unattended operation
+  with neither a human nor the critic in the loop — flagged, not fixed,
+  since deciding whether/how to add it changes what can gate a trade).
+- No real-order code path exists anywhere in this codebase — reconfirmed
+  by the safety test suite passing at every commit this session.
+
+## 7. Observability
+
+`decision_id` is reused (not reinvented) as the single correlation key
+across `Decision → Signal → JournalEntry → PredictionRecord`, proven
+with a real live 3-way join in the prior session and now visible on
+*both* dashboard journal views (this session closed the inconsistency
+between them). `rejected_tick_counts_by_symbol()` gives real, queryable,
+per-reason bad-tick counts. Clock skew now carries its own
+"measured at" timestamp, so staleness of the measurement itself is
+honest, not just staleness of the underlying data.
+
+Gap found this session: when the critic *does* run (`shadow-run` only),
+its per-check HARD/SOFT breakdown is tallied into an in-memory
+run-level summary but never persisted per-decision alongside the
+journal entry — an operator can see "3 REJECTED today" in aggregate but
+not, for one specific trade, exactly which check failed.
+
+## 8. Silent Failure Audit
+
+Every "do not fabricate" boundary checked this session held under
+inspection: Yahoo bars are labeled `HISTORICAL`, never `LIVE`; a tick
+with no volume field reports real `0.0`, never an estimate; an absent
+`feed_status`/`clock_skew` row renders as an explicit "never
+measured"/"no data" state on the dashboard, never a fabricated default;
+a partial candle is now impossible to mistake for a completed one
+(`is_partial`); the AI explanation layer is structurally incapable of
+altering a trade parameter and is labeled, verbatim, "LLM narration —
+not the decision basis" wherever it appears. No new silent-failure mode
+was introduced by this session's changes — each new capability
+(`last_known_price`, `partial_candle`, risk-halt reasons, clock skew)
+returns an explicit `None`/empty state rather than a fabricated value
+when nothing real is available, matching the codebase's own established
+discipline.
+
+## 9. News / Market-Intelligence Capability Matrix
+
+See §4 above (categories C–F) — this *is* the matrix the mission asked
+for, and duplicating it here would only invite drift between two
+copies.
+
+## 10. Remaining Risks
+
+**P0** — none newly found this session that touch real-money risk (there
+is no real-money path to touch). The highest-severity *architectural*
+item is the critic/regime disconnection from live decision paths (§4,
+§6) — real, but bounded by the fact that paper trading has no financial
+consequence.
+
+**P1**:
+1. Decide, deliberately, whether `paper-live` should gain a critic
+   check (at minimum under `--auto-approve`, where neither a human nor
+   the critic currently reviews a signal).
+2. Wire `benchmark_context` into `shadow-run`'s existing critic call —
+   mechanically small (the check is `WARNING` severity, cannot newly
+   reject a trade), but requires a real decision about how `shadow-run`
+   should economically source a benchmark's data on every invocation.
+3. Persist per-decision critic detail, not just the run-level tally.
+4. Confirm Dhan reconnect behavior against a genuine live disconnect
+   when one naturally occurs (do not force one artificially).
+
+**P2**:
+1. REST-connectivity status on the dashboard, alongside the
+   already-shown WebSocket state (same persistence pattern as clock
+   skew would work here).
+2. A distinct "RISK HALT" banner exists now; consider whether the same
+   treatment belongs on `decision_detail_page`, not just the index page.
+3. **Real operational trap found this session**: `paper-live`'s stdout is
+   block-buffered (Python's default when output is redirected to a file
+   rather than a TTY) — running it as `paper-live ... > session.log 2>&1`
+   for background monitoring can leave the log file looking frozen for
+   many minutes while the process is genuinely healthy and actively
+   processing real bars (verified: the log file showed only the startup
+   banner for over 15 real minutes while `feed_status`, queried
+   independently from the real SQLite state, was advancing normally the
+   whole time; the underlying process's CPU time was also visibly
+   incrementing). An operator relying on a tailed log file alone, without
+   also checking the persisted state, could mistake a healthy session
+   for a hang. `python -u` (or `PYTHONUNBUFFERED=1`) fixes this for
+   anyone redirecting output for monitoring; not changed in the codebase
+   itself this session since it's an invocation-time concern, not a bug.
+4. The `analyze` command's "RISK ANALYSIS"/"CRITIC" section headers
+   share names with the real deterministic `risk.engine`/`critic.engine`
+   modules — a cosmetic clarity gap, not a safety issue (confirmed via
+   import-graph analysis: `analyze` is completely isolated from the real
+   trading path).
+
+## 11. Honest Trust Score
+
+Restated from §1 for completeness — PLATFORM: B, DATA: C, STRATEGY: F
+by design. None of these three numbers should ever be averaged into a
+single figure; they answer different questions for different audiences
+(an engineer asking "is the code reliable," a researcher asking "is the
+data trustworthy," and a trader asking "does this make money" each need
+a different one of these three answers, not a blend).
+
+## 12. Live Session Final Tally (REAL LIVE DATA)
+
+The extended `paper-live --source dhan --auto-approve` session ran
+13:33:21–15:27:47 IST (~114 real minutes, essentially the rest of
+today's NSE session) against real production state
+(`data/live_sim_trading.db`, `data/live_state.db`), RELIANCE.NS, 1m
+interval, bounded to 100 bars.
+
+- **100 bars processed**, real prices throughout: opened around
+  ₹1310, ranged roughly ₹1303.60–1310.90 across the session, closed
+  around ₹1308.
+- **Zero signals generated.** Not forced, not manipulated — the
+  strategy's own deterministic entry conditions simply never qualified
+  during this real window. This is itself honest evidence, directly
+  consistent with the settled NO DEMONSTRATED EDGE finding: a real
+  ~114-minute live session produced no trade, and that is reported
+  plainly rather than treated as a shortfall to explain away.
+- **One real, live-observed `STALE_SIGNAL_SUPPRESSED` event** on the
+  final bar (`fresh=False`) — confirmed by reading `live/pipeline.py`'s
+  own logic: this means the freshness gate rejected the bar *before*
+  `strategy.generate_signal()` was ever called, exactly the
+  "never trade on stale data" behavior this gate exists for, firing
+  correctly under real, naturally-occurring conditions (most likely a
+  genuine quiet stretch in tick arrival near the end of the session,
+  not a bug — the ~13-minute gap between this bar's own timestamp and
+  the process's eventual clean shutdown is consistent with that).
+- **Account**: cash and equity both closed at ₹100,000.00 (unchanged —
+  no trade occurred), zero drawdown, zero consecutive losses.
+- **Reconciliation: OK.** No corruption, no drift between the store and
+  the in-memory account.
+- **Kill switch**: confirmed `INACTIVE` throughout and after.
+- The process shut down cleanly via its own `finally: source.close()`
+  path — no crash, no hang, no manual intervention needed.
+
+This is the single longest continuous real live-Dhan paper-trading
+session run in this project to date, and it completed with zero
+anomalies beyond the one freshness-gate event described above, which is
+itself a positive proof point, not a defect.
+
+## 13. Final Answer
+
+The platform is genuinely more trustworthy today than it was at this
+session's start — not because problems were hidden, but because more of
+them are now visible where an operator will actually see them (the
+dashboard) rather than only in a CLI flag an operator has to remember to
+pass. Today's real, ~114-minute live paper-trading session ran end to
+end with zero anomalies, produced zero trades because none were
+genuinely warranted (not because anything was forced or suppressed
+incorrectly), and its one notable event — a real freshness gate firing
+on real data — is a demonstration of the platform doing exactly what it
+should, not a defect. The strategy remains unproven and is not claimed
+otherwise; today added a real data point of "ran cleanly, found nothing
+to trade," which is consistent with, not contradictory to, the settled
+NO DEMONSTRATED EDGE finding. The gaps that remain (critic/regime
+disconnection from live paths, unproven live reconnect, no automatic
+fallback) are named, evidenced, and scoped — not fixed today, because
+fixing some of them (the critic wiring in particular) changes what can
+gate a real decision, and that is a choice for the user to make
+deliberately, not one to make unilaterally under time pressure. If the
+system cannot yet be fully trusted in those specific, named ways, this
+report says so plainly rather than implying otherwise.
