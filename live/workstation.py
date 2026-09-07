@@ -168,6 +168,23 @@ def get_risk_state() -> dict:
     }
 
 
+def get_risk_halt_reasons() -> list[str]:
+    """LIVE SYSTEM HARDENING mission, Part 10 -- real dashboard gap found:
+    the SAFETY section showed raw risk numbers (e.g. "2/5 consecutive
+    losses") but no explicit "trading is halted right now" signal
+    distinct from the kill switch, even though risk.engine.RiskEngine
+    already has exactly that answer via account_level_halt_reasons() --
+    the SAME circuit-breaker logic evaluate() itself uses for a real
+    signal, extracted specifically so a caller without a signal in hand
+    (this one included) can ask "is trading halted?" without duplicating
+    that logic. Empty list means not halted -- never fabricated; this
+    reuses the live engine's own real account/config state, no new risk
+    math written here."""
+    engine = get_live_engine()
+    reasons = engine.risk_engine.account_level_halt_reasons(engine.account)
+    return [r.value for r in reasons]
+
+
 def get_trade_journal() -> list:
     return get_live_engine().store.list_journal_entries()
 

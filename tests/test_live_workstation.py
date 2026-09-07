@@ -42,3 +42,26 @@ def test_kill_switch_status_reflects_a_reset():
     state_store.close()
 
     assert workstation.get_kill_switch_status()["active"] is False
+
+
+def test_get_risk_halt_reasons_is_empty_for_a_fresh_account(monkeypatch, tmp_path):
+    from paper.engine import PaperTradingEngine
+    from paper.store import PaperStore
+
+    monkeypatch.setattr(workstation, "get_live_engine", lambda: PaperTradingEngine(PaperStore(tmp_path / "live_sim.db")))
+    assert workstation.get_risk_halt_reasons() == []
+
+
+def test_get_risk_halt_reasons_reflects_a_real_consecutive_loss_hard_limit_breach(monkeypatch, tmp_path):
+    """Single-threaded, direct call -- no Starlette TestClient involved --
+    so pinning one real engine instance and mutating its account is safe
+    here, unlike tests/test_dashboard.py's HTTP-level equivalent (see
+    that test's own docstring for why it mocks this function instead)."""
+    from paper.engine import PaperTradingEngine
+    from paper.store import PaperStore
+
+    engine = PaperTradingEngine(PaperStore(tmp_path / "live_sim.db"))
+    engine.account.consecutive_losses = 6  # risk/config.py's own default consecutive_loss_hard_limit
+    monkeypatch.setattr(workstation, "get_live_engine", lambda: engine)
+
+    assert workstation.get_risk_halt_reasons() == ["CONSECUTIVE_LOSS_LIMIT"]

@@ -296,6 +296,15 @@ async def index(request: Request) -> HTMLResponse:
         reason = html.escape(status["kill_switch_reason"] or "")
         kill_banner = f'<div class="banner kill-active">KILL SWITCH ACTIVE &mdash; {reason} &mdash; no new signal will be approved or executed.</div>'
 
+    risk_halt_reasons = workstation.get_risk_halt_reasons()
+    risk_halt_banner = ""
+    if risk_halt_reasons:
+        reasons_text = ", ".join(html.escape(r) for r in risk_halt_reasons)
+        risk_halt_banner = (
+            f'<div class="banner kill-active">RISK HALT ACTIVE &mdash; {reasons_text} &mdash; '
+            f"a new signal would be REJECTED by risk.engine's own circuit breaker (separate from the kill switch above).</div>"
+        )
+
     kill_form = (
         '<form class="inline" method="post" action="/kill-switch/reset">'
         '<button class="reset" type="submit">Reset kill switch</button></form>'
@@ -363,6 +372,7 @@ async def index(request: Request) -> HTMLResponse:
 
     body = f"""
 {kill_banner}
+{risk_halt_banner}
 <p><a href="/intelligence">Market intelligence &amp; prediction performance &rarr;</a></p>
 <h2>KILL SWITCH <span class="tag tag-sim">{'ACTIVE' if status['kill_switch_active'] else 'INACTIVE'}</span></h2>
 {kill_form}

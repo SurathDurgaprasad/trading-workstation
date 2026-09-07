@@ -193,6 +193,34 @@ def test_clock_skew_banner_notes_when_the_reading_itself_is_stale(client):
     assert "may not reflect current conditions" in response.text
 
 
+def test_no_risk_halt_banner_under_normal_account_state(client):
+    response = client.get("/")
+    assert "RISK HALT ACTIVE" not in response.text
+
+
+def test_risk_halt_banner_appears_when_a_real_halt_reason_is_present(client, monkeypatch):
+    """LIVE SYSTEM HARDENING mission, Part 10: real dashboard gap -- risk
+    numbers were shown ("2/5 consecutive losses") but there was no
+    explicit "trading is halted right now" signal distinct from the kill
+    switch, even though risk.engine.RiskEngine.account_level_halt_reasons()
+    already has that exact answer (see live.workstation.get_risk_halt_reasons,
+    itself already covered by tests/test_paper_advance.py for the real
+    halt logic). This test targets the NEW code -- the dashboard's own
+    rendering of whatever that function returns -- rather than fighting
+    _isolated_live_engine's deliberate fresh-engine-per-call design
+    (needed for Starlette TestClient's cross-thread SQLite access, see
+    that fixture's own docstring), which a pinned mutated Account can't
+    survive."""
+    import live.workstation as workstation_module
+
+    monkeypatch.setattr(workstation_module, "get_risk_halt_reasons", lambda: ["CONSECUTIVE_LOSS_LIMIT"])
+
+    response = client.get("/")
+    assert "RISK HALT ACTIVE" in response.text
+    assert "CONSECUTIVE_LOSS_LIMIT" in response.text
+    assert "separate from the kill switch" in response.text
+
+
 def test_banner_says_not_connected_when_no_feed_status_exists(client):
     response = client.get("/")
     assert "NOT connected to a live broker or feed" in response.text
