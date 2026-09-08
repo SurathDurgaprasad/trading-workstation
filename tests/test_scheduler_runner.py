@@ -221,6 +221,35 @@ def test_run_tick_does_not_crash_on_a_market_data_failure(tmp_path, run_store, m
     assert run_store.get_run(result.run_id).status == RunStatus.FAILED
 
 
+def test_run_tick_records_a_failed_run_when_the_slot_calls_sys_exit(tmp_path, run_store, monkeypatch):
+    """BUILD THE REAL TRADING BRAIN mission, live run 2026-09-08: real bug
+    found via a genuinely orphaned RUNNING lock in production
+    data/scheduler_runs.db. _execute_slot() calls run_shadow_run_command()
+    IN-PROCESS; that function's own --paper-execute validation calls
+    sys.exit(2) on misconfiguration, raising SystemExit -- a BaseException
+    subclass the tick's own `except Exception` did not catch, so the
+    SystemExit propagated out of run_tick and killed the entire long-lived
+    scheduler process, leaving its lock stuck RUNNING forever (well past
+    this test's own reclaim window). This proves the fix: a slot that
+    raises SystemExit for ANY reason must still result in a FAILED
+    RunRecord (lock released), and run_tick itself must never raise."""
+    import main as main_module
+
+    def _raise_system_exit(*args, **kwargs):
+        raise SystemExit(2)
+
+    monkeypatch.setattr(main_module, "run_shadow_run_command", _raise_system_exit)
+
+    result = run_tick(schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", benchmark="", now=_TRADING_TIME, **_db_paths(tmp_path))
+
+    assert result.ran is True
+    assert "FAILED" in result.reason
+    record = run_store.get_run(result.run_id)
+    assert record.status == RunStatus.FAILED
+    assert record.error is not None
+    assert run_store.active_lock() is None  # the lock must be released, not left orphaned RUNNING
+
+
 def test_run_tick_evaluate_and_learn_slot_runs_without_a_symbol(tmp_path, run_store):
     """The post_market slot's action is evaluate_and_learn -- it must
     not require --symbols at all (there is nothing new to scan)."""

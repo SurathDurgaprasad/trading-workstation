@@ -214,7 +214,25 @@ def run_tick(
             initial_capital=initial_capital, paper_execute=paper_execute, state_db=state_db,
             max_holding_bars=max_holding_bars, skip_critic=skip_critic,
         )
-    except Exception as exc:  # noqa: BLE001 -- a failed tick must never crash a long-lived scheduler process
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 -- a failed tick must never crash a long-lived scheduler process
+        # BUILD THE REAL TRADING BRAIN mission, live run 2026-09-08: real
+        # bug found via a genuinely orphaned RUNNING lock in production
+        # data/scheduler_runs.db. _execute_slot() calls
+        # main.run_shadow_run_command() IN-PROCESS (not a subprocess) --
+        # that function's own --paper-execute validation calls
+        # sys.exit(2) on a misconfiguration, which raises SystemExit, a
+        # BaseException subclass `except Exception` does NOT catch. The
+        # SystemExit propagated straight out of run_tick, out of
+        # `schedule loop`'s own outer loop, and killed the entire
+        # long-lived scheduler PROCESS -- exactly the failure mode this
+        # try/except's own comment says must never happen -- leaving the
+        # lock stuck RUNNING (never reaching finish_run below) until the
+        # next tick's staleness reclaim, up to --staleness-seconds later.
+        # Catching SystemExit here (but deliberately NOT BaseException --
+        # KeyboardInterrupt must still stop the loop, not be swallowed as
+        # "one failed tick") closes this for every current and future
+        # sys.exit() call anywhere in the in-process call chain, not just
+        # this one validation.
         # `finished_at=now_utc`, not the default real wall-clock: this tick's
         # OWN clock reading is what every later is_due/frequency comparison
         # must be anchored to, so a caller-injected `now` (the `--now`
