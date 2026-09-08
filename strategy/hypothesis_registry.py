@@ -1332,4 +1332,74 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "harder look this mission demanded, and it does not survive."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_CONTEXT_MARKET_004",
+            description=(
+                "Deep validation of the market/sector-divergence family (H_CONTEXT_MARKET_002/SECTOR_002/"
+                "ALIGN_001) -- the SAME adversarial deep-validation treatment H_GAP_003 just applied to "
+                "gap-fade, applied here to this project's other remaining INCONCLUSIVE candidate."
+            ),
+            rationale=(
+                "EDGE VALIDATION mission, Phase 9's own priority rule (existing promising hypotheses come "
+                "before new families). Gap-fade's deep validation (H_GAP_003) found real disqualifying issues "
+                "when actually tried to be killed; this hypothesis had not yet received the same scrutiny and "
+                "should not be trusted further without it, per H_GAP_003's own explicit warning."
+            ),
+            expected_effect="The market-divergence effect should survive realistic costs, not concentrate in illiquid names or one sector, and not show a clear multi-year decay trend, the same bar gap-fade failed.",
+            dataset_restrictions="Same full 32-symbol NSE universe, 5 years daily, H_CONTEXT_MARKET_002's own condition (baseline BUY + NIFTY TRENDING_DOWN).",
+            experiment_design=(
+                "Four of H_GAP_003's five adversarial cuts, applied to the SAME condition_fn already registered "
+                "under H_CONTEXT_MARKET_002: (1) cost sensitivity across a 0.05%-0.30% grid on the full-period-"
+                "pooled h5/h10 mean forward return; (2) sector concentration via the existing NSE sector map; "
+                "(3) liquidity split (above/below-median avg_daily_value); (4) year-by-year concentration, "
+                "2021-2026. (Market/VIX-regime splits were not repeated -- this hypothesis IS itself a market-"
+                "regime condition by construction, so slicing it by regime again would mostly just re-derive "
+                "smaller versions of the same finding.) Structural note, unlike gap-fade: this hypothesis "
+                "measures a multi-bar close-to-close forward return (quant_research/market_behavior.py's own "
+                "fwd_return_h), directly implementable with this project's EXISTING long-only, multi-bar-hold "
+                "backtesting engine -- no new same-day-exit or short-selling infrastructure would be needed to "
+                "test this as a real strategy, unlike gap-fade."
+            ),
+            success_criteria="Survives realistic costs with margin, is decisive in BOTH liquidity halves (not just illiquid names), is not concentrated in one sector, and shows no clear decay trend.",
+            failure_criteria="Fails to clear realistic costs, concentrates in illiquid names or one sector, or shows a clear decay trend -- the same bar gap-fade failed.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "COST SENSITIVITY (full-period pooled, n=1723): h5 mean=+0.555% (CI-decisive "
+                "[+0.384%,+0.725%]), h10 mean=+0.999% (CI-decisive [+0.756%,+1.241%]). Remains POSITIVE at "
+                "EVERY tested cost level up to 0.30% (h5 net=+0.255%, h10 net=+0.699% even at the highest cost "
+                "tested) -- a materially wider cost margin than gap-fade's, which turned negative well before "
+                "0.30%. Clears the realistic ~0.21% round-trip estimate comfortably in both horizons. "
+                "SECTOR CONCENTRATION (h=5): NIFTY_BANK (n=220, +0.939%, CI-decisive) and NIFTY_AUTO (n=239, "
+                "+1.064%, CI-decisive) are the strongest; NIFTY_IT (n=275, -0.176%, NOT decisive) is the ONLY "
+                "sector with a negative point estimate -- a real, honest inconsistency, though NOT the kind of "
+                "single-sector-dominates-everything pattern gap-fade's own recovery side showed (there, one "
+                "sector explained nearly the entire pooled effect; here, two DIFFERENT sectors are each "
+                "independently decisive and one is mildly negative, a materially healthier spread). "
+                "NIFTY_PHARMA/FMCG/FINANCIAL_SERVICES are positive but not individually decisive (smaller "
+                "samples, n=73-198). "
+                "LIQUIDITY CHECK (h=5) -- the check that was MOST decisively disqualifying for gap-fade: "
+                "ABOVE-median avg_daily_value stocks n=790, +0.344% (CI-decisive [+0.084%,+0.605%]); "
+                "BELOW-median n=933, +0.732% (CI-decisive [+0.508%,+0.957%]). BOTH halves are independently "
+                "CI-decisive -- roughly 2x stronger in the less-liquid half, but NOT inert in the more-liquid "
+                "half the way gap-fade was. This is the clearest point of divergence from gap-fade's own "
+                "liquidity result and the strongest piece of evidence this effect is not merely an illiquid-"
+                "execution artifact. "
+                "YEAR CONCENTRATION (h=5): 2021 +1.057% (decisive), 2022 +0.487% (decisive), 2023 +0.536% "
+                "(decisive), 2024 +0.143% (not decisive, the weakest year), 2025 +1.020% (decisive, one of the "
+                "strongest), 2026 (partial year) +0.094% (not decisive). No clean monotonic decay pattern like "
+                "gap-fade's clean 2021-2024-strong-then-2025-2026-flat shape -- 2024 dips but 2025 recovers "
+                "strongly, more consistent with normal year-to-year noise than a systematic fade. "
+                "STILL INCONCLUSIVE, not upgraded: this deep-validation pass substantially STRENGTHENS "
+                "confidence relative to gap-fade's own result on the same four checks (wider cost margin, both "
+                "liquidity halves decisive, no clean decay pattern, less severe sector concentration) -- but it "
+                "does not address the ORIGINAL, still-binding limitation already recorded under "
+                "H_CONTEXT_MARKET_002/H_CONTEXT_ALIGN_001: thin out-of-sample statistical power (as low as n=10 "
+                "for the compound market+sector-divergence condition). Robustness across cuts of the FULL-"
+                "PERIOD sample is a different, necessary-but-not-sufficient claim from genuine out-of-sample "
+                "decisiveness -- this entry answers 'is the effect an artifact of cost/liquidity/sector/time,' "
+                "not 'does it hold on data the effect was never fit to.' The correct next step, if this line is "
+                "pursued further, is growing the out-of-sample sample (a longer history and/or a larger, "
+                "better-sourced sector map), not further robustness slicing of what's already available."
+            ),
+        ),
     )

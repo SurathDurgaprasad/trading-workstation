@@ -42,39 +42,50 @@ extreme-gap (3%+) sub-finding turned out to be a small-sample illusion
 that failed its own development-period check. **REJECTED as a
 currently tradeable edge** — see H_GAP_003 for the full evidence.
 
-The remaining candidate:
+The remaining candidate — and now this project's single most credible
+lead:
 
 - Market/sector-divergence conditioning on the baseline BUY signal
-  (H_CONTEXT_MARKET_002/SECTOR_002/ALIGN_001): real, broad-based,
-  cost-surviving, replicated at two independent context layers and
-  appears to compound — but out-of-sample power is too thin (as low as
-  n=10 for the combined condition) to promote. Not yet put through the
-  same level of adversarial deep-validation gap-fade just received —
-  a natural next candidate for the same treatment.
+  (H_CONTEXT_MARKET_002/SECTOR_002/ALIGN_001) has now ALSO been through
+  the same adversarial deep-validation gap-fade received (H_CONTEXT_
+  MARKET_004) and, unlike gap-fade, **substantially strengthened**: it
+  clears realistic costs with wide margin (still solidly positive even
+  at a 0.30% round-trip cost, well past the ~0.21% realistic estimate),
+  is CI-decisive in BOTH the above- and below-median liquidity halves
+  of the universe (not confined to illiquid names, the exact check that
+  killed gap-fade), is not dominated by a single sector, and shows no
+  clean year-over-year decay pattern. It is directly implementable with
+  the EXISTING long-only, multi-bar-hold backtesting engine — no new
+  execution infrastructure needed, unlike gap-fade. What it still lacks
+  is out-of-sample statistical POWER (as low as n=10 for the compound
+  market+sector condition) — a sample-size problem, not a robustness
+  problem, and the correct next step is growing that sample, not more
+  adversarial slicing of what already exists.
 
 Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(28 hypotheses tested to date).
+(29 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
-None currently meet the bar for "promising" (decisive across all three
-splits, adequate OOS power, AND survives an adversarial deep-validation
-pass) — the context-divergence family is the closest, but is explicitly
-not there yet, and gap-fade (the only candidate that received the full
-adversarial treatment so far) did not survive it.
+None formally meet the bar yet (decisive across all three splits with
+adequate OOS power) — but the market/sector-divergence family is now
+the closest this project has come: it has survived the same adversarial
+deep-validation pass that killed gap-fade, and its only remaining gap is
+out-of-sample sample size, not a demonstrated flaw.
 
-## INCONCLUSIVE HYPOTHESES (10)
+## INCONCLUSIVE HYPOTHESES (11)
 
 H_ENTRY_003, H_ENTRY_005, H_EXIT_002, H_MEANREV_002, H_CONTEXT_MARKET_002,
-H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_GAP_001, H_GAP_002 (the
-original gap-fade discovery record — kept as history; see H_GAP_003 for
-why the underlying idea did not ultimately survive), and
-H_TRANSMISSION_001 (Nasdaq → NIFTY IT, honest decline/advance
-asymmetry). Full evidence for each in `strategy/hypothesis_registry.py`.
+H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_CONTEXT_MARKET_004 (the deep-
+validation follow-up — see above), H_GAP_001, H_GAP_002 (the original
+gap-fade discovery record — kept as history; see H_GAP_003 for why the
+underlying idea did not ultimately survive), and H_TRANSMISSION_001
+(Nasdaq → NIFTY IT, honest decline/advance asymmetry). Full evidence for
+each in `strategy/hypothesis_registry.py`.
 
 ## REJECTED HYPOTHESES (17)
 
@@ -146,12 +157,13 @@ rebuilt, this segment.
    express and track everything the mission asks for; what it lacks is
    elapsed time and resolved outcomes. No amount of further engineering
    fixes this — only continued, undisturbed live observation does.
-2. **Temptation to lower the promotion bar.** The context-divergence
-   family remains this project's most interesting live candidate.
-   Promoting it before out-of-sample power is actually demonstrated —
-   or before it receives the same adversarial deep-validation gap-fade
-   just went through and failed — would be exactly the "manufactured
-   profitability" this mission explicitly forbids.
+2. **Out-of-sample power, specifically for the now-strengthened
+   market/sector-divergence family.** It has survived every robustness
+   check thrown at it (cost, liquidity, sector, time) — but robustness
+   on the full-period sample is not the same claim as decisive
+   out-of-sample performance, and the OOS sample for the compound
+   condition is as thin as n=10. Promoting on robustness alone, without
+   growing that sample first, would still be premature.
 3. **Small-sample illusions hiding inside a real-looking pooled
    result.** H_GAP_003's own extreme-gap sub-finding (a huge, exciting-
    looking +0.745% pooled effect that turned out to have zero support
@@ -169,11 +181,10 @@ directional forecasts recorded 2026-09-08 (and the 10 existing BUY
 predictions) resolve, then re-run `evaluate-forecasts`/`evaluate`/
 `learn` for the first real calibration read this project has ever had.
 
-If a genuinely new research question is wanted before then: put
-**H_CONTEXT_MARKET_002/SECTOR_002/ALIGN_001 (market/sector divergence)**
-through the SAME adversarial deep-validation gap-fade just received —
-cost sensitivity, liquidity split, sector concentration, year-by-year
-decay check. It is this project's last INCONCLUSIVE candidate that
-hasn't yet been put under that level of scrutiny, and gap-fade's own
-outcome (a strong-looking pooled result that did not survive) is a
-direct warning not to trust it further without the same treatment.
+If a genuinely new research question is wanted before then: **grow the
+out-of-sample sample for the market/sector-divergence family**
+(H_CONTEXT_MARKET_004's own stated correct next step) — a longer
+history and/or a larger, better-sourced NSE sector map (currently only
+20 of 32 universe symbols are sector-tagged) would directly attack the
+one remaining, demonstrated gap in this project's strongest current
+candidate, rather than another new hypothesis family.
