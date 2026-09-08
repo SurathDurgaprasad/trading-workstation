@@ -175,3 +175,74 @@ def test_daily_report_forecasts_db_records_one_forecast_per_symbol_and_is_duplic
     store = DirectionForecastStore(tmp_path / "forecasts.db")
     assert len(store.list_forecasts()) == 2
     store.close()
+
+
+# --- cache staleness (real incident: a symbol whose cache silently went stale --
+# still a cache HIT, so a forecast/report could be recorded against a stale
+# reference_price with no warning at all) --------------------------------------
+
+
+@pytest.fixture
+def _stale_cache_symbol():
+    """Writes a REAL meta.json (backtesting.cache.CACHE_ROOT is a bound
+    default on report_cache_staleness, so monkeypatching the module-level
+    name would NOT reach it -- this exercises the real, default cache
+    root main.py itself uses, with a throwaway, obviously-test symbol
+    name, cleaned up in teardown)."""
+    import json
+    from datetime import timezone
+    from pathlib import Path
+
+    from backtesting.cache import CACHE_ROOT
+
+    symbol = "ZZ_STALE_TEST_SYMBOL"
+    symbol_dir = CACHE_ROOT / symbol
+    symbol_dir.mkdir(parents=True, exist_ok=True)
+    old = datetime.now(timezone.utc) - timedelta(days=13)
+    meta_path = symbol_dir / "1d.meta.json"
+    meta_path.write_text(json.dumps({
+        "symbol": symbol, "interval": "1d", "period": "1y",
+        "start": (old - timedelta(days=365)).isoformat(), "end": old.isoformat(),
+        "retrieved_at": old.isoformat(), "bar_count": 250,
+    }))
+    try:
+        yield symbol
+    finally:
+        for f in symbol_dir.glob("*"):
+            f.unlink()
+        symbol_dir.rmdir()
+
+
+def test_daily_report_warns_and_skips_forecast_for_stale_cached_symbol(tmp_path, capsys, _stale_cache_symbol):
+    args = parse_args([
+        "daily-report", "--symbols", f"RELIANCE.NS,{_stale_cache_symbol}", "--benchmark", "", "--top", "2",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--regime-db", str(tmp_path / "regime.db"),
+        "--forecasts-db", str(tmp_path / "forecasts.db"),
+    ])
+    run_daily_report_command(args)
+
+    output = capsys.readouterr().out
+    assert "DATA STALENESS WARNING" in output
+    assert _stale_cache_symbol in output
+    assert "STALE DATA" in output
+    assert "1 skipped -- stale data" in output
+    assert "Forecasts recorded this run: 1 " in output
+
+    from predictions.direction_forecast_store import DirectionForecastStore
+
+    store = DirectionForecastStore(tmp_path / "forecasts.db")
+    recorded_symbols = {f.symbol for f in store.list_forecasts()}
+    assert _stale_cache_symbol not in recorded_symbols
+    assert "RELIANCE.NS" in recorded_symbols
+    store.close()
+
+
+def test_daily_report_no_staleness_warning_when_cache_is_fresh(tmp_path, capsys):
+    args = parse_args([
+        "daily-report", "--symbols", "RELIANCE.NS,TCS.NS", "--benchmark", "", "--top", "2",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--regime-db", str(tmp_path / "regime.db"),
+    ])
+    run_daily_report_command(args)
+
+    output = capsys.readouterr().out
+    assert "DATA STALENESS WARNING" not in output

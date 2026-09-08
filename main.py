@@ -2,7 +2,7 @@ import argparse
 import logging
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pydantic import BaseModel
 
@@ -1428,6 +1428,31 @@ def run_daily_report_command(args: argparse.Namespace) -> None:
     scan_store.save_report(scan_report)
     scan_store.close()
 
+    # Real data-integrity incident found while smoke-testing this command
+    # (EDGE VALIDATION mission): CachedMarketDataProvider never auto-
+    # refreshes -- a symbol whose cache silently went stale (last refreshed
+    # weeks ago) still returns a cache HIT, so `candidate.as_of` (and the
+    # reference_price a forecast records) can be quietly stale even though
+    # nothing about the scan itself fails or warns. Reuses the SAME 5-day
+    # (432000s) threshold critic/config.py's own DATA_FRESHNESS check
+    # already uses (sized to survive a long weekend/holiday without a false
+    # positive) -- not a new number invented for this check.
+    from backtesting.cache import report_cache_staleness
+
+    STALE_DATA_END_SECONDS = 432_000.0
+    stale_symbols: set[str] = set()
+    staleness_records = report_cache_staleness([c.symbol for c in scan_report.candidates], interval=args.interval)
+    now_utc = datetime.now(timezone.utc)
+    for record in staleness_records:
+        if record.data_end is None:
+            continue
+        data_end = record.data_end if record.data_end.tzinfo is not None else record.data_end.replace(tzinfo=timezone.utc)
+        if (now_utc - data_end).total_seconds() > STALE_DATA_END_SECONDS:
+            stale_symbols.add(record.symbol)
+    if stale_symbols:
+        print(f"\n*** DATA STALENESS WARNING: {len(stale_symbols)} candidate(s) have cached data older than 5 days -- direction/forecast for these is NOT based on current market conditions: {', '.join(sorted(stale_symbols))} ***")
+        print("*** Run `python main.py cache-status` to check, and delete+refetch data/market/<SYMBOL>/ for any symbol shown above before trusting this report. ***")
+
     regime_report = build_market_regime_report(
         scan_report, provider=provider, sector_map=NSE_SECTOR_MAP, period=args.period, interval=args.interval,
         include_nifty_sector_indices=args.with_nifty_sectors, include_india_vix=args.with_india_vix,
@@ -1468,6 +1493,7 @@ def run_daily_report_command(args: argparse.Namespace) -> None:
 
     forecast_store = None
     forecasts_recorded = 0
+    forecasts_skipped_stale = 0
     if args.forecasts_db:
         from predictions.direction_forecast import DirectionForecastRecord
         from predictions.direction_forecast_store import DirectionForecastStore
@@ -1485,7 +1511,9 @@ def run_daily_report_command(args: argparse.Namespace) -> None:
         sector_ctx = regime_report.sector_index_regimes.get(sector) if sector else None
         sector_line = f"{sector} ({sector_ctx.trend_regime})" if sector_ctx is not None else (sector or "not classified")
 
-        print(f"\n{rank}. {candidate.symbol}")
+        is_stale = candidate.symbol in stale_symbols
+
+        print(f"\n{rank}. {candidate.symbol}" + ("   *** STALE DATA -- see warning above ***" if is_stale else ""))
         print(f"   Direction:      {direction.label.value}   Confidence: {direction.confidence:.0%}")
         print(f"   Market context: NIFTY {regime_report.benchmark.trend_regime}")
         print(f"   Sector context: {sector_line}")
@@ -1513,7 +1541,9 @@ def run_daily_report_command(args: argparse.Namespace) -> None:
             for note in notes:
                 print(f"   Research note:  {note}")
 
-        if forecast_store is not None and not forecast_store.has_forecast_for_bar(candidate.symbol, candidate.as_of):
+        if is_stale:
+            forecasts_skipped_stale += 1
+        elif forecast_store is not None and not forecast_store.has_forecast_for_bar(candidate.symbol, candidate.as_of):
             forecast = DirectionForecastRecord.from_assessment(
                 direction, as_of=candidate.as_of, reference_price=candidate.last_close,
                 horizon_bars=args.forecast_horizon_bars, interval=args.interval, scan_id=scan_report.scan_id,
@@ -1522,7 +1552,8 @@ def run_daily_report_command(args: argparse.Namespace) -> None:
             forecasts_recorded += 1
 
     if forecast_store is not None:
-        print(f"\nForecasts recorded this run: {forecasts_recorded} (see `evaluate-forecasts` to score them later).")
+        skip_note = f" ({forecasts_skipped_stale} skipped -- stale data)" if forecasts_skipped_stale else ""
+        print(f"\nForecasts recorded this run: {forecasts_recorded}{skip_note} (see `evaluate-forecasts` to score them later).")
         forecast_store.close()
 
     if paper_store is not None:

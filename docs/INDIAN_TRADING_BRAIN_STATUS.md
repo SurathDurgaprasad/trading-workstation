@@ -113,14 +113,29 @@ hypothesis_registry.py`.
 - **BUY-shaped trade predictions** (`data/predictions.db`): 10 total,
   **all still ACTIVE, zero resolved.**
 - **Directional (UP/DOWN/NO_EDGE) forecasts** (`data/
-  direction_forecasts.db`): 15, recorded this segment against the live
-  15-symbol watchlist (13 DOWN, 2 UP — market was in a real NIFTY
-  downtrend at recording time) — the first real forecast history this
-  project has ever had. All unresolved as of this writing (recorded
-  same-day, horizon not yet elapsed).
+  direction_forecasts.db`): 15 recorded against the live 15-symbol
+  watchlist (13 DOWN, 2 UP — market was in a real NIFTY downtrend at
+  recording time), plus 4 OLDER real forecasts (RELIANCE.NS/TCS.NS/
+  INFY.NS/HDFCBANK.NS, as_of 2026-08-25/26) discovered already resolved
+  in the same database from an earlier debugging session — 1 correct,
+  3 incorrect, but **known to be built on a stale reference price** (see
+  the data-integrity finding below) and should be excluded from any
+  calibration read, not treated as real evidence either way.
 
 Both sample sizes are far too small for any statistical conclusion.
 This is the actual current bottleneck — not a missing capability.
+
+**Real data-integrity finding this segment, now fixed**: `daily-report`
+had no cache-freshness check at all — `CachedMarketDataProvider` never
+auto-refreshes, so a symbol whose cache silently went stale (weeks since
+last refresh) still returns a normal cache HIT, meaning a forecast could
+be recorded against a stale `reference_price` with zero warning. Found
+by investigating exactly this happening to 4 real forecasts (see above).
+Fixed: `daily-report` now runs `backtesting.cache.report_cache_staleness`
+before recording anything, prints an explicit warning naming any stale
+symbol (same 5-day/432000s threshold `critic/config.py`'s own
+DATA_FRESHNESS check already uses), and **skips forecast recording**
+for any stale candidate rather than silently recording a bad one.
 
 ## CURRENT CALIBRATION STATUS
 
