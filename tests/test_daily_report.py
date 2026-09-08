@@ -140,3 +140,38 @@ def test_daily_report_does_not_record_any_prediction_or_touch_paper_state(tmp_pa
     run_daily_report_command(args)
 
     assert not (tmp_path / "predictions.db").exists()
+
+
+def test_daily_report_does_not_record_forecasts_unless_forecasts_db_given(tmp_path, capsys):
+    args = parse_args([
+        "daily-report", "--symbols", "RELIANCE.NS", "--benchmark", "",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--regime-db", str(tmp_path / "regime.db"),
+    ])
+    run_daily_report_command(args)
+
+    assert not (tmp_path / "forecasts.db").exists()
+    assert "Forecasts recorded" not in capsys.readouterr().out
+
+
+def test_daily_report_forecasts_db_records_one_forecast_per_symbol_and_is_duplicate_safe(tmp_path, capsys):
+    args = parse_args([
+        "daily-report", "--symbols", "RELIANCE.NS,TCS.NS", "--benchmark", "", "--top", "2",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--regime-db", str(tmp_path / "regime.db"),
+        "--forecasts-db", str(tmp_path / "forecasts.db"),
+    ])
+    run_daily_report_command(args)
+    assert "Forecasts recorded this run: 2" in capsys.readouterr().out
+
+    from predictions.direction_forecast_store import DirectionForecastStore
+
+    store = DirectionForecastStore(tmp_path / "forecasts.db")
+    assert len(store.list_forecasts()) == 2
+    store.close()
+
+    # Same bar, run again -- must not duplicate.
+    run_daily_report_command(args)
+    assert "Forecasts recorded this run: 0" in capsys.readouterr().out
+
+    store = DirectionForecastStore(tmp_path / "forecasts.db")
+    assert len(store.list_forecasts()) == 2
+    store.close()

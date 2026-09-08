@@ -45,7 +45,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime", "daily-report", "experiment", "hypothesis-registry", "cache-status", "readiness-check")
+_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "evaluate-forecasts", "learn", "review", "shadow-run", "schedule", "universe", "regime", "daily-report", "experiment", "hypothesis-registry", "cache-status", "readiness-check")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -1466,6 +1466,14 @@ def run_daily_report_command(args: argparse.Namespace) -> None:
         for sector, ctx in regime_report.sector_index_regimes.items():
             print(f"    {sector:26s} {ctx.trend_regime}")
 
+    forecast_store = None
+    forecasts_recorded = 0
+    if args.forecasts_db:
+        from predictions.direction_forecast import DirectionForecastRecord
+        from predictions.direction_forecast_store import DirectionForecastStore
+
+        forecast_store = DirectionForecastStore(args.forecasts_db)
+
     print(f"\nTOP {min(args.top, len(scan_report.candidates))} STOCK OBSERVATIONS (ranked by composite score):")
     for rank, candidate in enumerate(scan_report.candidates[: args.top], start=1):
         direction = classify_direction(candidate)
@@ -1504,6 +1512,18 @@ def run_daily_report_command(args: argparse.Namespace) -> None:
                 notes.append("This stock's own sector index is falling while the stock looks bullish -- H_CONTEXT_SECTOR_002 (INCONCLUSIVE) found the same pattern at the sector level.")
             for note in notes:
                 print(f"   Research note:  {note}")
+
+        if forecast_store is not None and not forecast_store.has_forecast_for_bar(candidate.symbol, candidate.as_of):
+            forecast = DirectionForecastRecord.from_assessment(
+                direction, as_of=candidate.as_of, reference_price=candidate.last_close,
+                horizon_bars=args.forecast_horizon_bars, interval=args.interval, scan_id=scan_report.scan_id,
+            )
+            forecast_store.save_forecast(forecast)
+            forecasts_recorded += 1
+
+    if forecast_store is not None:
+        print(f"\nForecasts recorded this run: {forecasts_recorded} (see `evaluate-forecasts` to score them later).")
+        forecast_store.close()
 
     if paper_store is not None:
         paper_store.close()
@@ -1999,6 +2019,61 @@ def run_evaluate_command(args: argparse.Namespace) -> None:
     print(f"  Win rate:          {f'{summary.win_rate:.1%}' if summary.win_rate is not None else 'n/a (nothing resolved yet)'}")
     print(f"  Average return:    {f'{summary.average_return:+.2%}' if summary.average_return is not None else 'n/a'}")
     print(f"  Profit factor:     {f'{summary.profit_factor:.2f}' if summary.profit_factor is not None else 'n/a'}")
+    _print_provider_metrics(resilient)
+
+
+DEFAULT_FORECASTS_DB_PATH = PROJECT_ROOT / "data" / "direction_forecasts.db"
+
+
+# --------------------------------------------------------------------------
+# `evaluate-forecasts` -- NSE PREDICTION ENGINE mission, Phase 6: the
+# outcome-tracking counterpart to `daily-report --forecasts-db`, exactly
+# mirroring `evaluate`'s own structure for the UP/DOWN/NO_EDGE forecast
+# journal instead of the BUY-price-level prediction journal. Read-only
+# against market data (fetches forward bars to see what actually
+# happened); writes only new forecast_evaluations rows, never mutates an
+# existing forecast.
+# --------------------------------------------------------------------------
+
+
+def run_evaluate_forecasts_command(args: argparse.Namespace) -> None:
+    from predictions.direction_forecast import evaluate_forecast, summarize_forecasts
+    from predictions.direction_forecast_store import DirectionForecastStore
+
+    db_path = args.db or DEFAULT_FORECASTS_DB_PATH
+    store = DirectionForecastStore(db_path)
+    pending = store.list_forecasts_needing_evaluation()
+    provider, resilient = _build_provider(args)
+
+    print("=" * 70)
+    print("DIRECTIONAL FORECAST EVALUATION -- NOT A TRADE (outcome monitoring only)")
+    print("=" * 70)
+    print(f"Database:                     {db_path}")
+    print(f"Forecasts needing evaluation: {len(pending)}\n")
+
+    for forecast in pending:
+        logger.info("Evaluating forecast %s (%s)", forecast.forecast_id, forecast.symbol)
+        try:
+            evaluation = evaluate_forecast(forecast, provider=provider, period=args.period)
+            store.save_evaluation(evaluation)
+            status = "PENDING" if not evaluation.resolved else ("CORRECT" if evaluation.correct else ("N/A (NO_EDGE)" if evaluation.correct is None else "INCORRECT"))
+            print(f"{forecast.symbol:10s} {forecast.forecast_id[:12]}  {forecast.direction.value:8s} {status:14s} {evaluation.detail}")
+        except Exception as exc:  # noqa: BLE001 -- one forecast's failure must never abort evaluation of the rest of the batch, same posture as `evaluate`.
+            logger.warning("evaluate-forecasts: %s (%s) failed, continuing with the rest of the batch: %s", forecast.symbol, forecast.forecast_id, exc)
+            print(f"{forecast.symbol:10s} {forecast.forecast_id[:12]}  FAILED    {exc}")
+
+    forecasts_by_id = {f.forecast_id: f for f in store.list_forecasts(limit=5000)}
+    summary = summarize_forecasts(store.list_all_evaluations(), forecasts_by_id)
+    store.close()
+
+    print("\nSummary (latest evaluation per forecast):")
+    print(f"  Total:            {summary.total}")
+    print(f"  Resolved:         {summary.resolved}")
+    print(f"  Correct:          {summary.correct}")
+    print(f"  Incorrect:        {summary.incorrect}")
+    print(f"  NO_EDGE resolved: {summary.no_edge} (never scored correct/incorrect)")
+    print(f"  Accuracy:         {f'{summary.accuracy:.1%}' if summary.accuracy is not None else 'n/a (nothing directional resolved yet)'}")
+    print(f"  Average return:   {f'{summary.average_return:+.2%}' if summary.average_return is not None else 'n/a'}")
     _print_provider_metrics(resilient)
 
 
@@ -3654,6 +3729,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     daily_report_parser.add_argument("--scanner-db", type=str, default=None, help=f"SQLite scan-history path (default: {DEFAULT_SCANNER_DB_PATH}).")
     daily_report_parser.add_argument("--regime-db", type=str, default=None, help=f"SQLite market-regime-snapshot path (default: {DEFAULT_REGIME_DB_PATH}).")
     daily_report_parser.add_argument("--paper-db", type=str, default=None, help="Optional: check this paper-trading database for an existing open position per symbol, to distinguish BUY/WATCH from EXIT in the Tradeability column.")
+    daily_report_parser.add_argument("--forecasts-db", type=str, default=None, help="Optional: also record a DirectionForecastRecord per printed candidate here (default: off -- no forecast is recorded unless this is given). Duplicate-safe: at most one forecast per symbol per bar. Run `evaluate-forecasts` later to score them.")
+    daily_report_parser.add_argument("--forecast-horizon-bars", type=int, default=5, help="Bars after as_of before an unresolved forecast is checked for resolution (default: 5).")
     daily_report_parser.add_argument("--top", type=int, default=10, help="Print only the top N ranked candidates (default: 10).")
     daily_report_parser.add_argument("--resilient", action="store_true", help="Wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker protection (default: off).")
 
@@ -3732,6 +3809,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     evaluate_parser.add_argument("--db", type=str, default=None, help=f"SQLite prediction-history path (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
     evaluate_parser.add_argument("--period", default="1y", help="Historical window to fetch per symbol when checking for a resolution (default: 1y).")
     evaluate_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker protection when evaluating many predictions (default: off).")
+
+    evaluate_forecasts_parser = subparsers.add_parser(
+        "evaluate-forecasts",
+        help=(
+            "NSE PREDICTION ENGINE mission: check real subsequent market data against every "
+            "unresolved UP/DOWN/NO_EDGE forecast recorded by `daily-report --forecasts-db`, and "
+            "print a directional-accuracy summary. Not a trade -- no price levels, no order."
+        ),
+    )
+    evaluate_forecasts_parser.add_argument("--db", type=str, default=None, help=f"SQLite forecast-history path (default: {DEFAULT_FORECASTS_DB_PATH}).")
+    evaluate_forecasts_parser.add_argument("--period", default="1y", help="Historical window to fetch per symbol when checking for a resolution (default: 1y).")
+    evaluate_forecasts_parser.add_argument("--resilient", action="store_true", help="Wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker protection when evaluating many forecasts (default: off).")
 
     learn_parser = subparsers.add_parser(
         "learn",
@@ -3983,6 +4072,8 @@ def main() -> None:
             run_predict_command(args)
         elif args.command == "evaluate":
             run_evaluate_command(args)
+        elif args.command == "evaluate-forecasts":
+            run_evaluate_forecasts_command(args)
         elif args.command == "learn":
             run_learn_command(args)
         elif args.command == "review":
