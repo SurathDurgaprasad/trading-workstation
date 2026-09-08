@@ -608,4 +608,88 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "dedicated statistical test."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_MEANREV_002",
+            description=(
+                "US-only extreme 5-day price weakness (trailing_return_5 below its own development-period 5th "
+                "percentile) shows a real, forward-positive reversal at the 5-trading-day horizon specifically."
+            ),
+            rationale=(
+                "TRADING BRAIN EXECUTION LOOP mission, Part D-G: a broad, 68-condition market-behavior sweep "
+                "(quant_research/market_behavior.py) found this pattern; it then survived every adversarial check "
+                "run against it (Part I): decisive positive mean forward return (CI excludes zero) at h=2,3,5,10 "
+                "across development, validation, AND out-of-sample with a FROZEN (dev-fit-only) threshold; not "
+                "concentrated in any single symbol (all 9 US symbols independently positive, range +1.0% to "
+                "+3.7%); survives up to a 60bps round-trip cost assumption; and at h=5 specifically, remains "
+                "decisive even under a conservative Bonferroni correction for the full 68-condition sweep this "
+                "candidate was selected from (family_size=68, corrected z=3.376) in ALL THREE splits -- the only "
+                "horizon that does. Distinct from H_MEANREV_001 (REJECTED): a different metric "
+                "(trailing_return_5 percentile vs. zscore_close_20), market-SPECIFIC (US-only, not pooled with "
+                "NSE) -- H_MEANREV_001's own pooled-market design may have diluted a real, US-specific effect "
+                "into apparent noise, which this hypothesis exists to test directly as a real, tradeable "
+                "strategy rather than a raw price-behavior observation alone."
+            ),
+            expected_effect=(
+                "A LONG-only strategy entering on this frozen condition should show a confident "
+                "POSITIVE_PERFORMANCE verdict (via this project's own promotion gate, applied to REAL simulated "
+                "trades with the standard cost model and risk engine -- not the raw, cost-free price-return "
+                "measurement the candidate was originally found with) in development, validation, AND "
+                "out-of-sample."
+            ),
+            dataset_restrictions=(
+                "US symbols only (AAPL, AMZN, GOOGL, JNJ, JPM, MSFT, NVDA, WMT, XOM) -- this hypothesis makes no "
+                "claim about NSE. LONG-only, matching every other strategy in this project."
+            ),
+            experiment_design=(
+                "quant_research/us_weakness_reversal_signal.py -- a STANDALONE Strategy computing "
+                "trailing_return_5 INLINE from indicator_series['close'] (no precomputed column needed, so this "
+                "reuses backtesting.runner.run_full_backtest and backtesting.exit_experiments."
+                "run_universe_time_based_exit_experiment COMPLETELY UNCHANGED -- zero new runner code), gated on "
+                "a hardcoded, documented, FROZEN threshold (-5.3477%, the exact 5th percentile of the real "
+                "US-pooled development-period trailing_return_5 distribution, n=4928 -- computed once, never "
+                "refit). Two candidates, testing whether the raw price-behavior edge survives becoming an "
+                "actual, cost-aware, risk-sized strategy: A_atr_stop_target (the SAME frozen "
+                "stop=1.5xATR/target=2:1 every other hypothesis in this project's history uses -- isolates "
+                "whether the ENTRY signal alone works with a neutral, non-overfit exit) and "
+                "B_five_bar_time_exit (force-close after exactly 5 bars if neither stop nor target hit -- "
+                "directly informed by h=5 being the one horizon that survived Bonferroni correction in all "
+                "three splits)."
+            ),
+            success_criteria="At least one candidate reaches a confident POSITIVE_PERFORMANCE verdict (development AND validation AND out-of-sample) via strategy.promotion_gate.evaluate_promotion, using REAL simulated trades (real costs, real risk sizing), not the raw price-behavior measurement alone.",
+            failure_criteria="Neither candidate reaches PROMOTED -- i.e. the raw price-behavior edge does not survive becoming an actual, cost-aware, risk-sized trade.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "Run against the real 9-symbol US universe (all 9 backtested successfully, 0 failed) via "
+                "backtesting.runner.run_full_backtest (Candidate A) and backtesting.exit_experiments."
+                "run_universe_time_based_exit_experiment (Candidate B) -- both reused COMPLETELY UNCHANGED, no "
+                "new runner code required. "
+                "A_atr_stop_target (92/37/32 dev/val/oos trades): development expectancy +0.07% (win rate 37.0%, "
+                "PF 1.02), validation +0.54% (win rate 37.8%, PF 1.21), out-of-sample +1.28% (win rate 50.0%, "
+                "PF 1.59) -- every split POSITIVE and IMPROVING out-of-sample, but every mean-return 95% CI still "
+                "straddles zero. PROMOTION VERDICT: INCONCLUSIVE. "
+                "B_five_bar_time_exit (122/43/37 trades): development expectancy +0.41% (win rate 48.4%, "
+                "PF 1.27), validation +0.82% (win rate 53.5%, PF 1.54), out-of-sample +0.86% (win rate 64.9%, "
+                "PF 1.76) -- the SAME all-positive, improving-out-of-sample shape as Candidate A, consistently "
+                "stronger on every metric in every split, but likewise no split reaches a decisive CI. PROMOTION "
+                "VERDICT: INCONCLUSIVE. "
+                "This is the SAME shape as H_EXIT_002's own INCONCLUSIVE result (real, consistent, non-degraded, "
+                "OOS-growing directional signal -- the opposite of the textbook overfitting signature -- but not "
+                "yet statistically decisive), and arguably the most rigorously pre-vetted candidate in this "
+                "project's history before ever reaching a strategy backtest: the underlying raw price-behavior "
+                "finding survived a 68-condition broad sweep, a frozen dev-fit threshold, per-symbol concentration "
+                "checking (all 9 symbols independently positive), a 60bps cost-sensitivity check, AND a "
+                "conservative Bonferroni correction for the full sweep -- and STILL, once turned into an actual "
+                "risk-sized trade with a real stop, the promotion bar was not cleared. Honest interpretation: the "
+                "raw market behavior (price tends to bounce after extreme 5-day weakness) is real and well-"
+                "evidenced; whether it survives becoming a PROFITABLE TRADE depends heavily on execution "
+                "mechanics -- Candidate B's own consistent edge over Candidate A across every metric suggests the "
+                "ATR-based stop (designed for TrendMomentumBaseline's trend-following logic, reused here only for "
+                "cross-hypothesis methodological consistency) may be actively hurting this specific, structurally "
+                "different mean-reversion entry by exiting before the reversal completes -- a real, named lead for "
+                "future exit research (Part K), not pursued further this session per this project's own "
+                "'do not force trades, do not loosen anything to manufacture a promotion' discipline. Sample size "
+                "(9 US symbols only) is also a genuine, named limitation: more trades would sharpen every "
+                "confidence interval shown above one way or the other."
+            ),
+        ),
     )

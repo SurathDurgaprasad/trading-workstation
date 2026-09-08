@@ -139,6 +139,25 @@ def test_h_breakout_001_is_rejected_with_context_filters_making_it_worse():
     assert "REVERSED" in h.evidence
 
 
+def test_h_meanrev_002_is_inconclusive_with_real_us_strategy_backtest_evidence():
+    """TRADING BRAIN EXECUTION LOOP mission -- the most rigorously
+    pre-vetted candidate in this project's history before ever reaching
+    a strategy backtest (survived a 68-condition sweep, a frozen dev-fit
+    threshold, per-symbol concentration checking, cost sensitivity, and
+    a Bonferroni correction). Once turned into an actual risk-sized
+    trade against the real 9-symbol US universe, both candidates show
+    the SAME all-positive, improving-out-of-sample shape as H_EXIT_002
+    -- INCONCLUSIVE, not yet decisive, not promoted."""
+    registry = build_hypothesis_registry()
+    h = next(h for h in registry if h.hypothesis_id == "H_MEANREV_002")
+
+    assert h.status == HypothesisStatus.INCONCLUSIVE
+    assert "INCONCLUSIVE" in h.evidence
+    # Spot-check the real, actually-measured figures are present verbatim.
+    assert "92/37/32" in h.evidence
+    assert "122/43/37" in h.evidence
+
+
 def test_h_entry_004_is_rejected_with_the_real_dev_val_oos_evidence():
     """BUILD THE REAL TRADING BRAIN mission: the momentum-acceleration
     candidates (strategy/momentum_acceleration.py) were run through the
