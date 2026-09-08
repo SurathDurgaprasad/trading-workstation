@@ -136,6 +136,41 @@ def test_regime_no_benchmark_configured(tmp_path, capsys):
     assert "BENCHMARK (none configured):" in output
 
 
+# --- INDIAN MARKET TRADING BRAIN mission: --with-nifty-sectors / --with-india-vix ---
+
+
+def test_regime_subcommand_new_flags_default_off():
+    args = parse_args(["regime"])
+    assert args.with_nifty_sectors is False
+    assert args.with_india_vix is False
+
+
+def test_regime_without_new_flags_shows_not_computed(tmp_path, capsys):
+    db_path = tmp_path / "scanner.db"
+    _save_scan(db_path, _candidate("A", trend_score=1.0))
+
+    args = parse_args(["regime", "--scanner-db", str(db_path)])
+    run_regime_command(args)
+
+    output = capsys.readouterr().out
+    assert "NIFTY SECTORAL INDICES: not computed" in output
+    assert "INDIA VIX: not computed" in output
+
+
+def test_regime_with_nifty_sectors_and_india_vix(tmp_path, capsys):
+    db_path = tmp_path / "scanner.db"
+    _save_scan(db_path, _candidate("A", trend_score=1.0))
+
+    args = parse_args(["regime", "--scanner-db", str(db_path), "--with-nifty-sectors", "--with-india-vix"])
+    run_regime_command(args)
+
+    output = capsys.readouterr().out
+    assert "NIFTY SECTORAL INDICES (9 real, official indices):" in output
+    assert "NIFTY_BANK" in output and "NIFTY_IT" in output
+    assert "INDIA VIX (^INDIAVIX):" in output
+    assert "Last value:" in output
+
+
 # --- scan's breadth line ----------------------------------------------------------
 
 

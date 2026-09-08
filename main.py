@@ -1321,6 +1321,7 @@ def run_regime_command(args: argparse.Namespace) -> None:
     report = build_market_regime_report(
         scan_report, provider=provider, benchmark_symbol=benchmark_symbol, sector_map=sector_map,
         period=args.period, interval=args.interval,
+        include_nifty_sector_indices=args.with_nifty_sectors, include_india_vix=args.with_india_vix,
     )
 
     print("=" * 70)
@@ -1355,6 +1356,24 @@ def run_regime_command(args: argparse.Namespace) -> None:
             print(f"  {sector.sector:24s} n={sector.symbol_count:3d}  avg composite={sector.average_composite_score:+.2f}")
     else:
         print("\nSECTOR STRENGTH: not computed (pass --with-sectors to build one -- costs one extra fetch per symbol).")
+
+    if args.with_nifty_sectors:
+        print(f"\nNIFTY SECTORAL INDICES ({len(report.sector_index_regimes)} real, official indices):")
+        for sector, ctx in report.sector_index_regimes.items():
+            close_text = f"{ctx.last_close:.2f}" if ctx.last_close is not None else "n/a"
+            print(f"  {sector:28s} trend={ctx.trend_regime:10s} volatility={ctx.volatility_regime:16s} close={close_text}")
+    else:
+        print("\nNIFTY SECTORAL INDICES: not computed (pass --with-nifty-sectors -- costs 9 extra fetches).")
+
+    if args.with_india_vix:
+        vix = report.india_vix
+        print(f"\nINDIA VIX ({vix.symbol}):")
+        print(f"  Regime:              {vix.regime}")
+        print(f"  Last value:          {vix.last_value:.2f}" if vix.last_value is not None else "  Last value:          n/a")
+        if vix.ratio_vs_trailing_average is not None:
+            print(f"  Level vs trailing avg: {vix.ratio_vs_trailing_average:.2f}x")
+    else:
+        print("\nINDIA VIX: not computed (pass --with-india-vix -- costs 1 extra fetch).")
 
     _print_provider_metrics(resilient)
 
@@ -3437,6 +3456,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     regime_parser.add_argument("--period", default="2y", help="Historical window for the benchmark's own trend/volatility classification (default: 2y -- SMA200 needs enough warm-up history).")
     regime_parser.add_argument("--interval", default="1d", help="Bar interval (default: 1d).")
     regime_parser.add_argument("--with-sectors", action="store_true", help="Also build a sector-strength ranking (one extra Yahoo fetch per scanned symbol -- default off).")
+    regime_parser.add_argument("--with-nifty-sectors", action="store_true", help="INDIAN MARKET TRADING BRAIN mission: also classify the 9 real, official NIFTY sectoral indices (BANK/FINANCIAL SERVICES/IT/AUTO/PHARMA/FMCG/METAL/REALTY/ENERGY) -- 9 extra Yahoo fetches, default off.")
+    regime_parser.add_argument("--with-india-vix", action="store_true", help="INDIAN MARKET TRADING BRAIN mission: also classify India VIX (current level vs. its own trailing average) -- 1 extra Yahoo fetch, default off.")
     regime_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker protection (default: off).")
 
     research_parser = subparsers.add_parser(

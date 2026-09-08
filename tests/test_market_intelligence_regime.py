@@ -9,10 +9,14 @@ import pytest
 from market.data_provider import OHLCV, MarketDataError, OHLCVBar
 from market_intelligence.models import CandidateScore, ExcludedCandidate, ScanReport
 from market_intelligence.regime import (
+    NIFTY_SECTOR_INDICES,
+    VixRegime,
     VolatilityRegime,
     build_market_regime_report,
     compute_benchmark_context,
     compute_breadth,
+    compute_india_vix_context,
+    compute_sector_index_regimes,
     compute_sector_strength,
 )
 
@@ -230,3 +234,99 @@ def test_build_market_regime_report_default_inherits_the_scans_own_benchmark():
     scan_report = _scan_report([_candidate("A", trend_score=1.0)], benchmark_symbol="^NSEI")
     report = build_market_regime_report(scan_report, provider=_FakeProvider(_uptrend_bars()))  # no benchmark_symbol passed
     assert report.benchmark.symbol == "^NSEI"
+
+
+# --- INDIAN MARKET TRADING BRAIN mission: NIFTY sectoral indices + India VIX ---
+
+
+def test_build_market_regime_report_new_fields_default_off_byte_for_byte_unchanged():
+    """Regression: every EXISTING caller of build_market_regime_report
+    must see identical behavior after this mission's own additions --
+    the new fields must default to empty/None, never silently populated."""
+    scan_report = _scan_report([_candidate("A", trend_score=1.0)], benchmark_symbol="^NSEI")
+    report = build_market_regime_report(scan_report, provider=_FakeProvider(_uptrend_bars()))
+    assert report.sector_index_regimes == {}
+    assert report.india_vix is None
+
+
+def test_compute_sector_index_regimes_covers_every_nifty_sector():
+    provider = _FakeProvider(_uptrend_bars())
+    result = compute_sector_index_regimes(provider=provider, now=_START + timedelta(days=299))
+
+    assert set(result) == set(NIFTY_SECTOR_INDICES)
+    for sector, ctx in result.items():
+        assert ctx.symbol == NIFTY_SECTOR_INDICES[sector]
+        assert ctx.trend_regime == "UPTREND"  # the fake provider serves the same uptrending series for every ticker
+
+
+def test_compute_sector_index_regimes_accepts_a_custom_index_map():
+    provider = _FakeProvider(_uptrend_bars())
+    result = compute_sector_index_regimes({"MY_SECTOR": "^FAKE"}, provider=provider)
+    assert set(result) == {"MY_SECTOR"}
+    assert result["MY_SECTOR"].symbol == "^FAKE"
+
+
+def test_compute_sector_index_regimes_degrades_gracefully_on_one_bad_index():
+    """One bad/unreachable index must never abort the rest -- reuses
+    compute_benchmark_context's own internal degrade-to-UNKNOWN behavior,
+    no new per-index try/except needed."""
+    result = compute_sector_index_regimes(provider=_FailingProvider())
+    assert set(result) == set(NIFTY_SECTOR_INDICES)
+    assert all(ctx.trend_regime == "UNKNOWN" for ctx in result.values())
+
+
+def _flat_vix_bars(n: int = 100, level: float = 13.0) -> list[OHLCVBar]:
+    return [
+        OHLCVBar(timestamp=_START + timedelta(days=i), open=level, high=level + 0.2, low=level - 0.2, close=level, volume=0.0)
+        for i in range(n)
+    ]
+
+
+def test_compute_india_vix_context_flat_history_is_normal():
+    context = compute_india_vix_context(provider=_FakeProvider(_flat_vix_bars()))
+    assert context.symbol == "^INDIAVIX"
+    assert context.last_value == pytest.approx(13.0)
+    assert context.regime == VixRegime.NORMAL.value
+    assert context.ratio_vs_trailing_average == pytest.approx(1.0)
+
+
+def test_compute_india_vix_context_detects_elevated_spike():
+    bars = _flat_vix_bars(n=100, level=13.0)
+    spiked = list(bars)
+    spiked[-1] = OHLCVBar(timestamp=bars[-1].timestamp, open=20.0, high=21.0, low=19.0, close=20.0, volume=0.0)
+    context = compute_india_vix_context(provider=_FakeProvider(spiked))
+    assert context.regime == VixRegime.ELEVATED.value
+    assert context.ratio_vs_trailing_average > 1.3
+
+
+def test_compute_india_vix_context_detects_depressed_dip():
+    bars = _flat_vix_bars(n=100, level=13.0)
+    dipped = list(bars)
+    dipped[-1] = OHLCVBar(timestamp=bars[-1].timestamp, open=8.0, high=8.5, low=7.5, close=8.0, volume=0.0)
+    context = compute_india_vix_context(provider=_FakeProvider(dipped))
+    assert context.regime == VixRegime.DEPRESSED.value
+    assert context.ratio_vs_trailing_average < 0.75
+
+
+def test_compute_india_vix_context_handles_a_provider_failure_gracefully():
+    context = compute_india_vix_context(provider=_FailingProvider())
+    assert context.regime == VixRegime.UNKNOWN.value
+    assert context.last_value is None
+
+
+def test_compute_india_vix_context_unknown_with_insufficient_history():
+    context = compute_india_vix_context(provider=_FakeProvider(_flat_vix_bars(n=10)), lookback=60)
+    assert context.regime == VixRegime.UNKNOWN.value
+    assert context.last_value is not None  # the last value itself is still honestly reported
+    assert context.ratio_vs_trailing_average is None
+
+
+def test_build_market_regime_report_with_nifty_sectors_and_vix_opted_in():
+    scan_report = _scan_report([_candidate("A", trend_score=1.0)], benchmark_symbol="^NSEI")
+    report = build_market_regime_report(
+        scan_report, provider=_FakeProvider(_uptrend_bars()),
+        include_nifty_sector_indices=True, include_india_vix=True,
+    )
+    assert set(report.sector_index_regimes) == set(NIFTY_SECTOR_INDICES)
+    assert report.india_vix is not None
+    assert report.india_vix.symbol == "^INDIAVIX"
