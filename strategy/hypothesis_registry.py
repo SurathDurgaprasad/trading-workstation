@@ -1029,4 +1029,58 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "attempted, per this project's own 'do not become speculative fishing' discipline."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_TRANSMISSION_002",
+            description="USD/INR's prior-day return predicts NSE IT + Pharma exporter stocks' own forward returns.",
+            rationale=(
+                "NSE PREDICTION ENGINE mission, Family E (global -> India transmission), continuing "
+                "H_TRANSMISSION_001's line of research with a second economically-motivated global signal. "
+                "Indian IT and pharma companies derive substantial export revenue billed in USD; INR "
+                "depreciation (USD/INR rising) should plausibly translate into HIGHER INR-denominated earnings "
+                "for the same USD revenue, a real, named economic mechanism distinct from H_TRANSMISSION_001's "
+                "sentiment-transmission story."
+            ),
+            expected_effect="USD/INR prior-day return in the top 20% (INR depreciating) should predict positive forward returns for NSE IT+Pharma exporters; bottom 20% (INR appreciating) should predict negative forward returns.",
+            dataset_restrictions="9 NSE IT+Pharma symbols (TCS.NS, INFY.NS, HCLTECH.NS, TECHM.NS, WIPRO.NS, SUNPHARMA.NS, CIPLA.NS, DIVISLAB.NS, DRREDDY.NS), 5 years daily, conditioned on INR=X (USD/INR).",
+            experiment_design=(
+                "Reuses quant_research/market_behavior.py's build_universe_datasets/measure_condition unchanged. "
+                "USD/INR's own prior-day return computed causally and forward-filled onto each stock's calendar -- "
+                "the same alignment pattern as H_TRANSMISSION_001's Nasdaq alignment. Threshold frozen from the "
+                "development-period pooled distribution only (20th/80th percentile), applied unchanged to "
+                "validation/out-of-sample. Real infrastructure limitation found and worked around: "
+                "backtesting.cache.CachedMarketDataProvider's own path-safety symbol validator rejects 'INR=X' "
+                "(the standard Yahoo USD/INR ticker) because of its '=' character -- not a data problem, a "
+                "filesystem-path-construction guard incidentally catching a legitimate forex ticker format. "
+                "Worked around by fetching USD/INR uncached (a single fetch, acceptable cost) rather than "
+                "loosening the path-safety validator for one symbol; the validator itself was correctly doing "
+                "its job and was not modified."
+            ),
+            success_criteria="Both directions (INR depreciation and appreciation) reach a confident, CI-excludes-zero mean forward return in development, validation, AND out-of-sample, in the economically-predicted direction.",
+            failure_criteria="Either direction fails to replicate decisively out-of-sample, reverses sign, or the pooled IT+Pharma result conceals sector-level disagreement.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Frozen thresholds (development, n=6631, pooled across all 9 symbols): p20=-0.152%, p80=+0.172%. "
+                "USDINR_RISING (INR depreciation), h1/h3/h5: development not decisive at any horizon (CI includes "
+                "zero throughout); validation h1 not decisive, h3 -0.269%/h5 -0.382% (both CI-DECISIVE NEGATIVE -- "
+                "the OPPOSITE sign of the economic prediction); out-of-sample not decisive at any horizon (point "
+                "estimates near zero, mixed sign). USDINR_FALLING (INR appreciation), h1/h3/h5: development h3 "
+                "+0.190% CI-decisive positive (matches the economic prediction's sign for THIS direction, "
+                "inconsistently with the theory's own logic since a mirror-image effect would predict the "
+                "opposite), h1/h5 not decisive; validation not decisive at any horizon; out-of-sample h3 -0.306% "
+                "CI-decisive NEGATIVE -- a sign reversal from development. Neither direction shows a stable, "
+                "theory-consistent, non-reversing effect across all three splits. "
+                "CRITICAL SELF-CRITIQUE FINDING (per this project's own adversarial-review discipline -- 'could "
+                "this be concentrated in one symbol/sector'): the per-symbol concentration check (h=3, "
+                "USDINR_RISING, all periods pooled) reveals the pooled IT+Pharma universe was NOT a valid single "
+                "group -- all 5 IT stocks show NEGATIVE mean returns (TCS -0.199%, INFY -0.262%, HCLTECH -0.180%, "
+                "TECHM -0.043%, WIPRO -0.136%) while all 4 Pharma stocks show POSITIVE mean returns (SUNPHARMA "
+                "+0.170%, CIPLA +0.154%, DIVISLAB +0.168%, DRREDDY +0.198%) under the IDENTICAL condition -- a "
+                "real, clean, opposite-sign sector split that the pooled result completely conceals. REJECTED "
+                "overall (no stable pooled effect survives dev/val/oos), with an explicit, honest design lesson: "
+                "IT and Pharma should never have been pooled as a single 'exporter' bucket for this signal -- a "
+                "genuine follow-up (not pursued this session) would test USD/INR -> IT and USD/INR -> Pharma as "
+                "TWO SEPARATE hypotheses, since they may have genuinely different (or even opposite) real "
+                "sensitivities this pooled test was structurally unable to detect."
+            ),
+        ),
     )
