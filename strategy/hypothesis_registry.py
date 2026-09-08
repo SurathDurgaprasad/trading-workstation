@@ -1083,4 +1083,160 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "sensitivities this pooled test was structurally unable to detect."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_TRANSMISSION_003",
+            description="USD/INR's prior-day return predicts NSE IT stocks' own forward returns, tested SEPARATELY from Pharma this time (see H_TRANSMISSION_002).",
+            rationale=(
+                "TRADING BRAIN mission, direct follow-up to H_TRANSMISSION_002's own finding that pooling IT and "
+                "Pharma concealed opposite-signed behavior under the identical USD/INR condition. Re-run "
+                "IT-only, same design."
+            ),
+            expected_effect="USD/INR rising (INR depreciation) predicts positive forward returns for NSE IT exporters; USD/INR falling predicts negative forward returns.",
+            dataset_restrictions="5 NSE IT symbols (TCS.NS, INFY.NS, HCLTECH.NS, TECHM.NS, WIPRO.NS), 5 years daily, conditioned on INR=X.",
+            experiment_design="Identical machinery and frozen-threshold discipline to H_TRANSMISSION_002, IT-only universe. Adversarial addition: the SAME 5 symbols' UNCONDITIONED (no USD/INR filter) forward returns were also measured across all three splits, to test whether any conditioned effect is genuinely incremental or just restates the sector's own baseline drift.",
+            success_criteria="A conditioned effect that is decisive, theory-consistent, and MATERIALLY DIFFERENT from the unconditioned baseline across development, validation, AND out-of-sample.",
+            failure_criteria="The conditioned result's shape (sign, magnitude) essentially matches the unconditioned baseline's own shape in the same splits -- meaning USD/INR carries no incremental information.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "USDINR_RISING, h1/h3/h5: development not decisive (-0.040%/-0.106%/-0.080%); validation h5 "
+                "CI-decisive NEGATIVE (-0.558%) -- the OPPOSITE of the economic prediction; out-of-sample h1 "
+                "CI-decisive negative (-0.213%). Point estimates negative at every horizon in every split "
+                "(never flips sign), which looks superficially like a real, consistent effect. "
+                "USDINR_FALLING: development not decisive but positive-leaning; validation mixed; out-of-sample "
+                "h3/h5 CI-decisive NEGATIVE (-0.709%/-0.857%) -- a sign reversal from development, REJECTED on "
+                "its own. "
+                "DECISIVE ADVERSARIAL FINDING: IT's own UNCONDITIONED forward returns (no USD/INR filter at all) "
+                "show the SAME shape as USDINR_RISING's conditioned result -- development roughly flat "
+                "(+0.026%/+0.083%/+0.141%, mostly not decisive), validation CI-decisive NEGATIVE "
+                "(-0.061%/-0.189%/-0.323%), out-of-sample CI-decisive NEGATIVE (-0.064%/-0.194%/-0.327%). IT "
+                "stocks were simply in a negative-drift period during validation/out-of-sample REGARDLESS of "
+                "USD/INR direction -- the conditioned result is substantially explained by this baseline drift, "
+                "not a genuine incremental USD/INR transmission effect. REJECTED: USDINR_FALLING fails on its "
+                "own sign-reversal; USDINR_RISING's apparent consistency does not survive the unconditioned-"
+                "baseline comparison."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_TRANSMISSION_004",
+            description="USD/INR's prior-day return predicts NSE Pharma stocks' own forward returns, tested SEPARATELY from IT (see H_TRANSMISSION_002).",
+            rationale="Same as H_TRANSMISSION_003, Pharma-only.",
+            expected_effect="USD/INR rising (INR depreciation) predicts positive forward returns for NSE Pharma exporters; USD/INR falling predicts negative forward returns.",
+            dataset_restrictions="4 NSE Pharma symbols (SUNPHARMA.NS, CIPLA.NS, DIVISLAB.NS, DRREDDY.NS), 5 years daily, conditioned on INR=X.",
+            experiment_design="Identical to H_TRANSMISSION_003, Pharma-only universe, same unconditioned-baseline adversarial comparison.",
+            success_criteria="A conditioned effect decisive, theory-consistent, and materially different from the unconditioned baseline across all three splits.",
+            failure_criteria="The conditioned result's shape matches the unconditioned baseline's own shape.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "USDINR_RISING, h1/h3/h5: development CI-DECISIVE POSITIVE at all 3 horizons (+0.129%/+0.284%/"
+                "+0.320%) -- matches the economic prediction; validation NOT decisive and NEGATIVE-leaning "
+                "(-0.067%/-0.232%/-0.165%, a real dip, not just noise); out-of-sample NOT decisive but "
+                "positive-leaning again (+0.141%/+0.232%/+0.299%). "
+                "USDINR_FALLING, h1/h3/h5: development not decisive, slightly positive; validation not decisive, "
+                "positive; out-of-sample h5 CI-decisive POSITIVE (+0.373%) -- POSITIVE under BOTH USD/INR "
+                "directions is the opposite of what a real bidirectional transmission effect should look like. "
+                "DECISIVE ADVERSARIAL FINDING: Pharma's own UNCONDITIONED forward returns (no USD/INR filter) "
+                "are ALSO decisively positive in development (+0.068%/+0.209%/+0.352%, all CI exclude zero) and "
+                "directionally positive in out-of-sample (+0.054%/+0.147%/+0.243%, h5 CI-decisive) -- essentially "
+                "the SAME shape as both conditioned directions. Pharma stocks simply drifted upward over this "
+                "sample window regardless of USD/INR direction; USD/INR carries no incremental information over "
+                "that baseline drift. REJECTED: the appearance of a theory-consistent effect on the RISING side "
+                "is a restatement of Pharma's own unconditional drift, not a real transmission signal -- caught "
+                "specifically by comparing against the unconditioned baseline, exactly the kind of adversarial "
+                "check this project's own research discipline requires before trusting a promising-looking "
+                "result."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_GAP_001",
+            description="NSE stocks that open with a large overnight gap UP tend to give back part of that gap by the same day's close ('gap fade').",
+            rationale=(
+                "TRADING BRAIN mission, Family 1 (market structure) -- a classic, economically sensible "
+                "microstructure hypothesis (overnight-gap overreaction, intraday mean reversion) not yet tested "
+                "in this project's history. Genuinely new measurement dimension: every prior hypothesis measured "
+                "N-BAR-AHEAD close-to-close forward returns; this measures the SAME bar's own open-to-close move, "
+                "conditioned on how causally-known that bar's own open gapped from the PRIOR bar's close."
+            ),
+            expected_effect="Large gap-up opens (top decile of overnight gap %) show a negative same-day open-to-close return, more negative than the unconditioned baseline.",
+            dataset_restrictions="Full 32-symbol NSE universe, 5 years daily, gap_pct = (open - prior_close) / prior_close computed causally per bar.",
+            experiment_design=(
+                "New standalone measurement (not quant_research/market_behavior.py's existing forward-return "
+                "machinery, which cannot express a same-bar open-to-close outcome): gap_pct and intraday_return "
+                "= (close - open) / open added directly to each build_universe_datasets() frame. Gap-size decile "
+                "thresholds frozen from the development period only (pooled across all 32 symbols), applied "
+                "unchanged to validation/out-of-sample. An UNCONDITIONED control (no gap filter) was measured "
+                "in the same splits specifically to test whether any effect is incremental over the market's own "
+                "typical same-day drift (the adversarial check H_TRANSMISSION_003/004 established the value of)."
+            ),
+            success_criteria="A CI-decisive negative same-day return, more negative than the unconditioned control, in development AND validation AND out-of-sample, that survives realistic NSE intraday round-trip costs (backtesting.costs.CostModel.india_nse_intraday_2026(), ~0.21% round trip).",
+            failure_criteria="The effect reverses sign in any split, does not beat the unconditioned control, or does not survive realistic round-trip costs.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "Frozen thresholds (development, n=23645, pooled): p10=-0.629% (big gap down), p90=+0.839% "
+                "(big gap up). "
+                "GAP UP (top 10%): development n=2365 mean=-0.221% (CI-decisive negative, [-0.294%,-0.147%]); "
+                "validation n=577 mean=-0.116% (CI [-0.253%,+0.021%], JUST touches zero, not quite decisive, "
+                "same direction); out-of-sample n=687 mean=-0.133% (CI-decisive negative, [-0.258%,-0.007%]). "
+                "Direction is negative in EVERY split, decisive in 2 of 3. "
+                "UNCONDITIONED CONTROL (no gap filter): development -0.058%, validation -0.085%, "
+                "out-of-sample -0.026% -- GAP UP's returns are MORE NEGATIVE than this control baseline in ALL "
+                "THREE splits, meaning the effect is genuinely incremental, not a restatement of the market's "
+                "own typical same-day drift (the exact confound that sank H_TRANSMISSION_003/004). "
+                "Per-symbol concentration (full period pooled): broad-based -- 26 of 32 symbols show a negative "
+                "mean return after a big gap up (e.g. MARUTI.NS -0.567%, NTPC.NS -0.477%, POWERGRID.NS -0.469%, "
+                "BHARTIARTL.NS -0.522%, DRREDDY.NS -0.475%), only 6 mildly positive (largest: LT.NS +0.278%, "
+                "n=101) -- not concentrated in a handful of names. "
+                "COST REALITY CHECK (the decisive reason this is INCONCLUSIVE, not PROMOTED): "
+                "backtesting.costs.CostModel.india_nse_intraday_2026() gives a realistic round-trip cost of "
+                "~0.15% slippage (5bps entry + 10bps exit) + ~0.06% fees/taxes (2 fills) = ~0.21% round trip, "
+                "before the flat Rs20-per-fill brokerage. A short-at-open/cover-at-close position capturing this "
+                "effect would net: development +0.221%-0.21%=~+0.01% (barely positive, thin), validation "
+                "+0.116%-0.21%=~-0.09% (NEGATIVE after costs), out-of-sample +0.133%-0.21%=~-0.08% (NEGATIVE "
+                "after costs). The raw price behavior is real and broad-based; the effect size is comparable to "
+                "or smaller than realistic transaction costs in 2 of 3 splits. "
+                "ARCHITECTURAL REALITY CHECK: even setting costs aside, this project's execution/cost "
+                "infrastructure (backtesting.costs.CostModel.slippage_adjusted_price, strategy/baseline.py) "
+                "implements ONLY Side.LONG -- capturing the GAP UP side at all would require short-selling "
+                "capability that does not exist anywhere in this codebase (by design; this project is "
+                "structurally long-only) -- a real, structural, not-yet-addressed barrier to ever promoting "
+                "this specific side, independent of the cost result above. "
+                "INCONCLUSIVE: a real, broad-based, incremental (vs. baseline), non-reversing raw price effect -- "
+                "but not shown to survive realistic costs in most splits, and not currently implementable as a "
+                "strategy in this project's long-only architecture even if it did."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_GAP_002",
+            description="NSE stocks that open with a large overnight gap DOWN tend to recover part of that gap by the same day's close.",
+            rationale="Same as H_GAP_001, the symmetric gap-down side.",
+            expected_effect="Large gap-down opens (bottom decile of overnight gap %) show a positive same-day open-to-close return, more positive than the unconditioned baseline.",
+            dataset_restrictions="Same as H_GAP_001.",
+            experiment_design="Same as H_GAP_001, gap-down (bottom decile) condition.",
+            success_criteria="A CI-decisive positive same-day return, better than the unconditioned control, in development AND validation AND out-of-sample, surviving realistic round-trip costs.",
+            failure_criteria="The effect reverses sign in any split, does not beat the unconditioned control, or does not survive realistic costs.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "GAP DOWN (bottom 10%): development n=2365 mean=+0.128% (CI-decisive positive, "
+                "[+0.053%,+0.202%]); validation n=729 mean=+0.330% (CI-decisive positive, [+0.201%,+0.459%], "
+                "the strongest single split of either gap direction); out-of-sample n=947 mean=+0.009% (CI "
+                "[-0.102%,+0.119%], not decisive, essentially flat). Direction never reverses sign (positive "
+                "or flat in every split), decisive in 2 of 3. "
+                "Beats the unconditioned control (-0.058%/-0.085%/-0.026%, see H_GAP_001) in development and "
+                "validation by a wide, decisive margin; out-of-sample is close to the control (+0.009% vs. "
+                "-0.026%), a smaller but still favorable gap. "
+                "COST REALITY CHECK: development +0.128%-0.21%=~-0.08% (NEGATIVE after ~0.21% realistic "
+                "round-trip costs), validation +0.330%-0.21%=~+0.12% (the ONE split that survives), "
+                "out-of-sample +0.009%-0.21%=~-0.20% (deeply negative after costs). Only 1 of 3 splits nets "
+                "positive after realistic costs. "
+                "ARCHITECTURAL NOTE: unlike H_GAP_001, this side (long at open, sell at close) is at least "
+                "DIRECTIONALLY compatible with this project's long-only execution model -- but same-day, "
+                "forced-exit-at-close intraday execution does not exist anywhere in backtesting/execution.py "
+                "either (every existing strategy holds across multiple bars with a stop/target, never a forced "
+                "same-bar exit), so this would still need genuinely new execution infrastructure to become a "
+                "real strategy, not merely a sign-flip of an existing one. "
+                "INCONCLUSIVE: real, non-reversing, broad raw price effect, stronger than H_GAP_001's on the "
+                "development/validation splits, but out-of-sample weakens toward the control and does not "
+                "clearly survive realistic costs in 2 of 3 splits -- not promoted, and would need new intraday "
+                "execution infrastructure to ever be tested as a real strategy regardless."
+            ),
+        ),
     )
