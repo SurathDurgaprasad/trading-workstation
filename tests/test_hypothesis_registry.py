@@ -158,6 +158,26 @@ def test_h_meanrev_002_is_inconclusive_with_real_us_strategy_backtest_evidence()
     assert "122/43/37" in h.evidence
 
 
+def test_h_transmission_001_is_inconclusive_with_an_honest_asymmetry():
+    """INDIAN MARKET TRADING BRAIN mission, Family C (global -> India
+    transmission) -- Nasdaq's prior-session return vs. NIFTY IT-sector
+    stocks' own forward returns. Real, honest asymmetry: the decline
+    side stays direction-consistent across all three splits (loses
+    significance OOS, never reverses); the advance side is decisive in
+    dev+val but genuinely REVERSES sign out-of-sample. Also the
+    hypothesis whose own research run found and triggered the fix for a
+    real cache-depth data-integrity bug (see backtesting/cache.py)."""
+    registry = build_hypothesis_registry()
+    h = next(h for h in registry if h.hypothesis_id == "H_TRANSMISSION_001")
+
+    assert h.status == HypothesisStatus.INCONCLUSIVE
+    assert "INCONCLUSIVE" in h.evidence
+    # Spot-check the real, actually-measured figures are present verbatim.
+    assert "n=734" in h.evidence
+    assert "n=735" in h.evidence
+    assert "REVERSE sign" in h.evidence
+
+
 def test_h_entry_004_is_rejected_with_the_real_dev_val_oos_evidence():
     """BUILD THE REAL TRADING BRAIN mission: the momentum-acceleration
     candidates (strategy/momentum_acceleration.py) were run through the

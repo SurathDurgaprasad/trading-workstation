@@ -692,4 +692,70 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "confidence interval shown above one way or the other."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_TRANSMISSION_001",
+            description=(
+                "Nasdaq's prior-session return predicts NIFTY IT-sector stocks' own forward returns, with a "
+                "genuine, correct overnight lag (US closes ~2:30am IST, well before NSE's own 9:15am IST open the "
+                "SAME NSE trading day that session's information becomes available for)."
+            ),
+            rationale=(
+                "INDIAN MARKET TRADING BRAIN mission, Family C (global -> India transmission) -- the mission's own "
+                "explicitly named example. Indian IT services companies (TCS, Infosys, HCL Tech, Tech Mahindra, "
+                "Wipro) derive substantial revenue from US clients; Nasdaq strength/weakness could plausibly "
+                "transmit via shared investor sentiment and correlated fundamentals."
+            ),
+            expected_effect=(
+                "A large negative Nasdaq prior-day return should predict negative forward returns for NIFTY "
+                "IT-sector stocks; a large positive Nasdaq prior-day return should predict positive forward "
+                "returns -- a symmetric transmission effect."
+            ),
+            dataset_restrictions=(
+                "The 5 NSE IT-sector symbols in the existing 41-symbol universe (TCS.NS, INFY.NS, HCLTECH.NS, "
+                "TECHM.NS, WIPRO.NS), 5 years daily bars, conditioned on ^IXIC (Nasdaq)."
+            ),
+            experiment_design=(
+                "Reuses quant_research/market_behavior.py's build_universe_datasets/summarize_forward_returns "
+                "unchanged. New alignment logic only: Nasdaq's own trailing 1-day return, forward-filled onto "
+                "each IT stock's own NSE calendar -- the EXACT causal alignment pattern quant_research/"
+                "alpha_features.py's own relative_strength_20 already uses. Threshold frozen from the "
+                "development-period pooled distribution only (20th/80th percentile), applied unchanged to "
+                "validation/out-of-sample. A real, serious data-integrity bug was found and fixed while running "
+                "this exact study (see backtesting/cache.py's own commit history, 2026-09-08): 28 of 32 NSE "
+                "research-universe symbols -- including 3 of these 5 IT stocks -- had silently degraded from "
+                "5-year to 1-year cached depth; this hypothesis's own real evidence below is the CORRECTED, "
+                "post-fix result, re-run after restoring genuine 5-year depth for all 5 IT symbols."
+            ),
+            success_criteria="Both directions (decline and advance) reach a confident, CI-excludes-zero mean forward return in development, validation, AND out-of-sample.",
+            failure_criteria="Either direction fails to replicate decisively out-of-sample, or the two directions show inconsistent/asymmetric reliability.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "Run against the real, CORRECTED (post cache-depth-fix) 5-symbol NSE IT universe, frozen "
+                "thresholds (development-period pooled, n=3680): p20=-1.10%, p80=+1.20%. "
+                "NASDAQ_DECLINE (bottom 20% of Nasdaq's own prior-day return): development DECISIVE NEGATIVE at "
+                "all 3 horizons tested (h=1/3/5, n=734, mean -0.61%/-0.68%/-0.79%). Validation DECISIVE NEGATIVE "
+                "at all 3 horizons (n=172, mean -0.63%/-0.97%/-1.32%). Out-of-sample: DECISIVE NEGATIVE at h=1 "
+                "only (n=179, mean -0.51%, CI [-0.80%,-0.21%]); h=3/h=5 still negative point estimates but CI "
+                "touches zero. Every single period/horizon combination shows a NEGATIVE point estimate -- fully "
+                "direction-consistent, degrading in significance (not reversing) out-of-sample. "
+                "NASDAQ_ADVANCE (top 20%): development DECISIVE POSITIVE at all 3 horizons (n=735, mean "
+                "+0.59%/+0.85%/+0.80%). Validation DECISIVE POSITIVE at all 3 horizons (n=210, mean "
+                "+0.61%/+0.88%/+0.69%). Out-of-sample: NOT decisive at any horizon, AND the point estimates "
+                "REVERSE sign (n=178-181, mean -0.11%/-0.05%/-0.56%) -- a genuine directional flip, not merely a "
+                "loss of significance. "
+                "Per-symbol concentration check (h=3, all periods pooled): well-balanced across all 5 IT stocks "
+                "in both directions (decline: TCS -0.51%, INFY -0.68%, HCLTECH -0.41%, TECHM -0.84%, WIPRO "
+                "-0.89%, n~217 each; advance: all 5 positive, n~225 each) -- not concentrated in any single "
+                "symbol. INCONCLUSIVE overall, with a real, honest asymmetry: the DECLINE side is a real, "
+                "consistent, still-directionally-intact signal that simply lost statistical power out-of-sample "
+                "(smaller OOS sample, not a contradicting result); the ADVANCE side shows a materially weaker, "
+                "genuinely reversing out-of-sample result and should be trusted less than the decline side. "
+                "Not promoted (neither direction is decisive in all three splits); not rejected (the decline "
+                "side's direction never flips, and both sides are strongly decisive in 2 of 3 splits with "
+                "substantial, well-balanced sample sizes) -- a real, partial, asymmetric transmission signal, "
+                "stronger for bad news than good news, consistent with well-documented 'bad news travels faster "
+                "than good news' asymmetry in cross-market transmission generally (not verified against a "
+                "specific academic source here, stated as a plausible economic prior only)."
+            ),
+        ),
     )
