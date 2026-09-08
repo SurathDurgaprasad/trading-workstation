@@ -42,50 +42,58 @@ extreme-gap (3%+) sub-finding turned out to be a small-sample illusion
 that failed its own development-period check. **REJECTED as a
 currently tradeable edge** — see H_GAP_003 for the full evidence.
 
-The remaining candidate — and now this project's single most credible
-lead:
+The remaining candidate — genuinely the most-tested lead this project
+has, and the honest picture is now more complicated than it looked one
+research pass ago:
 
 - Market/sector-divergence conditioning on the baseline BUY signal
-  (H_CONTEXT_MARKET_002/SECTOR_002/ALIGN_001) has now ALSO been through
-  the same adversarial deep-validation gap-fade received (H_CONTEXT_
-  MARKET_004) and, unlike gap-fade, **substantially strengthened**: it
-  clears realistic costs with wide margin (still solidly positive even
-  at a 0.30% round-trip cost, well past the ~0.21% realistic estimate),
-  is CI-decisive in BOTH the above- and below-median liquidity halves
-  of the universe (not confined to illiquid names, the exact check that
-  killed gap-fade), is not dominated by a single sector, and shows no
-  clean year-over-year decay pattern. It is directly implementable with
-  the EXISTING long-only, multi-bar-hold backtesting engine — no new
-  execution infrastructure needed, unlike gap-fade. What it still lacks
-  is out-of-sample statistical POWER (as low as n=10 for the compound
-  market+sector condition) — a sample-size problem, not a robustness
-  problem, and the correct next step is growing that sample, not more
-  adversarial slicing of what already exists.
+  (H_CONTEXT_MARKET_002/SECTOR_002/ALIGN_001) survived an adversarial
+  deep-validation pass (H_CONTEXT_MARKET_004: costs, liquidity, sector,
+  time) that killed gap-fade. Following that entry's own recommended
+  next step — grow the out-of-sample sample rather than slice further
+  — the universe was extended from 5 to a genuine, verified 10 years of
+  NSE history (H_CONTEXT_MARKET_005). The result was NOT a clean
+  confirmation: the market-level condition's own sign **reverses**
+  between 2016-2022 (decisively negative) and 2022-2026 (decisively
+  positive) — a real, previously-undetectable time-instability the
+  shorter window could never have surfaced, meaning the original
+  finding may be specific to the post-2021 market era rather than a
+  stable mechanism. The one genuine gain: the compound "both market and
+  sector diverge" condition's out-of-sample sample grew from an
+  unusable n=10 to a properly-powered, CI-decisive n=236 — solving the
+  exact limitation H_CONTEXT_MARKET_004 flagged — though development
+  and validation do not confirm it under the new, longer partition.
+  Both facts (the instability AND the improved power) must be read
+  together, not selectively.
 
 Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(29 hypotheses tested to date).
+(30 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
-None formally meet the bar yet (decisive across all three splits with
-adequate OOS power) — but the market/sector-divergence family is now
-the closest this project has come: it has survived the same adversarial
-deep-validation pass that killed gap-fade, and its only remaining gap is
-out-of-sample sample size, not a demonstrated flaw.
+None meet the bar (decisive across all three splits with adequate OOS
+power). The market/sector-divergence family survived the same
+adversarial deep-validation pass that killed gap-fade — but the 10-year
+re-run (H_CONTEXT_MARKET_005) then found the market-level condition's
+own sign is unstable across the full available history, which is a
+step BACKWARD from "promising," not forward, even though the compound
+condition's OOS sample is now properly powered for the first time.
 
-## INCONCLUSIVE HYPOTHESES (11)
+## INCONCLUSIVE HYPOTHESES (12)
 
 H_ENTRY_003, H_ENTRY_005, H_EXIT_002, H_MEANREV_002, H_CONTEXT_MARKET_002,
-H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_CONTEXT_MARKET_004 (the deep-
-validation follow-up — see above), H_GAP_001, H_GAP_002 (the original
-gap-fade discovery record — kept as history; see H_GAP_003 for why the
-underlying idea did not ultimately survive), and H_TRANSMISSION_001
-(Nasdaq → NIFTY IT, honest decline/advance asymmetry). Full evidence for
-each in `strategy/hypothesis_registry.py`.
+H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_CONTEXT_MARKET_004,
+H_CONTEXT_MARKET_005 (the 10-year re-run — found real sign-instability
+pre-2022 alongside improved OOS power for the compound condition — see
+above), H_GAP_001, H_GAP_002 (the original gap-fade discovery record —
+kept as history; see H_GAP_003 for why the underlying idea did not
+ultimately survive), and H_TRANSMISSION_001 (Nasdaq → NIFTY IT, honest
+decline/advance asymmetry). Full evidence for each in `strategy/
+hypothesis_registry.py`.
 
 ## REJECTED HYPOTHESES (17)
 
@@ -157,13 +165,14 @@ rebuilt, this segment.
    express and track everything the mission asks for; what it lacks is
    elapsed time and resolved outcomes. No amount of further engineering
    fixes this — only continued, undisturbed live observation does.
-2. **Out-of-sample power, specifically for the now-strengthened
-   market/sector-divergence family.** It has survived every robustness
-   check thrown at it (cost, liquidity, sector, time) — but robustness
-   on the full-period sample is not the same claim as decisive
-   out-of-sample performance, and the OOS sample for the compound
-   condition is as thin as n=10. Promoting on robustness alone, without
-   growing that sample first, would still be premature.
+2. **Regime/era-dependence hiding behind a 5-year window.** The single
+   most important lesson from H_CONTEXT_MARKET_005: a finding that
+   looked stable across a 5-year sample reversed sign entirely in the
+   6 years before that window. Every remaining INCONCLUSIVE hypothesis
+   in this registry was ALSO only ever tested on 5 years of data
+   (or less) — this specific risk has not been checked for any of them
+   yet, and should be treated as a standing methodological gap, not a
+   one-off finding specific to the divergence family.
 3. **Small-sample illusions hiding inside a real-looking pooled
    result.** H_GAP_003's own extreme-gap sub-finding (a huge, exciting-
    looking +0.745% pooled effect that turned out to have zero support
@@ -172,6 +181,12 @@ rebuilt, this segment.
    number from this point forward must be re-split into dev/val/oos and
    checked for per-symbol sample size before being trusted, even when
    it emerges from an otherwise-legitimate pre-specified bucket scheme.
+4. **The temptation to cite only the favorable half of a mixed
+   result.** H_CONTEXT_MARKET_005 found genuine improvement (the
+   compound condition's OOS sample is now properly powered) AND a
+   genuine complication (sign instability pre-2022) in the SAME run.
+   Both must be carried forward together in any future summary of this
+   line of research.
 
 ## NEXT HIGHEST-VALUE RESEARCH QUESTION
 
@@ -181,10 +196,12 @@ directional forecasts recorded 2026-09-08 (and the 10 existing BUY
 predictions) resolve, then re-run `evaluate-forecasts`/`evaluate`/
 `learn` for the first real calibration read this project has ever had.
 
-If a genuinely new research question is wanted before then: **grow the
-out-of-sample sample for the market/sector-divergence family**
-(H_CONTEXT_MARKET_004's own stated correct next step) — a longer
-history and/or a larger, better-sourced NSE sector map (currently only
-20 of 32 universe symbols are sector-tagged) would directly attack the
-one remaining, demonstrated gap in this project's strongest current
-candidate, rather than another new hypothesis family.
+If a genuinely new research question is wanted before then: **the
+10-year NSE cache is now available for every symbol in this universe —
+re-run the era-stability check H_CONTEXT_MARKET_005 just did on the
+divergence family against every other still-INCONCLUSIVE hypothesis**
+(gap-fade already REJECTED, so lower priority; H_MEANREV_002 and
+H_TRANSMISSION_001 were both 5-year-or-shorter US/global-linked studies
+worth the same scrutiny). A finding that only ever survived a 5-year
+window has not yet earned the same confidence as one checked against
+the decade this project's own data now makes available for free.

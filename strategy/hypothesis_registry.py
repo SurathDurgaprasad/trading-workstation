@@ -1402,4 +1402,72 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "better-sourced sector map), not further robustness slicing of what's already available."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_CONTEXT_MARKET_005",
+            description=(
+                "Re-run H_CONTEXT_MARKET_002/SECTOR_002/ALIGN_001 against genuine 10-year NSE history (up from "
+                "5 years) -- H_CONTEXT_MARKET_004's own stated correct next step, growing out-of-sample "
+                "statistical power rather than further robustness slicing."
+            ),
+            rationale=(
+                "EDGE VALIDATION mission, Phase 9 priority rule. The 32-symbol universe (and the NIFTY/sector-"
+                "index/India-VIX context tickers) were found to have genuine, clean 10-year Yahoo depth "
+                "(verified via a real fetch before trusting it, per this project's own repeated cache-depth-"
+                "incident lesson) -- refetched and cache-verified (main.py cache-status) before running any "
+                "research against it."
+            ),
+            expected_effect="The market/sector-divergence effect should replicate with the same sign across a longer history, with a larger, more decisive out-of-sample sample.",
+            dataset_restrictions="Same 32-symbol NSE universe (21 sector-taggable), now 10 years daily (2016-09-08 to 2026-09-08, ~2474 bars) instead of 5.",
+            experiment_design=(
+                "IMPORTANT METHODOLOGICAL CAVEAT, stated upfront: extending the period changes backtesting."
+                "splits.split_periods' own 60/20/20 date boundaries -- this is NOT the original 5-year "
+                "validation/out-of-sample data with more appended; it is an entirely new development "
+                "(2016-2022) / validation (2022-2024) / out-of-sample (2024-2026) partition over a longer span. "
+                "Treated honestly as an independent replication attempt over a different, larger sample, not as "
+                "literally 'the same test with a bigger tail.' Same condition_fns as H_CONTEXT_MARKET_002/"
+                "SECTOR_002/ALIGN_001, unchanged."
+            ),
+            success_criteria="The same sign and rough magnitude replicate across all three splits of the new, longer partition.",
+            failure_criteria="The effect reverses sign between the new development period and the original finding, indicating the original result was specific to a sub-period rather than a stable mechanism.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "UNCONDITIONED CONTROL, 10y, h5/h10: development (2016-2022) n=17375 +0.323%/+0.628% (CI-"
+                "decisive positive); validation (2022-2024) n=6752 +0.328%/+0.723% (CI-decisive positive -- "
+                "NOTE this reverses the original 5-year study's own validation sign, which was decisively "
+                "NEGATIVE); out-of-sample (2024-2026) n=4785/4754 -0.173%/-0.361% (CI-decisive negative). The "
+                "unconditioned baseline's own shape is now completely different once the window is extended -- "
+                "a first sign that period selection materially changes this project's headline numbers. "
+                "MARKET_DOWN (H_CONTEXT_MARKET_002's own condition), h5/h10: development n=1068 "
+                "**-0.475%/-0.904% (CI-DECISIVE NEGATIVE)** -- the OPPOSITE SIGN of the original 5-year study's "
+                "own development-period finding (+0.573%/+1.040%, decisively positive); validation n=537 "
+                "+0.794%/+1.496% (CI-decisive positive); out-of-sample n=760 +0.531%/+0.946% (CI-decisive "
+                "positive). The effect's sign is NOT stable across the full available history -- it is "
+                "decisively NEGATIVE in 2016-2022 and decisively POSITIVE in 2022-2026, a genuine, previously-"
+                "undetected time-instability the shorter 5-year window (which only ever covered the "
+                "post-2021-positive era) could not have revealed, and which H_CONTEXT_MARKET_004's own year-by-"
+                "year check (2021-2026 only) also could not have caught. "
+                "SECTOR_DOWN, h5/h10: development n=702 -0.085%/-0.148% (NOT decisive, near flat -- less "
+                "alarming than MARKET_DOWN's own reversal, but does not confirm the original positive finding "
+                "either); validation n=168 +0.531%(not decisive)/+1.205%(CI-decisive positive); out-of-sample "
+                "n=290 +0.472%/+0.873% (both CI-decisive positive). "
+                "BOTH_DIVERGE (H_CONTEXT_ALIGN_001's own compound condition) -- THE ONE GENUINE IMPROVEMENT: "
+                "development n=230 -0.104%/-0.324% (not decisive, mildly negative); validation n=81 "
+                "+0.536%/+0.812% (not decisive, CI includes zero); **out-of-sample n=236 (up from the original "
+                "study's own n=10) mean +0.836%/+1.350%, BOTH CI-DECISIVE POSITIVE** ([+0.378%,+1.294%] / "
+                "[+0.742%,+1.959%]) -- genuinely solves the exact sample-size problem H_CONTEXT_MARKET_004 named "
+                "as the binding constraint, for the first time giving this specific compound condition real "
+                "out-of-sample statistical power. But development and validation do NOT confirm it under this "
+                "particular partition, so it cannot be called decisive across all three splits. "
+                "STILL INCONCLUSIVE, an honestly mixed result: this was NOT the clean confirmation hoped for. "
+                "The market-level condition's sign instability across 2016-2022 vs. 2022-2026 is a real, "
+                "material finding that argues AGAINST treating the original 5-year discovery as a stable, "
+                "timeless mechanism -- it may instead be specific to the post-2021 market era this project's "
+                "data happens to have been built around. The one genuine positive: the compound BOTH_DIVERGE "
+                "condition's out-of-sample sample is now properly powered and decisive, which the original "
+                "study's own n=10 could never have been. Do not promote on the strength of this entry alone -- "
+                "the honest interpretation is that a longer history surfaced a real complication (period-"
+                "dependence) at the same time it solved a real limitation (sample size), and both facts must be "
+                "carried forward together, not selectively cited."
+            ),
+        ),
     )
