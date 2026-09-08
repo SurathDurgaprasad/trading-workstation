@@ -122,6 +122,27 @@ class CacheStalenessRecord:
     age_days: float | None
     """Wall-clock days since retrieved_at, computed against the moment
     this report was generated. None when retrieved_at is None."""
+    bar_count: int | None
+    """INDIAN MARKET TRADING BRAIN mission -- from meta.json's own
+    "bar_count" field, which CachedMarketDataProvider._write() has
+    always recorded but this report never surfaced before. Real, found
+    gap: this AGE check alone cannot catch a cache that is fresh but
+    SHALLOW -- e.g. a symbol first cache-MISSED by a caller using a
+    short --period (this project's own scheduler commands default to
+    --period 1y) silently persists at that depth forever afterward
+    (CachedMarketDataProvider serves whatever's cached on a HIT,
+    regardless of what period is later requested -- see its own
+    docstring). A shallow cache passes the age check cleanly while
+    being unusable for anything needing real historical depth (e.g.
+    SMA200 warm-up, a 5-year backtest). Found via exactly this failure
+    mode in production data/market/: 28 of 32 NSE research-universe
+    symbols had silently degraded from ~1240 bars (5y) to 252 bars (1y)
+    after a scheduler run first-cached them with its own shorter
+    default, invisible to this report until bar_count was added."""
+    period: str | None
+    """The `period` argument used for the fetch that produced the
+    CURRENTLY cached file (meta.json's own "period" field) -- context
+    for bar_count above; None under the same conditions as retrieved_at."""
 
 
 def report_cache_staleness(
@@ -140,6 +161,8 @@ def report_cache_staleness(
 
         retrieved_at = None
         data_end = None
+        bar_count = None
+        period = None
         if meta_path.exists():
             try:
                 meta = json.loads(meta_path.read_text())
@@ -147,10 +170,17 @@ def report_cache_staleness(
                     retrieved_at = datetime.fromisoformat(meta["retrieved_at"])
                 if meta.get("end"):
                     data_end = datetime.fromisoformat(meta["end"])
+                if isinstance(meta.get("bar_count"), int):
+                    bar_count = meta["bar_count"]
+                if meta.get("period"):
+                    period = meta["period"]
             except (json.JSONDecodeError, ValueError):
                 pass  # malformed meta.json -- report as unknown (None), never a fabricated age
 
         age_days = (now - retrieved_at).total_seconds() / 86400 if retrieved_at is not None else None
-        records.append(CacheStalenessRecord(symbol=normalized, interval=interval, retrieved_at=retrieved_at, data_end=data_end, age_days=age_days))
+        records.append(CacheStalenessRecord(
+            symbol=normalized, interval=interval, retrieved_at=retrieved_at, data_end=data_end, age_days=age_days,
+            bar_count=bar_count, period=period,
+        ))
 
     return records

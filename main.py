@@ -2644,25 +2644,40 @@ def run_cache_status_command(args: argparse.Namespace) -> None:
 
     records = report_cache_staleness(symbols, interval=args.interval)
 
-    print("=" * 78)
-    print(f"CACHE STALENESS (interval={args.interval}) -- {len(records)} symbol(s)")
-    print("=" * 78)
-    print(f"{'SYMBOL':16s} {'RETRIEVED (UTC)':26s} {'DATA END':26s} {'AGE (days)':10s} FLAG")
+    print("=" * 100)
+    print(f"CACHE STALENESS & DEPTH (interval={args.interval}) -- {len(records)} symbol(s)")
+    print("=" * 100)
+    print(f"{'SYMBOL':16s} {'RETRIEVED (UTC)':26s} {'AGE (days)':10s} {'BARS':6s} {'PERIOD':8s} FLAG")
     for r in sorted(records, key=lambda r: (r.age_days is None, -(r.age_days or 0))):
         retrieved_text = r.retrieved_at.isoformat() if r.retrieved_at else "never cached"
-        end_text = r.data_end.isoformat() if r.data_end else "n/a"
         if r.age_days is None:
-            age_text, flag = "n/a", ""
+            age_text, age_flag = "n/a", ""
         else:
             age_text = f"{r.age_days:.1f}"
-            flag = "STALE (>30d)" if r.age_days > args.stale_after_days else ""
-        print(f"{r.symbol:16s} {retrieved_text:26s} {end_text:26s} {age_text:10s} {flag}")
+            age_flag = "STALE" if r.age_days > args.stale_after_days else ""
+        bars_text = str(r.bar_count) if r.bar_count is not None else "n/a"
+        period_text = r.period or "n/a"
+        # INDIAN MARKET TRADING BRAIN mission: a real, found gap -- age
+        # alone cannot catch a cache that is fresh but SHALLOW (e.g. a
+        # symbol first cache-MISSED with a short --period stays that
+        # shallow forever afterward). --shallow-below-bars gives the
+        # operator an explicit, honest way to flag this; it is NOT a
+        # universal "correct" depth (that depends entirely on the
+        # caller's own purpose), so it defaults to off (0 = no flag)
+        # rather than guessing one.
+        depth_flag = "SHALLOW" if (args.shallow_below_bars > 0 and r.bar_count is not None and r.bar_count < args.shallow_below_bars) else ""
+        flag = " ".join(f for f in (age_flag, depth_flag) if f)
+        print(f"{r.symbol:16s} {retrieved_text:26s} {age_text:10s} {bars_text:6s} {period_text:8s} {flag}")
 
     stale_count = sum(1 for r in records if r.age_days is not None and r.age_days > args.stale_after_days)
     never_cached_count = sum(1 for r in records if r.retrieved_at is None)
     print()
     print(f"{stale_count} symbol(s) stale (>{args.stale_after_days} days), {never_cached_count} never cached.")
+    if args.shallow_below_bars > 0:
+        shallow_count = sum(1 for r in records if r.bar_count is not None and r.bar_count < args.shallow_below_bars)
+        print(f"{shallow_count} symbol(s) shallow (<{args.shallow_below_bars} bars).")
     print("Caching has NO automatic invalidation -- delete a symbol's data/market/<SYMBOL>/ files to force a refresh.")
+    print("Depth is served as-cached regardless of a later caller's own requested --period -- a symbol first cached with a short period stays that shallow until its files are deleted and refetched.")
 
 
 # --------------------------------------------------------------------------
@@ -3402,6 +3417,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     cache_status_parser.add_argument("--symbols", type=str, default=None, help="Comma-separated symbols to check. Default: every symbol currently cached under data/market/.")
     cache_status_parser.add_argument("--interval", type=str, default="1d", help="Bar interval to check (default: 1d).")
     cache_status_parser.add_argument("--stale-after-days", type=float, default=30.0, help="Age threshold (days) above which a symbol is flagged STALE (default: 30).")
+    cache_status_parser.add_argument("--shallow-below-bars", type=int, default=0, help="INDIAN MARKET TRADING BRAIN mission: bar-count threshold below which a symbol is flagged SHALLOW (default: 0 = off -- 'adequate depth' depends entirely on your own purpose, so this never guesses one; e.g. pass 1000 to flag anything short of roughly 5 years of daily bars).")
 
     readiness_check_parser = subparsers.add_parser(
         "readiness-check",

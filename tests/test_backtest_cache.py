@@ -133,6 +133,39 @@ def test_staleness_report_returns_none_fields_for_a_symbol_never_cached():
     assert record.retrieved_at is None
     assert record.data_end is None
     assert record.age_days is None
+    assert record.bar_count is None
+    assert record.period is None
+
+
+# --- INDIAN MARKET TRADING BRAIN mission: bar_count/period (cache DEPTH, not just age) ---
+
+
+def test_staleness_report_surfaces_bar_count_and_period(tmp_path):
+    """Regression: this real gap was found via a genuine production
+    incident -- 28 of 32 NSE research-universe symbols silently
+    degraded from ~1240 bars (5y) to 252 bars (1y) after a scheduler
+    run first-cached them with its own shorter default period, invisible
+    to this report until bar_count/period were added. meta.json already
+    recorded both fields; this report just never read them back."""
+    inner = _CountingProvider(_sample_ohlcv("TEST"))
+    cached = CachedMarketDataProvider(inner, cache_root=tmp_path)
+    cached.fetch_ohlcv("TEST", period="5y", interval="1d")
+
+    records = report_cache_staleness(["TEST"], interval="1d", cache_root=tmp_path)
+
+    assert records[0].bar_count == 3  # _sample_ohlcv's own 3-row fixture
+    assert records[0].period == "5y"
+
+
+def test_staleness_report_bar_count_reflects_a_genuinely_shallow_cache(tmp_path):
+    inner = _CountingProvider(_sample_ohlcv("TEST"))
+    cached = CachedMarketDataProvider(inner, cache_root=tmp_path)
+    cached.fetch_ohlcv("TEST", period="1y", interval="1d")  # a caller who only asked for 1y
+
+    records = report_cache_staleness(["TEST"], interval="1d", cache_root=tmp_path)
+
+    assert records[0].period == "1y"
+    assert records[0].bar_count == 3
 
 
 def test_staleness_report_returns_one_record_per_symbol_in_the_same_order(tmp_path):
