@@ -15,6 +15,13 @@ a new family gets its own id prefix (e.g. H_MEANREV_*) so the id alone
 signals which market mechanism is under test, never conflated with "one
 more TrendMomentumBaseline tweak."
 
+INDIAN TRADING DECISION BRAIN mission: H_CONTEXT_MARKET_*/H_CONTEXT_SECTOR_*/
+H_CONTEXT_VIX_* test whether MARKET/SECTOR/VIX CONTEXT changes the
+frozen baseline stock-level BUY condition's own forward returns -- a
+different question from every prior family (which stock-level SIGNAL
+works), asking instead whether CONTEXT can act as a genuine decision
+filter on top of a signal already held fixed.
+
 This is a plain, honest ledger, not a claim of completeness: most
 entries are OPEN (not yet tested) by design -- populating a hypothesis
 with a status of SUPPORTED/REJECTED/INCONCLUSIVE requires the
@@ -756,6 +763,219 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "stronger for bad news than good news, consistent with well-documented 'bad news travels faster "
                 "than good news' asymmetry in cross-market transmission generally (not verified against a "
                 "specific academic source here, stated as a plausible economic prior only)."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_CONTEXT_MARKET_001",
+            description="The frozen baseline stock-level BUY condition (uptrend structure + bullish RSI momentum) performs better when the broader NIFTY 50 index is itself in an uptrend.",
+            rationale=(
+                "INDIAN TRADING DECISION BRAIN mission, Family A (market context conditioning), Phase 5. Naive "
+                "prior: 'a rising tide lifts all boats' -- a stock signal should be more reliable when the whole "
+                "market is supportive. The mission explicitly warns not to assume this and to let the data decide."
+            ),
+            expected_effect="Conditional forward returns for the baseline BUY condition should be higher, and/or its win rate higher, when market_trend_regime == TRENDING_UP versus unconditioned.",
+            dataset_restrictions="Full 32-symbol NSE universe, 5 years daily, baseline BUY condition (see H_CONTEXT_MARKET_002 for its exact causal definition) conditioned on ^NSEI's own causal trend_regime (backtesting.regime.classify_trend_at applied to ^NSEI's own OHLCV).",
+            experiment_design=(
+                "Reuses quant_research/market_behavior.py's build_universe_datasets/measure_condition unchanged. "
+                "New module quant_research/context_experiments.py adds only the missing piece: "
+                "build_benchmark_regime_series() computes an EXTERNAL benchmark's own causal trend regime as a "
+                "date-indexed series, and attach_external_regime() forward-fills it onto each stock's own "
+                "SymbolDataset.frame -- the identical causal cross-market alignment pattern "
+                "quant_research/alpha_features.py's relative_strength_20 already uses. Horizons 5/10 bars, "
+                "development/validation/out-of-sample splits, NSE only."
+            ),
+            success_criteria="CI-excludes-zero positive mean forward return, higher than the unconditioned control, in development AND validation AND out-of-sample.",
+            failure_criteria="No consistent improvement over the unconditioned control across splits, or a reversal/degradation versus control.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Control (unconditioned baseline BUY, NSE, full universe, h5/h10): development n=8517 "
+                "+0.276%/+0.555% (both CI-decisive positive); validation n=2420 -0.218%/-0.311% (both CI-decisive "
+                "NEGATIVE); out-of-sample n=2380/2345 -0.119%(CI touches zero)/-0.407%(CI-decisive negative). "
+                "H_CONTEXT_MARKET_001 (BUY + NIFTY TRENDING_UP): development n=5554 +0.279%/+0.635% (similar to "
+                "or slightly better than control); validation n=1358 -0.196%/-0.605% (still negative, h10 WORSE "
+                "than control's -0.311%); out-of-sample n=859/852 -0.299%(worse than control)/+0.044%(CI includes "
+                "zero, not decisive). No split shows a consistent, decisive improvement over the unconditioned "
+                "control -- market-up conditioning does not help, and modestly hurts on some metrics (h10 "
+                "validation). REJECTED: the naive 'rising tide lifts all boats' prior does not hold for this "
+                "baseline signal."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_CONTEXT_MARKET_002",
+            description="The frozen baseline stock-level BUY condition performs better -- not worse -- when the broader NIFTY 50 index is in a DOWNTREND (the stock's own bullish structure diverges from, rather than confirms, the market).",
+            rationale=(
+                "INDIAN TRADING DECISION BRAIN mission, Family A, Phase 5, registered as the natural counterpart "
+                "to H_CONTEXT_MARKET_001 -- explicitly testing the mission's own warning not to assume 'up market "
+                "= better buys.' A stock showing genuine uptrend + bullish momentum WHILE the broader index falls "
+                "is plausibly a more idiosyncratic, distinctive signal (real relative strength) than one that "
+                "merely rides a market-wide rally, where many stocks trivially look bullish together."
+            ),
+            expected_effect="Conditional forward returns for the baseline BUY condition should be no worse than -- and plausibly better than -- the unconditioned control when market_trend_regime == TRENDING_DOWN.",
+            dataset_restrictions="Same as H_CONTEXT_MARKET_001: full 32-symbol NSE universe, 5 years daily.",
+            experiment_design="Identical machinery to H_CONTEXT_MARKET_001 (same regime series, same condition_fn structure with TRENDING_DOWN in place of TRENDING_UP).",
+            success_criteria="CI-excludes-zero positive mean forward return, higher than the unconditioned control, in development AND validation AND out-of-sample.",
+            failure_criteria="No improvement over control, or a reversal/degradation versus control in any split.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "H_CONTEXT_MARKET_002 (BUY + NIFTY TRENDING_DOWN), h5/h10: development n=963 +0.573%/+1.040% "
+                "(both CI-decisive positive, both roughly DOUBLE the control's +0.276%/+0.555%); validation n=499 "
+                "+0.760%/+1.536% (both CI-decisive POSITIVE, a striking reversal from the control's decisively "
+                "NEGATIVE -0.218%/-0.311% in the same period); out-of-sample n=261 +0.094%(CI touches zero, not "
+                "decisive, but POSITIVE point estimate vs. control's negative -0.119%)/-0.181%(CI includes zero, "
+                "not decisive, but far less negative than control's decisively negative -0.407%). Direction is "
+                "consistently positive-vs-control across all three splits; decisive in development and "
+                "validation, not decisive (but never reversing to a clearly negative point estimate) "
+                "out-of-sample -- the same 'real, consistent, OOS-power-loss-not-reversal' shape as this "
+                "project's own H_MEANREV_002 and the decline side of H_TRANSMISSION_001. "
+                "Per-symbol concentration check (h5, all periods pooled, n=1723 total): broad-based across the "
+                "universe -- 24 of 31 symbols with a nonzero sample show a POSITIVE mean return (e.g. AXISBANK.NS "
+                "n=46 +1.55%, EICHERMOT.NS n=107 +1.12%, NTPC.NS n=82 +1.19%, SBIN.NS n=48 +1.27%), only 7 "
+                "negative and none with a large enough sample to be driving the pooled result alone (largest "
+                "negative: HCLTECH.NS n=75 -0.55%). Not concentrated in a handful of names. "
+                "Cost-sensitivity check: pooled h5/h10 mean (+0.555%/+0.999%) survives a conservative 20bps "
+                "round-trip haircut comfortably (+0.355%/+0.799%). "
+                "INCONCLUSIVE overall (out-of-sample does not reach a decisive CI), but a real, broad-based, "
+                "economically coherent, cost-surviving finding -- not promoted only because out-of-sample power "
+                "is limited (n=261, roughly a fifth of development's sample), not because the effect reverses. "
+                "The same divergence pattern independently reappears at the sector level (see "
+                "H_CONTEXT_SECTOR_002), which strengthens confidence this is a real, replicable market mechanism "
+                "(idiosyncratic/counter-tape strength) rather than a single-family coincidence -- worth a "
+                "dedicated, larger-sample re-test (a longer history, or a larger universe) before any "
+                "strategy-level attempt, per this project's own 'prove the market behavior before building a "
+                "strategy' discipline."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_CONTEXT_MARKET_003",
+            description="The frozen baseline stock-level BUY condition's forward returns vary meaningfully depending on NIFTY 50's own volatility regime (LOW/NORMAL/HIGH).",
+            rationale="INDIAN TRADING DECISION BRAIN mission, Family A, Phase 5 -- mission's own explicit instruction not to assume high volatility is bad.",
+            expected_effect="A consistent (same-direction, not necessarily positive) effect of NIFTY's own volatility regime on the baseline BUY condition's forward returns across development, validation, and out-of-sample.",
+            dataset_restrictions="Same 32-symbol NSE universe; ^NSEI's own causal volatility_regime (backtesting.regime.classify_volatility_at, 60-bar lookback, same defaults as every other volatility classification in this project).",
+            experiment_design="Same machinery as H_CONTEXT_MARKET_001/002, using quant_research/context_experiments.py's build_benchmark_volatility_series() in place of the trend variant.",
+            success_criteria="A same-sign, non-reversing effect (versus the unconditioned control) across development, validation, and out-of-sample for at least one volatility bucket.",
+            failure_criteria="The effect's sign reverses between splits (development vs. validation, or validation vs. out-of-sample), indicating noise rather than a stable regime effect.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "LOW_VOLATILITY, h5/h10: development n=368 +0.946%/+2.023% (both CI-decisive positive, looks "
+                "very strong); validation n=201 -0.991%/-1.742% (both CI-decisive NEGATIVE -- a direct SIGN "
+                "REVERSAL from development); out-of-sample n=67/56 -0.829%(CI touches zero)/-0.620%(CI includes "
+                "zero), still negative point estimates. Development's apparently strong result does not survive "
+                "even into validation, let alone out-of-sample -- the classic signature of fitting to a "
+                "development-period idiosyncrasy, not a real regime effect. "
+                "HIGH_VOLATILITY, h5/h10: development n=346 +1.236%/+2.234% (CI-decisive positive); validation "
+                "n=0 (NIFTY recorded zero HIGH_VOLATILITY days under this condition in the validation window -- "
+                "cannot be evaluated at all); out-of-sample n=115 +0.159%/-0.107% (both CI includes zero, not "
+                "decisive). No usable validation evidence and an inconclusive out-of-sample result. "
+                "NORMAL_VOLATILITY (the majority regime, ~91% of the sample) closely tracks the unconditioned "
+                "control in every split, as expected. "
+                "REJECTED for LOW_VOLATILITY specifically (clean sign reversal development->validation, the "
+                "sharpest disqualifying pattern this project's own promotion-gate discipline looks for); "
+                "HIGH_VOLATILITY is REJECTED for insufficient/non-decisive evidence rather than a reversal (no "
+                "validation sample at all). Neither volatility bucket is a usable decision filter. Notably "
+                "different in character from H_CONTEXT_MARKET_002's market-trend finding, which stayed "
+                "directionally consistent (never reversed sign) across all three splits -- this contrast is "
+                "itself useful evidence that the research methodology here correctly discriminates a real, "
+                "stable pattern from an unstable/noisy one."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_CONTEXT_SECTOR_001",
+            description="The frozen baseline stock-level BUY condition performs better when the stock's own NIFTY sector index is itself in an uptrend (sector confirms the stock).",
+            rationale="INDIAN TRADING DECISION BRAIN mission, Family B (sector context), Phase 6 -- explicitly marked HIGH PRIORITY in the mission. Natural sector-level counterpart to H_CONTEXT_MARKET_001.",
+            expected_effect="Higher, CI-decisive-positive conditional forward returns versus the unconditioned control when the stock's own sector_trend_regime == TRENDING_UP.",
+            dataset_restrictions=(
+                "A 21-of-32-symbol sector-taggable subset of the NSE universe, mapped to 6 of the 9 "
+                "market_intelligence.regime.NIFTY_SECTOR_INDICES via a conservative, high-confidence-only "
+                "GICS-style mapping NOT sourced from an official NSE index constituent file (none integrated in "
+                "this project): NIFTY_BANK (HDFCBANK/ICICIBANK/SBIN/KOTAKBANK/AXISBANK), NIFTY_IT "
+                "(TCS/INFY/HCLTECH/TECHM/WIPRO), NIFTY_AUTO (MARUTI/EICHERMOT/HEROMOTOCO), NIFTY_PHARMA "
+                "(SUNPHARMA/CIPLA/DIVISLAB/DRREDDY), NIFTY_FMCG (HINDUNILVR/ITC), NIFTY_FINANCIAL_SERVICES "
+                "(BAJFINANCE/BAJAJFINSV). 11 symbols deliberately excluded rather than guessed: RELIANCE, LT, "
+                "ASIANPAINT, BHARTIARTL, ADANIPORTS, GRASIM, ULTRACEMCO, TATASTEEL, COALINDIA, NTPC, POWERGRID."
+            ),
+            experiment_design="Same machinery as H_CONTEXT_MARKET_001, with each symbol's OWN sector index's causal trend regime attached (not the market-wide NIFTY 50) via a per-sector loop over quant_research/context_experiments.py's build_benchmark_regime_series/attach_external_regime.",
+            success_criteria="CI-excludes-zero positive mean forward return, higher than the unconditioned (sector-taggable-subset) control, in development AND validation AND out-of-sample.",
+            failure_criteria="No consistent improvement over control across splits.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Control (unconditioned baseline BUY, 21-symbol sector-taggable subset, h5/h10): development "
+                "n=5154 +0.204%/+0.361%; validation n=1746 -0.201%/-0.214%; out-of-sample n=1451/1423 "
+                "-0.115%/-0.413%. "
+                "H_CONTEXT_SECTOR_001 (BUY + own sector TRENDING_UP): development n=3977 +0.274%/+0.473% "
+                "(similar to control); validation n=1071 -0.432%/-0.529% (WORSE than control's -0.201%/-0.214%); "
+                "out-of-sample n=986/968 -0.117%/-0.431% (essentially identical to control). Sector agreement "
+                "does not improve on the unconditioned baseline in any split, and is measurably worse in "
+                "validation. REJECTED: the naive 'sector confirms stock = better' prior does not hold, echoing "
+                "H_CONTEXT_MARKET_001's identical finding at the market level."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_CONTEXT_SECTOR_002",
+            description="The frozen baseline stock-level BUY condition performs better -- not worse -- when the stock's own NIFTY sector index is in a DOWNTREND (the stock diverges from its own sector, echoing H_CONTEXT_MARKET_002's market-level divergence finding).",
+            rationale="INDIAN TRADING DECISION BRAIN mission, Family B, Phase 6 -- registered specifically to test whether H_CONTEXT_MARKET_002's divergence effect replicates at the sector level, a genuinely independent context layer.",
+            expected_effect="Conditional forward returns no worse than, and plausibly better than, the unconditioned control when sector_trend_regime == TRENDING_DOWN.",
+            dataset_restrictions="Same 21-symbol sector-taggable subset as H_CONTEXT_SECTOR_001.",
+            experiment_design="Identical machinery to H_CONTEXT_SECTOR_001, TRENDING_DOWN in place of TRENDING_UP.",
+            success_criteria="CI-excludes-zero positive mean forward return, higher than the unconditioned control, in development AND validation AND out-of-sample.",
+            failure_criteria="No improvement over control, or a reversal/degradation versus control in any split.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "H_CONTEXT_SECTOR_002 (BUY + own sector TRENDING_DOWN), h5/h10: development n=277 "
+                "+0.327%/+0.655% (h10 CI-decisive positive, better than control's +0.204%/+0.361%); validation "
+                "n=251 +0.556%/+0.895% (both CI-decisive POSITIVE, a reversal from control's decisively negative "
+                "-0.201%/-0.214% -- the same shape as H_CONTEXT_MARKET_002's validation-split reversal); "
+                "out-of-sample n=39 (small sample -- sector-disagreement while the stock is still technically "
+                "bullish is a narrow condition) -0.072%/+0.732%, both CI includes zero, not decisive but not "
+                "reversing to a clearly negative estimate either. Direction is consistently positive-vs-control "
+                "in development and validation, echoing H_CONTEXT_MARKET_002 at an independent context layer; "
+                "out-of-sample is underpowered (n=39) rather than contradicting. INCONCLUSIVE -- the smaller, "
+                "narrower sector-taggable universe and the rarity of this specific condition (own sector down "
+                "while the stock itself remains structurally bullish) limit out-of-sample confidence, but this "
+                "is the SECOND independent context layer (after market-wide NIFTY) showing the same "
+                "divergence-beats-confirmation shape, which is more valuable corroborating evidence than a "
+                "second unrelated hypothesis would be. See H_CONTEXT_MARKET_002's evidence for the fuller, "
+                "better-powered version of this same pattern and its concentration/cost checks."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_CONTEXT_VIX_001",
+            description="The frozen baseline stock-level BUY condition's forward returns are meaningfully different when India VIX is ELEVATED (level >= 1.3x its own 60-day trailing average) versus its DEPRESSED counterpart (<= 0.75x).",
+            rationale="INDIAN TRADING DECISION BRAIN mission, Family C (India VIX / risk environment), Phase 7 -- mission's own explicit instruction not to assume high volatility is bad.",
+            expected_effect="A consistent (same-direction, non-reversing) effect of India VIX regime on the baseline BUY condition's forward returns across development, validation, and out-of-sample.",
+            dataset_restrictions="Full 32-symbol NSE universe; ^INDIAVIX's own causal regime via a new historical counterpart (quant_research/context_experiments.py's build_india_vix_regime_series) to market_intelligence.regime.compute_india_vix_context's existing latest-bar-only logic -- same thresholds (DEFAULT_VIX_LOOKBACK=60, ELEVATED>=1.3x, DEPRESSED<=0.75x trailing average), applied at every historical bar instead of only the most recent one.",
+            experiment_design="Same machinery as H_CONTEXT_MARKET_001/002, VIX regime in place of NIFTY trend regime.",
+            success_criteria="A same-sign, non-reversing effect across development, validation, and out-of-sample.",
+            failure_criteria="The effect's sign reverses between any two splits.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "ELEVATED, h5/h10: development n=296 +0.434%(CI includes zero)/+1.404%(CI-decisive positive); "
+                "validation n=54 +5.008%/+3.725% (both CI-decisive positive, an implausibly large effect for "
+                "only 54 observations -- consistent with temporal clustering around one or two specific "
+                "volatility-spike episodes rather than a broad, repeatable pattern); out-of-sample n=68 "
+                "-1.124%/-2.468% (both CI-DECISIVE NEGATIVE -- a full sign reversal from validation). Development "
+                "-> validation -> out-of-sample goes weak-positive -> extreme-positive -> decisive-negative: no "
+                "usable, stable direction. REJECTED."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_CONTEXT_VIX_002",
+            description="Companion to H_CONTEXT_VIX_001: the DEPRESSED-VIX side of the same India VIX regime conditioning.",
+            rationale="See H_CONTEXT_VIX_001.",
+            expected_effect="A consistent (same-direction, non-reversing) effect across development, validation, and out-of-sample.",
+            dataset_restrictions="Same as H_CONTEXT_VIX_001.",
+            experiment_design="Same as H_CONTEXT_VIX_001, DEPRESSED in place of ELEVATED.",
+            success_criteria="A same-sign, non-reversing effect across development, validation, and out-of-sample.",
+            failure_criteria="The effect's sign reverses between any two splits.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "DEPRESSED, h5/h10: development n=81 +1.104%(CI-decisive positive)/-0.657%(CI includes zero); "
+                "validation n=98 -1.594%/-2.480% (both CI-DECISIVE NEGATIVE -- reversal from development's h5 "
+                "result); out-of-sample n=130 -1.012%/-1.144% (both CI-decisive negative, consistent with "
+                "validation but not with development). No stable direction across splits. REJECTED. "
+                "Combined with H_CONTEXT_VIX_001: neither VIX regime bucket survives dev->val->oos discipline, "
+                "in clear contrast to H_CONTEXT_MARKET_002/H_CONTEXT_SECTOR_002's market/sector divergence "
+                "finding, which stayed directionally consistent throughout -- India VIX regime, at least at "
+                "these thresholds and this sample size, is not a usable decision filter for this baseline signal."
             ),
         ),
     )
