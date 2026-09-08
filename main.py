@@ -1165,6 +1165,7 @@ def run_dashboard_command(args: argparse.Namespace) -> None:
 # --------------------------------------------------------------------------
 
 DEFAULT_SCANNER_DB_PATH = PROJECT_ROOT / "data" / "scanner.db"
+DEFAULT_REGIME_DB_PATH = PROJECT_ROOT / "data" / "market_regime.db"
 
 
 def _build_provider(args: argparse.Namespace):
@@ -1468,6 +1469,7 @@ def run_decide_command(args: argparse.Namespace) -> None:
 
     scanner_db = args.scanner_db or DEFAULT_SCANNER_DB_PATH
     candidate = None
+    latest_scan = None
     if Path(scanner_db).exists():
         scan_store = ScanHistoryStore(scanner_db)
         latest_scan = scan_store.latest_report()
@@ -1499,7 +1501,7 @@ def run_decide_command(args: argparse.Namespace) -> None:
     logger.info("Running decision engine for %s", normalized)
     decision = make_decision(
         normalized, candidate=candidate, research=research_report, risk_context=risk_context,
-        include_narrative=not args.no_narrative,
+        include_narrative=not args.no_narrative, scan_id=latest_scan.scan_id if latest_scan is not None else None,
     )
 
     db_path = args.db or DEFAULT_DECISION_DB_PATH
@@ -2311,6 +2313,32 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     scan_store.close()
     print(f"\n[1/4] Scan complete: {len(scan_report.candidates)} candidates, {len(scan_report.excluded)} excluded (scan_id={scan_report.scan_id}).")
 
+    # NSE PREDICTION ENGINE mission, Phase 3: persist ONE MarketRegimeReport
+    # per run, keyed by this SAME scan_id -- breadth/benchmark/sector_strength
+    # are pure aggregations over scan_report (zero extra fetches); the 9
+    # NIFTY-sector-index + 1 India-VIX fetches only happen when explicitly
+    # requested (--with-nifty-sectors/--with-india-vix), same opt-in cost
+    # posture as the standalone `regime` command. A failure here must never
+    # abort the run -- this is supporting evidence, not a hard dependency.
+    try:
+        from market_intelligence.regime import build_market_regime_report
+        from market_intelligence.regime_store import MarketRegimeStore
+
+        regime_report = build_market_regime_report(
+            scan_report, provider=provider, period=args.period, interval=args.interval,
+            include_nifty_sector_indices=args.with_nifty_sectors, include_india_vix=args.with_india_vix,
+        )
+        regime_store = MarketRegimeStore(args.regime_db or DEFAULT_REGIME_DB_PATH)
+        regime_store.save_report(regime_report)
+        regime_store.close()
+        vix_note = f", India VIX {regime_report.india_vix.regime}" if regime_report.india_vix is not None else ""
+        print(
+            f"      Market snapshot saved: NIFTY {regime_report.benchmark.trend_regime}/{regime_report.benchmark.volatility_regime}, "
+            f"breadth {regime_report.breadth.advancing}/{regime_report.breadth.declining}/{regime_report.breadth.flat}{vix_note}."
+        )
+    except Exception as exc:  # noqa: BLE001 -- supporting evidence only, must never abort a shadow-run
+        logger.warning("Could not compute/persist this run's MarketRegimeReport: %s", exc)
+
     decision_db = args.decision_db or DEFAULT_DECISION_DB_PATH
     research_db = args.research_db or DEFAULT_RESEARCH_DB_PATH
     predictions_db = args.predictions_db or DEFAULT_PREDICTIONS_DB_PATH
@@ -2353,7 +2381,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
             market_context = get_market_context(symbol, period=args.period, interval=args.interval, live_snapshot_provider=live_snapshot_provider)
             decision = make_decision(
                 symbol, candidate=candidate, research=research_report, market_context=market_context,
-                risk_context=risk_context, include_narrative=args.with_ai,
+                risk_context=risk_context, include_narrative=args.with_ai, scan_id=scan_report.scan_id,
             )
             decision_store.save_decision(decision)
             decisions_by_label[decision.label.value] = decisions_by_label.get(decision.label.value, 0) + 1
@@ -3652,6 +3680,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     shadow_run_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker/rate-limit protection across the whole run (default: off, matches prior behavior exactly). Prints a provider-metrics summary at the end.")
     shadow_run_parser.add_argument("--live-source", choices=["dhan"], default=None, help="Phase 32: overlay every candidate's price with a real Dhan live quote (requires DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN) instead of the Yahoo historical close. One adapter is built for the whole run and closed at the end. A failed/unhealthy live source silently falls back to the Yahoo historical price per symbol.")
     shadow_run_parser.add_argument("--schedule-config", type=str, default=None, help="Optional path to the SAME YAML schedule/holiday config used with `schedule --config` (holidays: key). When given, the startup market-session banner is cross-checked against it.")
+    shadow_run_parser.add_argument("--with-nifty-sectors", action="store_true", help="NSE PREDICTION ENGINE mission: also classify the 9 real NIFTY sectoral indices in this run's persisted MarketRegimeReport snapshot -- 9 extra Yahoo fetches per run, default off (same flag/cost as `regime --with-nifty-sectors`).")
+    shadow_run_parser.add_argument("--with-india-vix", action="store_true", help="NSE PREDICTION ENGINE mission: also classify India VIX in this run's persisted MarketRegimeReport snapshot -- 1 extra Yahoo fetch per run, default off (same flag/cost as `regime --with-india-vix`).")
+    shadow_run_parser.add_argument("--regime-db", type=str, default=None, help=f"SQLite market-regime-snapshot path (default: {DEFAULT_REGIME_DB_PATH}). Every shadow-run persists one MarketRegimeReport here, correlated to this run's decisions by scan_id.")
     _add_optional_sizing_args(shadow_run_parser)
     shadow_run_parser.add_argument(
         "--paper-execute", action="store_true",

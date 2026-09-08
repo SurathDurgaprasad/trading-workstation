@@ -75,6 +75,7 @@ def make_decision(
     config: DecisionConfig | None = None,
     include_narrative: bool = True,
     now: datetime | None = None,
+    scan_id: str | None = None,
 ) -> Decision:
     normalized = symbol.strip().upper()
     config = config or DecisionConfig()
@@ -91,6 +92,7 @@ def make_decision(
         label=label,
         rationale=rationale,
         config_version=config.version_id(),
+        scan_id=scan_id,
         scanner_evidence=candidate,
         research_evidence=research,
         market_context=market_context,

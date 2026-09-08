@@ -113,6 +113,21 @@ class Decision(BaseModel):
     market_context: MarketContext | None
     risk_context: RiskContext
 
+    scan_id: str | None = None
+    """NSE PREDICTION ENGINE mission -- the market_intelligence.models.
+    ScanReport.scan_id (and, when computed, the SAME id
+    market_intelligence.regime_store.MarketRegimeStore keys a
+    MarketRegimeReport by) this decision's own scanner_evidence was
+    produced alongside. None for a Decision built without going through
+    a scan (e.g. some tests construct one directly), or for one made
+    before this field existed -- never fabricated. This is what makes
+    "Decision is reproducible" (this module's own stated roadmap
+    criterion, above) extend to the BROADER market environment
+    (breadth/NIFTY regime/sector regime/India VIX), not just this
+    decision's own per-symbol MarketContext -- without it, no persisted
+    Decision could ever be correlated back to what the wider market
+    looked like when it was made."""
+
     confidence: float | None = None
     """Phase 34 -- decision_engine.confidence.compute_confidence's score
     (0.0-1.0): fraction of available scanner factors agreeing with this

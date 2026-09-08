@@ -204,6 +204,66 @@ def test_shadow_run_end_to_end_with_skip_evaluate_persists_every_stage(tmp_path,
     prediction_store.close()
 
 
+def test_shadow_run_persists_a_market_regime_snapshot_correlated_to_decisions_by_scan_id(tmp_path, capsys):
+    """NSE PREDICTION ENGINE mission, Phase 3: every shadow-run should now
+    save ONE MarketRegimeReport, and every Decision from that same run
+    should carry the SAME scan_id -- the reproducibility link this test
+    exists to prove actually holds, not just that neither piece crashes."""
+    args = parse_args([
+        "shadow-run", "--symbols", "AAPL,MSFT", "--benchmark", "", "--skip-evaluate",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--research-db", str(tmp_path / "research.db"),
+        "--decision-db", str(tmp_path / "decisions.db"), "--predictions-db", str(tmp_path / "predictions.db"),
+        "--regime-db", str(tmp_path / "regime.db"), "--with-nifty-sectors", "--with-india-vix",
+    ])
+    run_shadow_run_command(args)
+
+    output = capsys.readouterr().out
+    assert "Market snapshot saved:" in output
+
+    from decision_engine.store import DecisionStore
+    from market_intelligence.regime_store import MarketRegimeStore
+    from market_intelligence.store import ScanHistoryStore
+
+    scan_store = ScanHistoryStore(tmp_path / "scanner.db")
+    scan_id = scan_store.latest_report().scan_id
+    scan_store.close()
+
+    regime_store = MarketRegimeStore(tmp_path / "regime.db")
+    report = regime_store.latest_report()
+    assert report is not None
+    assert report.scan_id == scan_id
+    assert len(report.sector_index_regimes) == 9
+    assert report.india_vix is not None
+    regime_store.close()
+
+    decision_store = DecisionStore(tmp_path / "decisions.db")
+    aapl_decision = decision_store.latest_decision_for_symbol("AAPL")
+    assert aapl_decision.scan_id == scan_id
+    decision_store.close()
+
+
+def test_shadow_run_market_regime_snapshot_omits_sector_and_vix_by_default(tmp_path, capsys):
+    """--with-nifty-sectors/--with-india-vix are opt-in -- a plain run must
+    still save a snapshot (breadth/benchmark are free, from the already-
+    fetched scan_report) but never fabricate the opt-in fields."""
+    args = parse_args([
+        "shadow-run", "--symbols", "AAPL", "--benchmark", "", "--skip-evaluate",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--research-db", str(tmp_path / "research.db"),
+        "--decision-db", str(tmp_path / "decisions.db"), "--predictions-db", str(tmp_path / "predictions.db"),
+        "--regime-db", str(tmp_path / "regime.db"),
+    ])
+    run_shadow_run_command(args)
+
+    from market_intelligence.regime_store import MarketRegimeStore
+
+    regime_store = MarketRegimeStore(tmp_path / "regime.db")
+    report = regime_store.latest_report()
+    assert report is not None
+    assert report.sector_index_regimes == {}
+    assert report.india_vix is None
+    regime_store.close()
+
+
 def test_shadow_run_persists_a_trade_plan_per_prediction_when_initial_capital_is_given(tmp_path, capsys):
     """Mission auditability requirement, exercised through shadow-run's
     own per-symbol loop (a separate code path from `predict`): each BUY
