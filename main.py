@@ -45,7 +45,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime", "experiment", "hypothesis-registry", "cache-status", "readiness-check")
+_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "learn", "review", "shadow-run", "schedule", "universe", "regime", "daily-report", "experiment", "hypothesis-registry", "cache-status", "readiness-check")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -1375,6 +1375,138 @@ def run_regime_command(args: argparse.Namespace) -> None:
             print(f"  Level vs trailing avg: {vix.ratio_vs_trailing_average:.2f}x")
     else:
         print("\nINDIA VIX: not computed (pass --with-india-vix -- costs 1 extra fetch).")
+
+    _print_provider_metrics(resilient)
+
+
+# --------------------------------------------------------------------------
+# `daily-report` -- NSE PREDICTION ENGINE mission: the mission's own
+# explicitly requested "INDIAN MARKET DAILY DECISION REPORT" output.
+# Read-only (no prediction recorded, no paper order, no critic call) --
+# a richer VIEW over the same real scan + market-regime machinery
+# `scan`/`regime`/`shadow-run` already use, plus two genuinely new
+# pieces: decision_engine.direction.classify_direction (UP/DOWN/NO_EDGE,
+# separate from classify()'s BUY/WATCH/AVOID) and a context-divergence
+# note for candidates matching the EXACT condition this project's own
+# H_CONTEXT_MARKET_002/H_CONTEXT_SECTOR_002 research measured (a real,
+# but still INCONCLUSIVE, finding -- shown as evidence to consider, never
+# as a reason to act). "Tradeability" reuses decision_engine.rules.
+# classify()'s own real label unchanged -- this command invents no new
+# tradeability concept of its own.
+# --------------------------------------------------------------------------
+
+
+def run_daily_report_command(args: argparse.Namespace) -> None:
+    from decision_engine.config import DecisionConfig
+    from decision_engine.direction import classify_direction
+    from decision_engine.models import RiskContext
+    from decision_engine.rules import classify
+    from market_data.universe import MarketUniverse
+    from market_intelligence.nse_sector_map import NSE_SECTOR_MAP, sector_for_symbol
+    from market_intelligence.regime import build_market_regime_report
+    from market_intelligence.regime_store import MarketRegimeStore
+    from market_intelligence.scanner import run_scan
+    from market_intelligence.store import ScanHistoryStore
+
+    if args.watchlist_file:
+        universe = MarketUniverse.from_yaml_file(args.watchlist_file)
+    elif args.symbols:
+        symbols = [s for s in args.symbols.split(",") if s.strip()]
+        universe = MarketUniverse.from_watchlist(symbols)
+    else:
+        print("daily-report: one of --symbols or --watchlist-file is required.", file=sys.stderr)
+        sys.exit(2)
+
+    provider, resilient = _build_provider(args)
+    benchmark_symbol = args.benchmark or None
+
+    logger.info("daily-report: scanning %d symbols", len(universe))
+    scan_report = run_scan(universe, provider=provider, benchmark_symbol=benchmark_symbol, period=args.period, interval=args.interval)
+
+    scanner_db = args.scanner_db or DEFAULT_SCANNER_DB_PATH
+    scan_store = ScanHistoryStore(scanner_db)
+    scan_store.save_report(scan_report)
+    scan_store.close()
+
+    regime_report = build_market_regime_report(
+        scan_report, provider=provider, sector_map=NSE_SECTOR_MAP, period=args.period, interval=args.interval,
+        include_nifty_sector_indices=args.with_nifty_sectors, include_india_vix=args.with_india_vix,
+    )
+    regime_store = MarketRegimeStore(args.regime_db or DEFAULT_REGIME_DB_PATH)
+    regime_store.save_report(regime_report)
+    regime_store.close()
+
+    paper_store = None
+    if args.paper_db:
+        from paper.store import PaperStore
+
+        paper_store = PaperStore(args.paper_db)
+
+    print("=" * 78)
+    print("INDIAN MARKET DAILY DECISION REPORT (paper-only -- no order is placed by this command)")
+    print("=" * 78)
+    print(f"Scan ID:  {scan_report.scan_id}   As of: {scan_report.as_of.isoformat()}")
+    print(f"Universe: {scan_report.universe_mode} ({scan_report.universe_size} symbols)   Excluded: {len(scan_report.excluded)}")
+
+    print("\nMARKET:")
+    print(f"  NIFTY:    {regime_report.benchmark.trend_regime} / {regime_report.benchmark.volatility_regime}")
+    ratio_text = f"{regime_report.breadth.advance_decline_ratio:.2f}" if regime_report.breadth.advance_decline_ratio is not None else "n/a"
+    print(f"  BREADTH:  {regime_report.breadth.advancing} advancing / {regime_report.breadth.declining} declining / {regime_report.breadth.flat} flat (ratio {ratio_text})")
+    if regime_report.india_vix is not None:
+        print(f"  INDIA VIX: {regime_report.india_vix.regime} (last={regime_report.india_vix.last_value:.2f}, {regime_report.india_vix.ratio_vs_trailing_average:.2f}x trailing avg)" if regime_report.india_vix.last_value is not None else f"  INDIA VIX: {regime_report.india_vix.regime}")
+    else:
+        print("  INDIA VIX: not computed (pass --with-india-vix)")
+    if regime_report.sector_strength:
+        strong = ", ".join(f"{s.sector} ({s.average_composite_score:+.2f})" for s in regime_report.sector_strength[:3])
+        weak = ", ".join(f"{s.sector} ({s.average_composite_score:+.2f})" for s in regime_report.sector_strength[-3:])
+        print(f"  STRONG SECTORS (this scan): {strong}")
+        print(f"  WEAK SECTORS (this scan):   {weak}")
+    if regime_report.sector_index_regimes:
+        print("  NIFTY SECTOR INDICES:")
+        for sector, ctx in regime_report.sector_index_regimes.items():
+            print(f"    {sector:26s} {ctx.trend_regime}")
+
+    print(f"\nTOP {min(args.top, len(scan_report.candidates))} STOCK OBSERVATIONS (ranked by composite score):")
+    for rank, candidate in enumerate(scan_report.candidates[: args.top], start=1):
+        direction = classify_direction(candidate)
+        has_open_position = paper_store.get_open_position(candidate.symbol) is not None if paper_store is not None else False
+        label, _ = classify(symbol=candidate.symbol, candidate=candidate, risk_context=RiskContext(has_open_position=has_open_position), config=DecisionConfig())
+        tradeability = {"BUY": "CANDIDATE (BUY)", "WATCH": "WATCH", "AVOID": "NO TRADE (AVOID)", "EXIT": "EXIT (held position)", "NO_ACTION": "NO ACTION"}[label.value]
+
+        sector = sector_for_symbol(candidate.symbol)
+        sector_ctx = regime_report.sector_index_regimes.get(sector) if sector else None
+        sector_line = f"{sector} ({sector_ctx.trend_regime})" if sector_ctx is not None else (sector or "not classified")
+
+        print(f"\n{rank}. {candidate.symbol}")
+        print(f"   Direction:      {direction.label.value}   Confidence: {direction.confidence:.0%}")
+        print(f"   Market context: NIFTY {regime_report.benchmark.trend_regime}")
+        print(f"   Sector context: {sector_line}")
+        print(f"   Tradeability:   {tradeability}")
+        print(f"   Bullish evidence: {'; '.join(direction.bullish_evidence) or 'none'}")
+        print(f"   Bearish evidence: {'; '.join(direction.bearish_evidence) or 'none'}")
+
+        # H_CONTEXT_MARKET_002/H_CONTEXT_SECTOR_002 (strategy/hypothesis_registry.py):
+        # a real, replicated, but still INCONCLUSIVE research finding -- a
+        # BUY-shaped signal historically showed a STRONGER (not weaker)
+        # forward return when the broader market/sector was falling, not
+        # rising, in this project's own dev/validation testing. Shown here
+        # as a labeled research note, never as a reason to trade -- the
+        # underlying finding never reached a decisive out-of-sample result
+        # and must not be treated as proven. Only shown for UP-direction
+        # candidates, matching EXACTLY the condition that was tested
+        # (a symmetric DOWN-direction note would be fabricated -- that side
+        # was never researched).
+        if direction.label.value == "UP":
+            notes = []
+            if regime_report.benchmark.trend_regime == "DOWNTREND":
+                notes.append("NIFTY is falling while this stock looks bullish -- H_CONTEXT_MARKET_002 (INCONCLUSIVE) found this specific pattern historically outperformed a rising-market BUY, not underperformed.")
+            if sector_ctx is not None and sector_ctx.trend_regime == "DOWNTREND":
+                notes.append("This stock's own sector index is falling while the stock looks bullish -- H_CONTEXT_SECTOR_002 (INCONCLUSIVE) found the same pattern at the sector level.")
+            for note in notes:
+                print(f"   Research note:  {note}")
+
+    if paper_store is not None:
+        paper_store.close()
 
     _print_provider_metrics(resilient)
 
@@ -3504,6 +3636,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     regime_parser.add_argument("--with-india-vix", action="store_true", help="INDIAN MARKET TRADING BRAIN mission: also classify India VIX (current level vs. its own trailing average) -- 1 extra Yahoo fetch, default off.")
     regime_parser.add_argument("--resilient", action="store_true", help="Phase 30: wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker protection (default: off).")
 
+    daily_report_parser = subparsers.add_parser(
+        "daily-report",
+        help=(
+            "NSE PREDICTION ENGINE mission: a single ranked, read-only 'what to look at today' report -- "
+            "market context, sector context, per-stock UP/DOWN/NO_EDGE direction, confidence, tradeability, "
+            "and evidence. Runs a fresh scan; records NO prediction, places NO order, calls NO critic."
+        ),
+    )
+    daily_report_parser.add_argument("--symbols", type=str, default=None, help="Comma-separated watchlist (e.g. RELIANCE.NS,TCS.NS). Required unless --watchlist-file is given.")
+    daily_report_parser.add_argument("--watchlist-file", type=str, default=None, help="Path to a YAML file with a top-level `market_universe: {mode: watchlist, symbols: [...]}` key.")
+    daily_report_parser.add_argument("--period", default="1y", help="Historical window used for scanning and market context (default: 1y).")
+    daily_report_parser.add_argument("--interval", default="1d", help="Bar interval (default: 1d).")
+    daily_report_parser.add_argument("--benchmark", default="^NSEI", help="Benchmark symbol for scanner relative strength and NIFTY regime (default: ^NSEI). Pass an empty string to disable.")
+    daily_report_parser.add_argument("--with-nifty-sectors", action="store_true", help="Also classify the 9 real NIFTY sectoral indices -- 9 extra Yahoo fetches, default off.")
+    daily_report_parser.add_argument("--with-india-vix", action="store_true", help="Also classify India VIX -- 1 extra Yahoo fetch, default off.")
+    daily_report_parser.add_argument("--scanner-db", type=str, default=None, help=f"SQLite scan-history path (default: {DEFAULT_SCANNER_DB_PATH}).")
+    daily_report_parser.add_argument("--regime-db", type=str, default=None, help=f"SQLite market-regime-snapshot path (default: {DEFAULT_REGIME_DB_PATH}).")
+    daily_report_parser.add_argument("--paper-db", type=str, default=None, help="Optional: check this paper-trading database for an existing open position per symbol, to distinguish BUY/WATCH from EXIT in the Tradeability column.")
+    daily_report_parser.add_argument("--top", type=int, default=10, help="Print only the top N ranked candidates (default: 10).")
+    daily_report_parser.add_argument("--resilient", action="store_true", help="Wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker protection (default: off).")
+
     research_parser = subparsers.add_parser(
         "research",
         help=(
@@ -3846,6 +3999,8 @@ def main() -> None:
             run_readiness_check_command(args)
         elif args.command == "regime":
             run_regime_command(args)
+        elif args.command == "daily-report":
+            run_daily_report_command(args)
         elif args.command == "experiment":
             run_experiment_command(args)
         else:

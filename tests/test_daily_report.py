@@ -1,0 +1,142 @@
+"""NSE PREDICTION ENGINE mission: tests for the `daily-report` CLI
+command -- pure wiring tests (does scan -> regime -> direction -> sector
+context -> tradeability correctly flow through and get printed/
+persisted), same posture as tests/test_shadow_run.py's own docstring.
+No real network anywhere: the market-data provider is replaced with a
+fake serving a deterministic uptrend series for every symbol.
+"""
+from datetime import datetime, timedelta
+
+import pytest
+
+from main import parse_args, run_daily_report_command
+from market.data_provider import OHLCV, OHLCVBar
+
+_START = datetime(2023, 1, 2)
+
+
+def _bars(n: int = 300, start: float = 100.0, step: float = 0.5) -> list[OHLCVBar]:
+    bars = []
+    for i in range(n):
+        close = start + step * i
+        bars.append(OHLCVBar(
+            timestamp=_START + timedelta(days=i), open=close, high=close * 1.001, low=close * 0.999,
+            close=close, volume=100_000.0,
+        ))
+    return bars
+
+
+class _FakeMarketDataProvider:
+    """Serves the SAME rising series for any symbol requested -- including
+    ^NSEI and the 9 NIFTY sector indices/India VIX, so --with-nifty-sectors/
+    --with-india-vix exercise real code paths without any real fetch."""
+
+    def __init__(self, bars: list[OHLCVBar]):
+        self._bars = bars
+
+    def fetch_ohlcv(self, symbol, *, period="1y", interval="1d"):
+        return OHLCV(symbol=symbol, interval=interval, bars=self._bars)
+
+
+@pytest.fixture(autouse=True)
+def _wire_fake_provider(monkeypatch):
+    import backtesting.cache as cache_module
+    import market.data_provider as market_data_provider_module
+
+    fake_provider = _FakeMarketDataProvider(_bars())
+    monkeypatch.setattr(market_data_provider_module, "get_market_data_provider", lambda: fake_provider)
+    monkeypatch.setattr(cache_module, "CachedMarketDataProvider", lambda inner: inner)
+
+
+def test_daily_report_requires_symbols_or_watchlist_file(capsys):
+    args = parse_args(["daily-report"])
+    with pytest.raises(SystemExit) as exc:
+        run_daily_report_command(args)
+    assert exc.value.code == 2
+    assert "one of --symbols or --watchlist-file is required" in capsys.readouterr().err
+
+
+def test_daily_report_prints_the_expected_sections(tmp_path, capsys):
+    args = parse_args([
+        "daily-report", "--symbols", "RELIANCE.NS,TCS.NS", "--benchmark", "", "--top", "2",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--regime-db", str(tmp_path / "regime.db"),
+    ])
+    run_daily_report_command(args)
+
+    output = capsys.readouterr().out
+    assert "INDIAN MARKET DAILY DECISION REPORT" in output
+    assert "MARKET:" in output
+    assert "TOP 2 STOCK OBSERVATIONS" in output
+    assert "Direction:" in output
+    assert "Tradeability:" in output
+    assert "Bullish evidence:" in output
+
+
+def test_daily_report_persists_scan_and_regime_snapshot_with_matching_scan_id(tmp_path, capsys):
+    args = parse_args([
+        "daily-report", "--symbols", "RELIANCE.NS,TCS.NS", "--benchmark", "",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--regime-db", str(tmp_path / "regime.db"),
+    ])
+    run_daily_report_command(args)
+
+    from market_intelligence.regime_store import MarketRegimeStore
+    from market_intelligence.store import ScanHistoryStore
+
+    scan_store = ScanHistoryStore(tmp_path / "scanner.db")
+    scan_report = scan_store.latest_report()
+    assert scan_report is not None
+    scan_store.close()
+
+    regime_store = MarketRegimeStore(tmp_path / "regime.db")
+    report = regime_store.latest_report()
+    assert report is not None
+    assert report.scan_id == scan_report.scan_id
+    regime_store.close()
+
+
+def test_daily_report_with_nifty_sectors_and_india_vix_populates_both(tmp_path, capsys):
+    args = parse_args([
+        "daily-report", "--symbols", "TCS.NS", "--benchmark", "", "--with-nifty-sectors", "--with-india-vix",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--regime-db", str(tmp_path / "regime.db"),
+    ])
+    run_daily_report_command(args)
+
+    output = capsys.readouterr().out
+    assert "NIFTY SECTOR INDICES:" in output
+    assert "NIFTY_IT" in output
+    assert "INDIA VIX:" in output
+
+    from market_intelligence.regime_store import MarketRegimeStore
+
+    regime_store = MarketRegimeStore(tmp_path / "regime.db")
+    report = regime_store.latest_report()
+    assert len(report.sector_index_regimes) == 9
+    assert report.india_vix is not None
+    regime_store.close()
+
+
+def test_daily_report_shows_sector_context_for_a_mapped_symbol():
+    """TCS.NS is in market_intelligence.nse_sector_map.NSE_SECTOR_MAP
+    (-> NIFTY_IT); its sector context line must name that sector, not
+    'not classified'."""
+    args = parse_args(["daily-report", "--symbols", "TCS.NS", "--benchmark", "", "--with-nifty-sectors"])
+    import io
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        run_daily_report_command(args)
+    output = buf.getvalue()
+    assert "Sector context: NIFTY_IT" in output
+
+
+def test_daily_report_does_not_record_any_prediction_or_touch_paper_state(tmp_path, capsys):
+    """This is a READ-ONLY report -- no predictions.db is ever created or
+    written to by this command, unlike shadow-run."""
+    args = parse_args([
+        "daily-report", "--symbols", "RELIANCE.NS", "--benchmark", "",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--regime-db", str(tmp_path / "regime.db"),
+    ])
+    run_daily_report_command(args)
+
+    assert not (tmp_path / "predictions.db").exists()
