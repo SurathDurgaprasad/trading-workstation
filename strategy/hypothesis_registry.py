@@ -1239,4 +1239,97 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "execution infrastructure to ever be tested as a real strategy regardless."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_GAP_003",
+            description=(
+                "Deep validation of H_GAP_001/002 (overnight gap fade) -- a disciplined attempt to disprove the "
+                "strongest raw finding in this project's history via cost sensitivity, pre-specified magnitude "
+                "buckets, market-regime/VIX-regime/sector splits, a liquidity check, and year-concentration."
+            ),
+            rationale=(
+                "EDGE VALIDATION mission, Phase 3's own explicit instruction: treat gap-fade as the "
+                "highest-priority candidate and actively try to kill it before trusting it further. Every check "
+                "below was chosen because it could disqualify the finding, not because it was expected to "
+                "confirm it."
+            ),
+            expected_effect="The gap-fade effect should be broad-based, liquidity-independent, regime-stable, sector-diversified, and time-stable if it is a real, exploitable market mechanism rather than an artifact.",
+            dataset_restrictions="Same full 32-symbol NSE universe as H_GAP_001/002, 5 years daily, plus NIFTY trend regime, India VIX regime, and market_intelligence.nse_sector_map sector tags attached per bar.",
+            experiment_design=(
+                "Six independent adversarial cuts, pre-specified before running (magnitude buckets: 0.5-1%, "
+                "1-1.5%, 1.5-2%, 2-3%, 3%+, taken directly from this mission's own text, not fit to this data): "
+                "(1) cost sensitivity across a 0.05%-0.30% grid on the full-period-pooled effect; (2) the "
+                "magnitude buckets themselves; (3) NIFTY trend regime split; (4) India VIX regime split; (5) "
+                "sector split via the existing NSE sector map; (6) liquidity split (above/below-median "
+                "avg_daily_value); (7) year-by-year concentration, 2021-2026. A promising-looking extreme-tail "
+                "sub-finding surfaced during (2) was explicitly flagged as EXPLORATORY (discovered by looking at "
+                "results, not pre-registered) and re-tested with its own proper development/validation/"
+                "out-of-sample split before being trusted at all, per this mission's own Phase 6 multiple-"
+                "testing discipline."
+            ),
+            success_criteria="The effect survives realistic costs, is not concentrated in illiquid names or one sector, is stable across market/VIX regimes, and does not show a clear multi-year decay trend.",
+            failure_criteria="Any of: fails to clear realistic round-trip costs; concentrates in below-median-liquidity names; concentrates in one sector; shows a clear decay trend across recent years; a sub-finding fails its own development-period check.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "COST SENSITIVITY (full-period pooled, n=3629 GAP UP / n=4041 GAP DOWN, short-the-gap-up / "
+                "long-the-gap-down capture): raw GAP_UP capture +0.187% (CI-decisive), GAP_DOWN capture +0.136% "
+                "(CI-decisive). Break-even: GAP_UP turns negative between 0.15% and 0.20% cost; GAP_DOWN turns "
+                "negative between 0.10% and 0.15% cost. H_GAP_001's own registered realistic-cost estimate "
+                "(~0.21% round trip, backtesting.costs.CostModel.india_nse_intraday_2026()) sits AT OR PAST both "
+                "break-even points -- refines, does not reverse, the original INCONCLUSIVE-on-costs finding. "
+                "MAGNITUDE BUCKETS (pre-specified): GAP UP fade is decisive-negative in the 0.5-1% (n=5956, "
+                "-0.141%) and 1-1.5% (n=1485, -0.145%) buckets, NOT decisive in 1.5-2% (n=510, +0.046%, a "
+                "non-monotonic dip -- CI includes zero, read as noise given the modest sample, not a real "
+                "reversal), then decisive-negative again at 2-3% (n=315, -0.453%) and 3%+ (n=202, -0.581%). "
+                "GAP DOWN recovery grows monotonically with magnitude and only the 0.5-1% bucket (n=3190, "
+                "+0.086%) is individually decisive on its own; the apparently striking 3%+ bucket (n=203, "
+                "+0.745%, would clear realistic costs by a wide margin) was investigated separately below. "
+                "EXTREME-TAIL (3%+) GAP DOWN, PROPERLY RE-SPLIT: development n=97 mean=-0.205% (NOT decisive, "
+                "and NEGATIVE -- the effect was not even present in the period it would need to be discovered "
+                "in); validation n=45 mean=+1.998% (decisive positive); out-of-sample n=61 mean=+1.330% "
+                "(decisive positive). Per-symbol counts in this bucket are tiny (many symbols n=1-6 over 5 "
+                "years). REJECTED as its own claim: this is a textbook small-sample illusion that fails the "
+                "most basic sequential validation logic (no real signal in development), not a genuine "
+                "extreme-gap effect -- exactly the kind of exploratory, post-hoc-noticed result this project's "
+                "own multiple-testing discipline exists to catch before it gets over-interpreted. "
+                "MARKET REGIME SPLIT: GAP_UP fade is NOT decisive when NIFTY itself is TRENDING_UP (n=1196, "
+                "-0.046%, CI includes zero) but IS decisive in TRENDING_DOWN (n=1396, -0.237%), SIDEWAYS "
+                "(n=847, -0.279%), and UNKNOWN (n=188, -0.310%) -- a real, economically sensible regime "
+                "dependence (a gap up against a falling/flat tape looks more like overreaction than one in a "
+                "genuine uptrend), but it means the effect is NOT regime-stable, failing that specific success "
+                "criterion. GAP_DOWN recovery is comparatively regime-stable (+0.182%/+0.127%/+0.096%/+0.121% "
+                "across the four regimes, decisive in 3 of 4). "
+                "VIX REGIME SPLIT: broadly consistent with the overall pattern in the NORMAL bucket (the large "
+                "majority of the sample); ELEVATED and DEPRESSED buckets are too small (n=291/79 UP, n=567/43 "
+                "DOWN) to add real information beyond the headline result. "
+                "SECTOR SPLIT: GAP_UP fade is decisive only in NIFTY_PHARMA (n=306, -0.361%), NIFTY_AUTO "
+                "(n=311, -0.261%), and NIFTY_FMCG (n=122, -0.314%); NOT decisive in NIFTY_BANK, NIFTY_IT, or "
+                "NIFTY_FINANCIAL_SERVICES (all CI include zero, weaker point estimates around -0.10%). "
+                "GAP_DOWN recovery is overwhelmingly concentrated in NIFTY_PHARMA alone (n=386, +0.518%, "
+                "decisive and far larger than any other sector's point estimate, e.g. NIFTY_BANK's own barely-"
+                "decisive +0.108%) -- a real, material sector concentration for the down side specifically, "
+                "distinct from (and a sharper finding than) the whole-universe 27-of-32-symbols check H_GAP_001 "
+                "already recorded. "
+                "LIQUIDITY CHECK (the single most decisive disqualifying finding): GAP_UP fade is NOT decisive "
+                "for ABOVE-median avg_daily_value stocks (n=2379, -0.066%, CI=[-0.145%,+0.012%]) but IS strongly "
+                "decisive for BELOW-median-liquidity stocks (n=1250, -0.418%, CI=[-0.493%,-0.342%], nearly 6x "
+                "the effect size and a much wider win-rate gap, 35.8% vs 47.1%) -- even within this large-cap-"
+                "only universe, the effect is substantially a lower-liquidity phenomenon, exactly the kind of "
+                "result this mission's own Phase 3 explicitly warns 'avoid strategies that depend on illiquid "
+                "execution.' The realistic cost model used above almost certainly UNDERSTATES true slippage for "
+                "the below-median-liquidity names actually driving the effect. "
+                "YEAR CONCENTRATION: GAP_UP fade is decisive-negative in every year 2021-2024 but flattens to "
+                "essentially zero in 2025 (n=508, +0.0004%, not decisive) and weakens (though still negative, "
+                "not decisive) in 2026 (n=604, -0.130%) -- a real, honest recency-decay signal, consistent with "
+                "either genuine regime change or the effect being arbitraged away, either of which argues "
+                "against relying on the pooled 5-year average as a forward-looking estimate. "
+                "FINAL VERDICT: REJECTED as a currently tradeable edge. The underlying raw phenomenon (moderate-"
+                "size gap-fade, concentrated in less-liquid large caps) may still be real, but it fails multiple "
+                "independent 'try to kill it' checks this mission specifically asked for: liquidity "
+                "concentration, sector concentration (Pharma-driven on the down side), regime dependence "
+                "(inert when NIFTY itself is rising), apparent recency decay, and a marginal-at-best cost "
+                "margin. H_GAP_001/002's own original INCONCLUSIVE status is not overturned as a historical "
+                "record of what was found and why it was promising at the time -- this entry is the deeper, "
+                "harder look this mission demanded, and it does not survive."
+            ),
+        ),
     )

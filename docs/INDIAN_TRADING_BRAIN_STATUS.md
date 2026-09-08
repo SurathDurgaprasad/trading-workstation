@@ -1,11 +1,10 @@
 # Indian Trading Brain — Current Status
 
-Last updated: 2026-09-08, end of the "BUILD A REAL PROFIT-SEEKING
-INDIAN NSE TRADING BRAIN" mission segment. This is a living status
-snapshot, not a narrative report — see `docs/
-INDIAN_NSE_PREDICTION_ENGINE_REPORT.md` and `docs/
-INDIAN_TRADING_DECISION_BRAIN_REPORT.md` for the fuller writeups this
-distills.
+Last updated: 2026-09-08, end of the "INDIAN NSE EDGE VALIDATION AND
+LEARNING LOOP" mission segment. This is a living status snapshot, not a
+narrative report — see `docs/INDIAN_NSE_PREDICTION_ENGINE_REPORT.md`
+and `docs/INDIAN_TRADING_DECISION_BRAIN_REPORT.md` for the fuller
+writeups this distills.
 
 ## CURRENT SYSTEM STATE
 
@@ -26,49 +25,65 @@ independent of the BUY-only trade-prediction journal.
 ## CURRENT ACTIVE EDGE STATUS
 
 **No validated, tradeable edge exists.** This is the honest, current
-answer, not a gap to be embarrassed about. The closest candidates:
+answer, not a gap to be embarrassed about.
+
+Overnight gap-fade was this project's most promising raw finding
+(H_GAP_001/002) and was put through a deep, deliberately adversarial
+validation this segment (H_GAP_003) — cost sensitivity, pre-specified
+magnitude buckets, market-regime/VIX-regime/sector splits, a liquidity
+check, and year-by-year concentration. It did not survive: the effect
+is concentrated in below-median-liquidity names (nearly 6x stronger
+there than in the more-liquid half of this large-cap universe), is
+inert specifically when NIFTY itself is trending up, is disproportion-
+ately driven by NIFTY_PHARMA on the recovery side, shows a real decay
+trend (decisive 2021-2024, flat 2025-2026), and sits right at or past
+the realistic cost break-even point. A superficially striking
+extreme-gap (3%+) sub-finding turned out to be a small-sample illusion
+that failed its own development-period check. **REJECTED as a
+currently tradeable edge** — see H_GAP_003 for the full evidence.
+
+The remaining candidate:
 
 - Market/sector-divergence conditioning on the baseline BUY signal
   (H_CONTEXT_MARKET_002/SECTOR_002/ALIGN_001): real, broad-based,
   cost-surviving, replicated at two independent context layers and
   appears to compound — but out-of-sample power is too thin (as low as
-  n=10 for the combined condition) to promote.
-- Overnight gap-fade (H_GAP_001/002): the single most statistically
-  consistent raw price-behavior finding in this project's history
-  (broad-based across 26+ of 32 symbols, never reverses sign across any
-  split) — but the effect size is comparable to or smaller than
-  realistic NSE intraday round-trip costs in most splits, and this
-  project's execution engine is structurally long-only with no same-day
-  forced-exit mechanism, so it isn't even implementable as a strategy
-  yet regardless of the cost question.
+  n=10 for the combined condition) to promote. Not yet put through the
+  same level of adversarial deep-validation gap-fade just received —
+  a natural next candidate for the same treatment.
 
-Neither is promoted. Neither should be traded.
+Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(27 hypotheses tested to date).
+(28 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
 None currently meet the bar for "promising" (decisive across all three
-splits with adequate OOS power) — the two INCONCLUSIVE candidates above
-are the closest, but are explicitly not there yet.
+splits, adequate OOS power, AND survives an adversarial deep-validation
+pass) — the context-divergence family is the closest, but is explicitly
+not there yet, and gap-fade (the only candidate that received the full
+adversarial treatment so far) did not survive it.
 
 ## INCONCLUSIVE HYPOTHESES (10)
 
 H_ENTRY_003, H_ENTRY_005, H_EXIT_002, H_MEANREV_002, H_CONTEXT_MARKET_002,
-H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_GAP_001, H_GAP_002, and
+H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_GAP_001, H_GAP_002 (the
+original gap-fade discovery record — kept as history; see H_GAP_003 for
+why the underlying idea did not ultimately survive), and
 H_TRANSMISSION_001 (Nasdaq → NIFTY IT, honest decline/advance
 asymmetry). Full evidence for each in `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (16)
+## REJECTED HYPOTHESES (17)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
 H_CONTEXT_MARKET_003, H_CONTEXT_SECTOR_001, H_CONTEXT_VIX_001,
 H_CONTEXT_VIX_002, H_TRANSMISSION_002, H_TRANSMISSION_003,
-H_TRANSMISSION_004. Full evidence for each in `strategy/
+H_TRANSMISSION_004, H_GAP_003 (the deep-validation follow-up to
+H_GAP_001/002 — see above). Full evidence for each in `strategy/
 hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
@@ -131,30 +146,34 @@ rebuilt, this segment.
    express and track everything the mission asks for; what it lacks is
    elapsed time and resolved outcomes. No amount of further engineering
    fixes this — only continued, undisturbed live observation does.
-2. **Temptation to lower the promotion bar.** Two INCONCLUSIVE
-   candidates (context-divergence, gap-fade) are genuinely the most
-   interesting results this project has produced. Promoting either
-   before out-of-sample power or cost-survival is actually demonstrated
-   would be exactly the "manufactured profitability" this mission
-   explicitly forbids.
-3. **Execution-infrastructure gap for gap-fade.** If that line of
-   research is ever pursued further, this project has no same-day
-   intraday exit mechanism and no short-selling capability — pursuing
-   it without building (and re-auditing for safety) that infrastructure
-   first would be premature.
+2. **Temptation to lower the promotion bar.** The context-divergence
+   family remains this project's most interesting live candidate.
+   Promoting it before out-of-sample power is actually demonstrated —
+   or before it receives the same adversarial deep-validation gap-fade
+   just went through and failed — would be exactly the "manufactured
+   profitability" this mission explicitly forbids.
+3. **Small-sample illusions hiding inside a real-looking pooled
+   result.** H_GAP_003's own extreme-gap sub-finding (a huge, exciting-
+   looking +0.745% pooled effect that turned out to have zero support
+   in its own development period once split by percentile/threshold)
+   is a concrete, freshly-demonstrated example of why every promising
+   number from this point forward must be re-split into dev/val/oos and
+   checked for per-symbol sample size before being trusted, even when
+   it emerges from an otherwise-legitimate pre-specified bucket scheme.
 
 ## NEXT HIGHEST-VALUE RESEARCH QUESTION
 
 Given the evidence-starvation finding above, the single highest-EV
 action is **not another new hypothesis** — it is time: let the 15 real
-directional forecasts recorded this segment (and the 10 existing BUY
+directional forecasts recorded 2026-09-08 (and the 10 existing BUY
 predictions) resolve, then re-run `evaluate-forecasts`/`evaluate`/
 `learn` for the first real calibration read this project has ever had.
 
-If a genuinely new research question is wanted before then: **does the
-gap-fade effect (H_GAP_001) hold when conditioned on market regime**
-(does it strengthen in a NIFTY downtrend, where broad selling pressure
-might mechanically produce more gap-ups-to-fade, or is it regime-
-independent)? This is a natural, narrow, evidence-informed follow-up —
-not a new family, a refinement of the strongest raw finding this
-project has, using infrastructure that already exists.
+If a genuinely new research question is wanted before then: put
+**H_CONTEXT_MARKET_002/SECTOR_002/ALIGN_001 (market/sector divergence)**
+through the SAME adversarial deep-validation gap-fade just received —
+cost sensitivity, liquidity split, sector concentration, year-by-year
+decay check. It is this project's last INCONCLUSIVE candidate that
+hasn't yet been put under that level of scrutiny, and gap-fade's own
+outcome (a strong-looking pooled result that did not survive) is a
+direct warning not to trust it further without the same treatment.
