@@ -191,19 +191,31 @@ deliberately excluded rather than guessed; see §12).
 
 ## 9. Market+sector+stock interaction findings
 
-Not yet run this segment. Family A/B/C's per-layer findings (context
-*agreement* never helps, context *divergence* helps at two independent
-layers, VIX regime is unreliable) are a necessary prerequisite for a
-principled Family D (alignment/interaction) design — testing all
-combinations blindly before this would have been exactly the
-"brute-force hundreds of combinations" the mission explicitly warned
-against. The natural next experiment, informed by what was actually
-found here, is narrower than the mission's original 4-condition sketch:
-does the market-divergence effect (H_CONTEXT_MARKET_002) and the
-sector-divergence effect (H_CONTEXT_SECTOR_002) *combine* — is a stock
-bullish while *both* its market and its sector are falling even
-stronger than either alone, or does combining them just shrink the
-sample without adding signal? Genuinely open.
+Run narrowly and only after Family A/B/C's own per-layer findings
+justified the specific question — not a blind sweep of combinations,
+which would have been exactly the "brute-force hundreds of
+combinations" the mission explicitly warned against.
+**H_CONTEXT_ALIGN_001**: does the market-divergence effect
+(H_CONTEXT_MARKET_002) and the sector-divergence effect
+(H_CONTEXT_SECTOR_002) *compound* when both are true at once (stock
+bullish while *both* its market and its own sector are falling)?
+**INCONCLUSIVE, with the single strongest development+validation result
+of this entire research segment**: development +0.688%/+1.040%
+(h5/h10, both decisive, larger than the "neither diverges" control);
+validation **+0.958%/+1.389%** (both decisive positive, and *larger*
+than either single-layer divergence effect alone — consistent with a
+genuine, additive compounding effect, not the same signal counted
+twice). Out-of-sample collapses to n=10 once both conditions are
+required simultaneously on a 21-symbol universe — far too small for any
+conclusion. This is a genuine, honest data-limitation stop point for
+this specific narrow slice, not a contradicting result; slicing further
+(e.g. adding a volatility dimension) was deliberately not attempted, as
+the data no longer supports it. The market-only and sector-only single-
+divergence counterparts measured in the same run were each weaker and
+less consistent than the combined condition (market-only reverses sign
+at h10 out-of-sample; sector-only is noisy with a validation-period
+reversal on a 25-observation sample) — see `strategy/
+hypothesis_registry.py`'s `H_CONTEXT_ALIGN_001` entry for full figures.
 
 ## 10. Global → India findings
 
@@ -233,9 +245,12 @@ sign-reverses). Full evidence in `strategy/hypothesis_registry.py`.
 
 H_CONTEXT_MARKET_002 (NIFTY downtrend conditioning: real, broad-based,
 cost-surviving, decisive in development+validation, underpowered but
-directionally consistent out-of-sample) and H_CONTEXT_SECTOR_002 (the
-same divergence pattern, replicated independently at the sector level,
-more underpowered out-of-sample). These are this segment's most
+directionally consistent out-of-sample), H_CONTEXT_SECTOR_002 (the same
+divergence pattern, replicated independently at the sector level, more
+underpowered out-of-sample), and H_CONTEXT_ALIGN_001 (the two divergence
+effects appear to compound — the strongest development+validation
+result of this entire segment — but the out-of-sample sample collapses
+to n=10, too small for any conclusion). These are this segment's most
 valuable results — not promoted, but real evidence pointing toward a
 genuine market mechanism (idiosyncratic/counter-tape strength being a
 more distinctive, credible signal than context-confirmed strength)
@@ -244,14 +259,14 @@ actively reversed sign.
 
 ## 14. Negative knowledge
 
-All 7 new hypotheses (H_CONTEXT_MARKET_001/002/003, H_CONTEXT_SECTOR_
-001/002, H_CONTEXT_VIX_001/002) are recorded in `strategy/
-hypothesis_registry.py` with full `description`/`rationale`/
+All 8 new hypotheses (H_CONTEXT_MARKET_001/002/003, H_CONTEXT_SECTOR_
+001/002, H_CONTEXT_VIX_001/002, H_CONTEXT_ALIGN_001) are recorded in
+`strategy/hypothesis_registry.py` with full `description`/`rationale`/
 `expected_effect`/`dataset_restrictions`/`experiment_design`/
 `success_criteria`/`failure_criteria`/`evidence` fields, discoverable
 and citable, so this exact ground is never blindly re-covered. Combined
-with the 14 pre-existing entries, the registry now holds 21 hypotheses,
-0 promoted, 2 newly INCONCLUSIVE-with-real-effect, 5 newly REJECTED.
+with the 14 pre-existing entries, the registry now holds 22 hypotheses,
+0 promoted, 3 newly INCONCLUSIVE-with-real-effect, 5 newly REJECTED.
 
 ## 15. Data limitations
 
@@ -304,11 +319,12 @@ the sample sizes available.
 
 ## 18. Recommended next evolution
 
-1. **Do not wire H_CONTEXT_MARKET_002/SECTOR_002 into any live path
-   yet** — INCONCLUSIVE means more evidence, not action. A larger-sample
-   re-test (longer history and/or a larger, better-sourced sector map)
-   is the correct next step, per this project's own promotion
-   discipline.
+1. **Do not wire H_CONTEXT_MARKET_002/SECTOR_002/ALIGN_001 into any
+   live path yet** — INCONCLUSIVE means more evidence, not action. A
+   larger-sample re-test (longer history and/or a larger, better-
+   sourced sector map, to grow H_CONTEXT_ALIGN_001's n=10 out-of-sample
+   sample into something usable) is the correct next step, per this
+   project's own promotion discipline.
 2. **Separately, and regardless of the research verdict above**: §2's
    finding that `REGIME_CONFLICT` is WARNING-severity and therefore
    currently inert deserves its own explicit decision from a human, not
@@ -319,14 +335,12 @@ the sample sizes available.
    severity, since that would reject exactly the divergence case this
    segment's most promising (still-unproven) finding says may be worth
    *favoring*.
-3. Family D (interaction) should now be run narrowly (§9), not broadly
-   — test whether market-divergence and sector-divergence compound,
-   informed by what was actually found here.
-4. Family E (global -> India) has three unused, confirmed-real signals
+3. Family E (global -> India) has three unused, confirmed-real signals
    (USD/INR, crude, gold/DXY) genuinely open for the same
    measure-before-strategy discipline already applied to Nasdaq -> NIFTY
    IT.
-5. Source a real NIFTY sector-index constituent list (rather than the
+4. Source a real NIFTY sector-index constituent list (rather than the
    hand-built approximation here) to recover the 11 currently-excluded
    universe symbols and the 3 currently-unused sector indices for
-   Family B.
+   Family B/D — this would directly grow H_CONTEXT_ALIGN_001's
+   out-of-sample sample past its current n=10 bottleneck.

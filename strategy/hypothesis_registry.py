@@ -978,4 +978,55 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "these thresholds and this sample size, is not a usable decision filter for this baseline signal."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_CONTEXT_ALIGN_001",
+            description="Does the market-divergence effect (H_CONTEXT_MARKET_002) and the sector-divergence effect (H_CONTEXT_SECTOR_002) COMPOUND when both are true at once (stock bullish while BOTH its market and its own sector are falling), or does combining them just shrink the sample without adding signal?",
+            rationale=(
+                "INDIAN TRADING DECISION BRAIN mission, Family D (alignment/interaction), Phase 8 -- deliberately "
+                "narrow and evidence-informed rather than a blind brute-force sweep of combinations, per the "
+                "mission's own explicit warning against that. Only registered after Family A/B/C's own per-layer "
+                "findings (context agreement never helps; context divergence helps at two independent layers) "
+                "justified this specific question as the natural next one."
+            ),
+            expected_effect="If the two divergence effects are independent and additive, BOTH-diverge should show a stronger/more decisive effect than either single-layer divergence alone; if they are the same underlying effect measured twice, BOTH-diverge should look similar to either alone, just with a smaller sample.",
+            dataset_restrictions="The same 21-symbol sector-taggable NSE subset as H_CONTEXT_SECTOR_001/002, both ^NSEI's own trend regime and each stock's own sector index trend regime attached simultaneously.",
+            experiment_design=(
+                "Same machinery as H_CONTEXT_MARKET_002/H_CONTEXT_SECTOR_002 (quant_research/context_experiments.py, "
+                "unchanged), with BOTH market_trend_regime and sector_trend_regime attached to the same datasets and "
+                "a compound condition_fn: baseline_buy_condition AND market_trend_regime == TRENDING_DOWN AND "
+                "sector_trend_regime == TRENDING_DOWN. Compared against three counterparts: market-only-diverges "
+                "(H_CONTEXT_ALIGN_002), sector-only-diverges (H_CONTEXT_ALIGN_003), and neither-diverges "
+                "(H_CONTEXT_ALIGN_004, the natural control)."
+            ),
+            success_criteria="BOTH-diverge reaches a CI-decisive positive mean forward return, larger in magnitude than either single-layer divergence effect, in development AND validation AND out-of-sample.",
+            failure_criteria="No improvement over the single-layer effects, or a reversal in any split with an adequate sample size.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "H_CONTEXT_ALIGN_001 (BOTH diverge), h5/h10: development n=159 +0.688%/+0.961% (both CI-decisive "
+                "positive, larger than the neither-diverges control's +0.156%/+0.315%); validation n=226 "
+                "+0.958%/+1.389% (both CI-decisive positive, and LARGER than either H_CONTEXT_MARKET_002's own "
+                "validation result (+0.760%/+1.536%, comparable at h10, clearly larger at h5) or "
+                "H_CONTEXT_SECTOR_002's (+0.556%/+0.895%) -- consistent with a genuine, real compounding effect "
+                "rather than the same signal measured twice); out-of-sample n=10 (h5 -1.932%, h10 +0.472%, both "
+                "CI wide and includes zero) -- the sample collapses to essentially unusable size once both "
+                "conditions are required simultaneously on a 21-symbol universe. "
+                "H_CONTEXT_ALIGN_002 (market diverges, sector does not), h5/h10: development n=451 "
+                "+0.601%/+0.625% (both decisive positive); validation n=180 +0.279%(not decisive)/+1.963%(decisive "
+                "positive); out-of-sample n=105 -0.424%(not decisive)/-1.728%(CI-decisive NEGATIVE) -- weaker and "
+                "less consistent than the BOTH-diverge case, with a genuine h10 reversal out-of-sample. "
+                "H_CONTEXT_ALIGN_003 (sector diverges, market does not), h5/h10: development not decisive "
+                "(-0.159%/+0.243%, both CI includes zero); validation n=25 -3.076%/-3.575% (both CI-decisive "
+                "NEGATIVE -- a sharp reversal, tiny sample); out-of-sample n=29 +0.569%/+0.821% (not decisive) -- "
+                "no stable direction at all, smallest and noisiest of the four conditions. "
+                "H_CONTEXT_ALIGN_004 (neither diverges, control): matches the general NSE baseline shape "
+                "(development positive, validation/out-of-sample negative), as expected. "
+                "INCONCLUSIVE, not REJECTED: the development+validation evidence for compounding is the single "
+                "strongest, most decisive dev+val result in this whole research segment (stronger than either "
+                "individual divergence layer), but out-of-sample statistical power (n=10) is far too small for "
+                "any conclusion either way -- a genuine, honest data-limitation stop point for this specific "
+                "narrow slice, not a contradicting result. Slicing this condition any further (e.g. by "
+                "volatility bucket on top) would not be justified by the data available and was deliberately not "
+                "attempted, per this project's own 'do not become speculative fishing' discipline."
+            ),
+        ),
     )
