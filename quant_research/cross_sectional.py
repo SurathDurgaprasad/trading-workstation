@@ -89,6 +89,58 @@ class QuantileBucketResult:
     summary: ForwardReturnSummary
 
 
+def attach_bucket_membership_column(
+    datasets: dict[str, SymbolDataset],
+    *,
+    score_column: str,
+    column_name: str,
+    n_buckets: int = 5,
+    min_symbols_per_date: int = 10,
+) -> None:
+    """Mutates every dataset's frame in place, adding `column_name` with
+    the bucket label ('Q1'..'Q{n_buckets}', or None on a date skipped
+    for having too few scored symbols) each symbol landed in on each
+    date. This is the bridge from pure cross-sectional MEASUREMENT
+    (rank_cross_sectionally, above) to a real, executable Strategy: a
+    Strategy.generate_signal only ever sees ONE symbol's own indicator_
+    series, bar by bar (backtesting/engine.py's own single-symbol
+    design) -- it has no visibility into the rest of the universe on
+    that date. Precomputing bucket membership ONCE, across the whole
+    universe, and attaching it as an ordinary column is what lets an
+    existing, unmodified single-symbol backtest (backtesting.
+    exit_experiments.run_time_based_exit_backtest, reused unchanged)
+    read a cross-sectional signal at all -- the SAME "compute once,
+    attach as a column, let existing machinery read it" pattern this
+    project's own market/sector-regime research already established via
+    quant_research.context_experiments.attach_external_regime."""
+    all_dates: set[pd.Timestamp] = set()
+    for dataset in datasets.values():
+        all_dates.update(dataset.frame.index)
+
+    assignments: dict[str, dict[pd.Timestamp, str]] = {symbol: {} for symbol in datasets}
+
+    for date in sorted(all_dates):
+        scores: dict[str, float] = {}
+        for symbol, dataset in datasets.items():
+            if date not in dataset.frame.index:
+                continue
+            value = dataset.frame.loc[date, score_column]
+            if pd.notna(value):
+                scores[symbol] = float(value)
+
+        if len(scores) < min_symbols_per_date:
+            continue
+
+        ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+        bucket_size = len(ranked) / n_buckets
+        for rank, (symbol, _score) in enumerate(ranked):
+            bucket_index = min(int(rank / bucket_size), n_buckets - 1)
+            assignments[symbol][date] = f"Q{bucket_index + 1}"
+
+    for symbol, dataset in datasets.items():
+        dataset.frame[column_name] = dataset.frame.index.map(assignments[symbol])
+
+
 def rank_cross_sectionally(
     datasets: dict[str, SymbolDataset],
     *,

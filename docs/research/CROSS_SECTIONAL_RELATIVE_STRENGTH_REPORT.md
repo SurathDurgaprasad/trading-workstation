@@ -178,13 +178,77 @@ most rigorously-validated finding in this project's history to date.
    real, cost-aware, risk-sized backtest, not just the raw price-behavior
    measurement this report is based on (the same "does the raw finding
    survive becoming an actual trade" question `H_MEANREV_002` asked of
-   its own raw finding).
-2. If that backtest also clears the promotion gate, run it in shadow
-   mode — recording what it WOULD have signaled, without affecting any
-   live paper-trading decision — for a real observation period before
-   ever considering `--paper-execute` integration.
+   its own raw finding). **DONE — see §11 below. Result: NEGATIVE.**
+2. ~~If that backtest also clears the promotion gate, run it in shadow
+   mode~~ — **does not apply.** The executable wrapper did not clear the
+   promotion gate (§11), so no shadow-mode observation was started.
 3. Test the sector-relative and NIFTY-relative score variants the
    mission's own text also named (`stock_return_N - nifty_return_N`,
    `stock_return_N - sector_return_N`) as independent replications, not
    assumed to behave identically to the absolute-return version tested
-   here.
+   here. Still open.
+
+## 11. Addendum — the real, cost-aware, risk-sized backtest (`H_XSECT_002`)
+
+Full record: `H_XSECT_002` in `strategy/hypothesis_registry.py`,
+status `REJECTED`. Summary here so this report stays a complete,
+standalone account of what has and hasn't been validated.
+
+`quant_research/cross_sectional_strategy.py` implements
+`CrossSectionalLaggardStrategy` (Strategy protocol; fires a LONG entry
+only on a stock's first day newly in Q5 by trailing 60-day return,
+reading a bucket-membership column precomputed once across the whole
+universe) and runs it through `backtesting.exit_experiments.
+run_time_based_exit_backtest` (reused unchanged, `max_holding_bars=20`)
+with `CostModel.india_nse_intraday_2026()` and `risk.engine.RiskEngine`
+sizing — the same real machinery, and the same `strategy/
+promotion_gate.py::evaluate_promotion` verdict, every other hypothesis
+candidate in this project is judged by. Single frozen configuration,
+no parameter search.
+
+**Result: NEGATIVE.** Development n=623 mean **-0.17%**
+(CI=[-0.63%,+0.28%], statistically meaningless); validation n=236 mean
+**+0.84%** (CI=[+0.30%,+1.37%], positive); out-of-sample n=227 mean
+**-0.76%** (CI=[-1.31%,-0.21%], CI-decisive **negative**). The
+out-of-sample split's confident negative verdict fails
+`evaluate_promotion` outright: *"decisive evidence of harm, not merely
+unproven. Must not be promoted."*
+
+**Mechanism (diagnostic on the already-computed trades, not a re-run
+with different parameters):** STOP exits dominate the loss in every
+split — development 320/623 trades (51%) exited via STOP for a
+combined **-₹160,628** (avg -₹502/trade), versus only 118 EXPIRED
+(the pure 20-day time-cap exit, the closest analogue to §5's raw
+measurement) for +₹11,969 (avg +₹101/trade); out-of-sample 130/227
+(57%) exited via STOP for **-₹61,371** (avg -₹472/trade) versus 36
+EXPIRED for only -₹1,006 (avg -₹28/trade — mildly negative, but two
+orders of magnitude smaller). The ATR-based stop reused from
+`strategy/baseline.py` was calibrated for `TrendMomentumBaseline`'s
+trend-**continuation** setups, never validated for a reversal/
+mean-reversion signal — the working explanation is that laggards
+often fall further before the 20-day reversal §5 measured actually
+occurs, and this stop is clipping those positions before it can play
+out.
+
+**What this does and does not mean.** The §4–§6 raw measurement is
+**not invalidated** — it remains a real, adversarially-validated
+statistical fact about NSE cross-sectional price behavior; nothing
+about the mechanism above changes any of §6's checks. What is rejected
+is narrower: *this specific, naive execution wrapper* — a stop/target
+mechanic borrowed unchanged from a different strategy family — does
+not monetize the finding. Per this project's own multiple-testing
+discipline, no alternative stop/target width was tried here, and none
+will be tried as a tuning follow-up on this same result: a genuinely
+different, honestly pre-registered exit design (e.g. one built for
+mean-reversion's own known dynamics — wider stops, or no hard stop at
+all within the 20-day hold) would need to be its own new, independently
+motivated hypothesis, not a retry of this one.
+
+**Net effect on status:** `H_XSECT_001` stays `INCONCLUSIVE` (a raw
+measurement claim, not an executable-strategy claim) — it is not
+promoted to `PROMISING`, and shadow mode does not start on the strength
+of this execution design. The mission's own "IF A REAL EDGE APPEARS"
+workflow's "verify costs" step is exactly where this candidate stopped,
+and honestly reporting a real negative result at that stage — rather
+than retrying with looser risk parameters until something clears the
+gate — is the discipline this whole research program is built on.

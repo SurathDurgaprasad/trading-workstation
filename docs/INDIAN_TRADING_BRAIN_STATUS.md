@@ -1,7 +1,8 @@
 # Indian Trading Brain — Current Status
 
-Last updated: 2026-09-09, mid-session of the "BUILD THE REAL
-PROFIT-SEEKING INDIAN NSE TRADING BRAIN" autonomous loop. This is a
+Last updated: 2026-09-09, mid-session of the "INDIAN NSE TRADING BRAIN
+— AUTONOMOUS CONTINUATION LOOP — EDGE DISCOVERY PHASE" mission
+(cross-sectional research thread). This is a
 living status snapshot, not a narrative report — see `docs/
 INDIAN_NSE_PREDICTION_ENGINE_REPORT.md` and `docs/
 INDIAN_TRADING_DECISION_BRAIN_REPORT.md` for the fuller writeups this
@@ -40,28 +41,56 @@ answer, not a gap to be embarrassed about — but the gap has narrowed
 significantly today.
 
 **New today, and by a wide margin the strongest, most rigorously-
-validated finding in this project's history**: `H_XSECT_001`, a genuine
-CROSS-SECTIONAL momentum ranking (rank all 32 universe stocks by
-trailing 60-day return, buy the bottom quintile "laggards," hold 20
-days) — a capability this project never had before today
-(`quant_research/cross_sectional.py`, new). Decisive and POSITIVE in
-ALL THREE splits, never reversing (development +1.53%, validation
-+2.38%, out-of-sample +0.49%, all CI-decisive). Survived every
-adversarial check that has ever killed a promising candidate in this
-project: clears realistic costs with a 5x margin (still net positive
-at a 1.00% round-trip cost); broad across 29 of 32 symbols; no sector
+validated RAW MEASUREMENT this project's history has produced**:
+`H_XSECT_001`, a genuine CROSS-SECTIONAL momentum ranking (rank all 32
+universe stocks by trailing 60-day return, buy the bottom quintile
+"laggards," hold 20 days) — a capability this project never had before
+today (`quant_research/cross_sectional.py`, new). Decisive and
+POSITIVE in ALL THREE splits, never reversing (development +1.53%,
+validation +2.38%, out-of-sample +0.49%, all CI-decisive). Survived
+every adversarial check that has ever killed a promising candidate in
+this project: clears realistic costs with a 5x margin (still net
+positive at a 1.00% round-trip cost, as an unconditioned pooled-return
+subtraction — see below for why that estimate did not hold up once
+converted to a real trade); broad across 29 of 32 symbols; no sector
 concentration (largest sector bucket only 17.8%); remarkably stable
 across three decade-spanning eras including COVID (no decay, unlike
 gap-fade or the divergence family); strong in BOTH liquidity halves
 (unlike gap-fade); and — the check specifically designed to catch an
 inflated-looking rolling-window result — still decisive under a
 genuinely non-overlapping, independent re-sampling. Full validation in
-`docs/research/CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md`. **Still
-INCONCLUSIVE, not PROMOTED, by explicit choice**: this project's own
-promotion discipline requires a real backtest through the existing
-cost-aware/risk-sized engine and a shadow-mode observation period
-before anything stronger — not yet done, deliberately, per the
-mission's own "do not immediately modify live trading" instruction.
+`docs/research/CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §1-9.
+
+**Same day, the follow-through: the real, cost-aware, risk-sized
+backtest FAILED (`H_XSECT_002`, REJECTED).** Per the mission's own "IF
+A REAL EDGE APPEARS" workflow, the next required step was building the
+executable wrapper and running it through the real promotion-gate
+machinery — done this session (`quant_research/
+cross_sectional_strategy.py`, new). Result: out-of-sample shows a
+CI-decisive **NEGATIVE** mean per-trade return (-0.76%,
+CI=[-1.31%,-0.21%]) against a realistic `CostModel.
+india_nse_intraday_2026()`; `strategy/promotion_gate.py` verdict:
+NEGATIVE, "decisive evidence of harm... must not be promoted." Root
+cause, confirmed via an exit-reason diagnostic (not a re-run with
+different parameters): the ATR-based stop reused from
+`strategy/baseline.py` — calibrated for trend-CONTINUATION setups, not
+a reversal signal — clips the majority of positions (51-57% of trades
+each split) before the 20-day mean-reversion the raw measurement
+captured can play out; the pure time-cap EXIT (`EXPIRED`, the closest
+analogue to the raw measurement) stayed only mildly negative in
+out-of-sample by comparison. **This is the same "does the raw finding
+survive becoming a real trade" test H_MEANREV_002 already applied to
+its own finding, applied here for the first time to a decisively-
+positive-in-all-splits raw measurement — and it did not survive.**
+Full addendum in `docs/research/
+CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §11. **`H_XSECT_001`
+itself stays INCONCLUSIVE, not downgraded** — the raw measurement claim
+and the executable-strategy claim are honestly kept distinct; no
+alternative stop/target width was or will be tried as a tuning
+follow-up on this result (that would violate this project's own
+multiple-testing discipline) — a genuinely different, independently
+motivated exit design would need its own new hypothesis. Shadow mode
+does not start on the strength of this execution design.
 
 Overnight gap-fade was this project's second-most promising raw finding
 (H_GAP_001/002) and was put through a deep, deliberately adversarial
@@ -125,26 +154,25 @@ Nothing is promoted. Nothing should be traded.
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(35 hypotheses tested to date).
+(36 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
 None FORMALLY carry that status in the registry yet (this project's own
-`HypothesisStatus` enum doesn't have a PROMISING tier — see the note in
-`H_XSECT_001`'s own entry), but **H_XSECT_001 (cross-sectional
-mean-reversion) is now, by a clear margin, the closest this project has
-ever come**: decisive across all three splits (not just robust on the
-pooled sample, unlike Tuesday), survives costs with the widest margin
-of any finding here, and passed every adversarial check applied. It is
-recorded as INCONCLUSIVE only because the mission's own required
-workflow (validation report → PROMISING → shadow mode) hasn't completed
-the shadow-mode step yet — see `docs/research/
-CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md`. H_CALENDAR_001 (Tuesday
+`HypothesisStatus` enum doesn't have a PROMISING tier), and
+**H_XSECT_001 no longer looks like the closest candidate to that status
+it did earlier today**: its raw measurement remains the strongest, most
+adversarially-validated PRICE-BEHAVIOR finding this project has
+produced, but the mandatory next step — a real, cost-aware, risk-sized
+backtest (`H_XSECT_002`) — came back NEGATIVE (out-of-sample
+CI-decisive harm), so it does not advance to PROMISING or shadow mode
+on the strength of this execution design. See the CURRENT ACTIVE EDGE
+STATUS section above for the full story. H_CALENDAR_001 (Tuesday
 effect) remains the strongest PURELY STATISTICAL replication (broad,
 Bonferroni-surviving, no decay) but fails economically (doesn't clear
 costs, no execution vehicle) — a different way of falling short than
-H_XSECT_001's own remaining gap (evidence exists, shadow-mode
-observation does not yet).
+H_XSECT_001's own gap (a real measurement whose only tested execution
+design failed, rather than one untested).
 
 ## INCONCLUSIVE HYPOTHESES (15)
 
@@ -162,11 +190,12 @@ underpowered; a mild fade direction echoed gap-fade's own finding but
 never reached decisive significance), H_CALENDAR_001 (the Tuesday
 effect — this project's most statistically robust PURE finding, real
 but not tradeable — see above), and **H_XSECT_001 (cross-sectional
-mean-reversion — this project's strongest finding overall, awaiting
-shadow-mode validation — see PROMISING HYPOTHESES above)**. Full
-evidence for each in `strategy/hypothesis_registry.py`.
+laggard raw measurement — this project's strongest PRICE-BEHAVIOR
+finding, but its only tested execution design failed as H_XSECT_002 —
+see PROMISING HYPOTHESES above)**. Full evidence for each in
+`strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (19)
+## REJECTED HYPOTHESES (20)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
@@ -179,9 +208,12 @@ indices, a genuinely different formulation from the earlier binary
 sector-regime tests — found a real, sensible, monotonic ordinal
 pattern, leading sectors beat lagging ones, but the magnitude was too
 small and the "best" bucket still went decisively negative
-out-of-sample), and H_CALENDAR_002 (the Tuesday effect does not hold on
-NIFTY 50 itself — see above). Full evidence for each in `strategy/
-hypothesis_registry.py`.
+out-of-sample), H_CALENDAR_002 (the Tuesday effect does not hold on
+NIFTY 50 itself — see above), and **H_XSECT_002 (the real, cost-aware,
+risk-sized backtest of H_XSECT_001's own finding — out-of-sample shows
+CI-decisive harm, driven mechanistically by an ATR stop mis-calibrated
+for a reversal signal — see above)**. Full evidence for each in
+`strategy/hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
 "entry timing underperforms random" — confirmatory, not an edge.)
@@ -297,12 +329,17 @@ rebuilt, this segment.
    genuine complication (sign instability pre-2022) in the SAME run.
    Both must be carried forward together in any future summary of this
    line of research.
-5. **The temptation to rush H_XSECT_001 straight to paper execution.**
-   It is this project's strongest finding by every measure applied —
-   which is exactly why the mission's own explicit workflow (real
-   cost-aware backtest → shadow mode → only then consider execution)
-   matters most here, not least. A measurement finding, however
-   well-validated, is not yet a strategy.
+5. **The temptation to tune the stop/target until H_XSECT_002 "works."**
+   Now realized, not just hypothetical: the real backtest failed
+   out-of-sample, and the honest, disclosed mechanism (an ATR stop
+   mis-calibrated for a reversal signal) makes it obvious a wider stop
+   or no stop at all might behave very differently. That is exactly the
+   trap — retrying with looser parameters until one clears the
+   promotion gate would be undisclosed multiple testing on the same
+   result. Any different exit design must be its own new, independently
+   pre-registered hypothesis, not a quiet retry of this one. This risk
+   item stays open as a standing reminder for whoever picks that up
+   next.
 6. **Recurring, unexplained live-scheduler stops.** Twice in one
    session, with no error either time. The cause has not been
    identified from inside this session (no OS-level kill log visible to
@@ -312,17 +349,28 @@ rebuilt, this segment.
 
 ## NEXT HIGHEST-VALUE RESEARCH QUESTION
 
-The single highest-EV action is now **not another new hypothesis** — it
-is completing H_XSECT_001's own validation pipeline per the mission's
-explicit required order: (1) build the minimal `Strategy`-protocol
-wrapper for "bottom-quintile 60-day trailing return, 20-day hold" and
-run it through the EXISTING cost-aware, risk-sized backtesting/
-promotion-gate machinery (not yet done — this report is the raw
-price-behavior validation stage only); (2) if that clears the promotion
-gate, shadow-mode observation before any execution consideration. See
-`docs/research/CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §10 for the
-full ordered next-steps list, including testing the sector-relative and
-NIFTY-relative score variants as independent replications.
+**Already answered, same session**: does H_XSECT_001's raw measurement
+survive becoming a real, cost-aware, risk-sized trade? **No**
+(H_XSECT_002, REJECTED — out-of-sample CI-decisive negative, driven by
+an ATR stop mis-calibrated for a reversal signal; see above). This
+closes off "rush straight to shadow mode" but does NOT close off the
+underlying price-behavior finding, which remains real.
+
+The single highest-EV action now is testing the sector-relative and
+NIFTY-relative score variants named in `docs/research/
+CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §10 step 3
+(`stock_return_N - nifty_return_N`, `stock_return_N - sector_return_N`)
+as independent replications of the RAW measurement, not assumed to
+behave identically to the absolute-return version already tested —
+still using `quant_research/cross_sectional.py`'s pure-measurement
+engine (§1-9 stage), before considering any new executable wrapper.
+Separately, and a genuinely different, independently-motivated
+question (not a retry of H_XSECT_002): whether an exit design built
+for mean-reversion's own known dynamics (e.g. a wider stop, or no hard
+stop within the fixed 20-day hold) changes the executable-backtest
+outcome — this would need its own honest pre-registration before any
+code is written, exactly the discipline H_XSECT_002 itself was built
+to test.
 
 Separately, and lower priority: let the 15 real directional forecasts
 recorded 2026-09-08 (and the 10-11 existing BUY predictions) resolve,

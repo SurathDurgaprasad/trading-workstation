@@ -1805,4 +1805,90 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "to date."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_XSECT_002",
+            description=(
+                "Does H_XSECT_001's raw price-behavior measurement (cross-sectional bottom-quintile "
+                "trailing-60-day laggards, 20-day horizon, CI-decisive positive in all three splits) survive "
+                "becoming an actual, executable, risk-managed trade -- a real position with an ATR-based stop/"
+                "target and realistic transaction costs, run through backtesting.exit_experiments."
+                "run_time_based_exit_backtest and strategy/promotion_gate.py's evaluate_promotion -- the SAME "
+                "'does the raw finding survive becoming a real trade' question H_MEANREV_002 already asked of "
+                "its own raw finding, and the report's own §10 recommended next step #1."
+            ),
+            rationale=(
+                "docs/research/CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md §8 explicitly stated H_XSECT_001 "
+                "was 'a measurement finding, not an executable strategy' and named the executable wrapper as "
+                "the mandatory next step before shadow mode, per this mission's own 'IF A REAL EDGE APPEARS' "
+                "workflow (create report -> verify no leakage -> verify costs -> register as PROMISING -> "
+                "SHADOW MODE'). A pooled unconditioned forward-return measurement has no stop-loss risk built "
+                "in at all; a real trade does, and this project's own research history (this is the FIRST "
+                "candidate to reach this stage with a decisively-positive raw measurement in every split) has "
+                "never actually tested whether a reversal-type signal survives a stop/target mechanic that "
+                "was frozen for a DIFFERENT strategy family (strategy/baseline.py's STOP_ATR_MULTIPLIER/"
+                "TARGET_RISK_REWARD, built for TrendMomentumBaseline's trend-CONTINUATION setups)."
+            ),
+            expected_effect="No prior assumption -- tests whether the raw measurement's edge survives, is reduced, or is destroyed once translated into a real stop/target/cost-aware trade.",
+            dataset_restrictions="Same full 32-symbol NSE universe, 10 years daily (2016-2026), identical to H_XSECT_001.",
+            experiment_design=(
+                "New module quant_research/cross_sectional_strategy.py (6 new tests, tests/"
+                "test_cross_sectional_strategy.py): CrossSectionalLaggardStrategy implements the Strategy "
+                "protocol, reading a precomputed bucket-membership column (quant_research.cross_sectional."
+                "attach_bucket_membership_column, computed ONCE across the whole universe before any per-symbol "
+                "backtest runs -- the same 'compute once, attach as a column' pattern "
+                "RelativeStrengthSignalStrategy already established) and firing a LONG entry ONLY on a NEW "
+                "entry into the bottom quintile (Q5) by trailing 60-day return -- the report's own frozen §8 "
+                "rule, not re-tuned here. Stop/target sizing reuses strategy/baseline.py's frozen "
+                "STOP_ATR_MULTIPLIER/TARGET_RISK_REWARD unchanged (this experiment tests the entry signal in a "
+                "real trade context only, the same isolation posture every hypothesis in this project already "
+                "takes). Position held up to backtesting.exit_experiments.DEFAULT_MAX_HOLDING_BARS=20 bars via "
+                "run_time_based_exit_backtest (reused UNCHANGED, the same time-cap mechanic H_EXIT_004/"
+                "H_MEANREV_002 already use), cost_model=CostModel.india_nse_intraday_2026() (the SAME realistic "
+                "~0.21% round-trip estimate the report's own cost-sensitivity check used as its benchmark). Run "
+                "through strategy/promotion_gate.py's evaluate_promotion (the SAME mechanical dev/val/oos "
+                "promotion rule every H_EXIT_*/H_ENTRY_* candidate in this project is judged by), not a new or "
+                "looser bar."
+            ),
+            success_criteria="evaluate_promotion returns a POSITIVE verdict: all three splits show a CI-decisive positive mean per-trade return, none negative.",
+            failure_criteria="evaluate_promotion returns NEGATIVE (any split shows a CI-decisive negative mean per-trade return) or INSUFFICIENT_DATA/UNPROVEN.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REAL BACKTEST RESULT (32/32 symbols built, 10y, cost-aware via CostModel."
+                "india_nse_intraday_2026(), risk-sized via risk.engine.RiskEngine, single frozen "
+                "configuration -- no parameter search performed): development n=623 mean=-0.17% "
+                "(CI=[-0.63%,+0.28%], STATISTICALLY_MEANINGLESS -- straddles zero); validation n=236 "
+                "mean=+0.84% (CI=[+0.30%,+1.37%], POSITIVE_PERFORMANCE); out_of_sample n=227 mean=-0.76% "
+                "(CI=[-1.31%,-0.21%], NEGATIVE_PERFORMANCE -- CI-decisive harm). strategy/promotion_gate.py's "
+                "evaluate_promotion verdict: NEGATIVE ('out_of_sample split(s) show a confident "
+                "NEGATIVE_PERFORMANCE verdict -- decisive evidence of harm, not merely unproven. Must not be "
+                "promoted.'). "
+                "MECHANISM (exit-reason diagnostic on the SAME already-computed trades, not a new run -- a "
+                "post-hoc explanation, never used to justify re-testing a different stop width): STOP exits "
+                "are the dominant loss source in every split -- development 320/623 trades (51%) exited via "
+                "STOP for -160,628 total net P&L (avg -501.96/trade) vs. only 118 EXPIRED (the pure 20-day "
+                "time-cap exit, closest analogue to the raw measurement) for +11,968 total (avg +101.43/trade); "
+                "out_of_sample 130/227 trades (57%) exited via STOP for -61,371 total (avg -472.08/trade) vs. "
+                "36 EXPIRED for only -1,005 total (avg -27.94/trade, mildly negative but two orders of "
+                "magnitude smaller than the STOP bucket's damage). This strongly suggests the ATR-based stop "
+                "-- calibrated for TrendMomentumBaseline's trend-CONTINUATION setups, never validated for a "
+                "reversal/mean-reversion signal -- is systematically clipping laggard positions during further "
+                "short-term downside BEFORE the 20-day reversal the raw measurement captured has a chance to "
+                "play out. This is a mechanistic, not merely statistical, explanation. "
+                "CONCLUSION: H_XSECT_001's raw measurement finding is NOT invalidated by this result -- it "
+                "remains a real, adversarially-validated statistical fact about NSE cross-sectional price "
+                "behavior (see H_XSECT_001's own evidence and docs/research/"
+                "CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md). What is rejected here is narrower and more "
+                "specific: THIS naive execution wrapper (a stop/target mechanic borrowed unchanged from a "
+                "different, trend-continuation strategy family) does not monetize that finding, and per this "
+                "project's own multiple-testing discipline ('every experiment must be economically motivated, "
+                "pre-defined... registered honestly'), no alternative stop/target design was tried or will be "
+                "tried as a follow-up tuning search on this same result -- a genuinely different, honestly "
+                "pre-registered exit mechanic (e.g. one designed for mean-reversion's own known dynamics) would "
+                "need to be its OWN new, independently-motivated hypothesis, not a retry of this one. Per this "
+                "mission's own 'IF A REAL EDGE APPEARS' workflow, this NEGATIVE verdict at the 'verify costs' "
+                "stage means H_XSECT_001 does NOT proceed to PROMISING status or shadow mode on the strength of "
+                "this execution design; H_XSECT_001's own status remains INCONCLUSIVE (a raw measurement claim, "
+                "not an executable-strategy claim) and is not itself downgraded by this entry's rejection."
+            ),
+        ),
     )
