@@ -17,6 +17,11 @@ NSE,E,2885,EQUITY,0,RELIANCE,1.0,Reliance Industries,,,,10.0000,NA,ES,EQ,RELIANC
 BSE,E,500325,EQUITY,0,RELIANCE,1.0,Reliance Industries,,,,0.0500,NA,ES,A,RELIANCE INDUSTRIES LTD
 NSE,D,49081,FUTSTK,0,RELIANCE,500.0,RELIANCE FUT,2026-09-25,,,10.0000,NA,FUTSTK,,RELIANCE INDUSTRIES LTD
 NSE,E,1333,EQUITY,0,HDFCBANK,1.0,HDFC Bank,,,,10.0000,NA,ES,EQ,HDFC BANK LTD
+NSE,D,55001,FUTSTK,0,HDFCBANK,550.0,HDFCBANK FUT,2026-09-25,,,10.0000,NA,FUTSTK,,HDFC BANK LTD
+NSE,E,9999,EQUITY,0,ITC,1.0,ITC,,,,10.0000,NA,ES,EQ,ITC LTD
+NSE,D,88881,FUTIDX,0,081NSETEST,1.0,NSE TEST,2026-09-25,,,10.0000,NA,FUTIDX,,NSE CONNECTIVITY TEST
+NSE,D,88882,FUTSTK,0,091NSETEST,1.0,NSE TEST,2026-09-25,,,10.0000,NA,FUTSTK,,NSE CONNECTIVITY TEST
+NSE,D,77771,OPTSTK,0,RELIANCE-Oct2026-1500-CE,500.0,RELIANCE OPT,2026-10-30,1500.0,CE,10.0000,NA,OPTSTK,,RELIANCE INDUSTRIES LTD
 """
 
 
@@ -78,6 +83,50 @@ def test_lookup_yahoo_symbol_without_a_recognized_suffix_raises():
 def test_lookup_unknown_symbol_raises_not_found(instrument_map):
     with pytest.raises(InstrumentNotFoundError):
         instrument_map.lookup(trading_symbol="NOSUCHSYMBOL", exchange="NSE", segment="E")
+
+
+def test_underlying_symbols_with_active_derivative_includes_fno_names(instrument_map):
+    """RELIANCE and HDFCBANK both have a real NSE FUTSTK row -- both
+    must be included."""
+    result = instrument_map.underlying_symbols_with_active_derivative()
+    assert "RELIANCE" in result
+    assert "HDFCBANK" in result
+
+
+def test_underlying_symbols_with_active_derivative_excludes_equity_without_derivative(instrument_map):
+    """ITC has an NSE equity row but no FUTSTK row -- must be excluded,
+    this is the whole point of the F&O-eligibility gate."""
+    result = instrument_map.underlying_symbols_with_active_derivative()
+    assert "ITC" not in result
+
+
+def test_underlying_symbols_with_active_derivative_excludes_nse_test_instruments(instrument_map):
+    """091NSETEST has a real FUTSTK row but is an exchange connectivity
+    test instrument, not a real security -- must never leak through."""
+    result = instrument_map.underlying_symbols_with_active_derivative()
+    assert not any("NSETEST" in symbol for symbol in result)
+
+
+def test_underlying_symbols_with_active_derivative_ignores_futidx_and_optstk(instrument_map):
+    """Only FUTSTK (single-stock futures) counts by default -- an index
+    future (FUTIDX) or an option contract (OPTSTK) on the same
+    underlying must not, by itself, satisfy the default query (RELIANCE
+    already qualifies via its own FUTSTK row regardless, so this checks
+    081NSETEST -- FUTIDX only, no FUTSTK -- is correctly excluded)."""
+    result = instrument_map.underlying_symbols_with_active_derivative()
+    assert "081NSETEST" not in result
+
+
+def test_underlying_symbols_with_active_derivative_respects_exchange_filter():
+    """A BSE-only instrument master (no NSE rows at all) must return an
+    empty set for exchange="NSE", never fall back to a different
+    exchange's own data."""
+    bse_only_csv = """SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_INSTRUMENT_NAME,SEM_EXPIRY_CODE,SEM_TRADING_SYMBOL,SEM_LOT_UNITS,SEM_CUSTOM_SYMBOL,SEM_EXPIRY_DATE,SEM_STRIKE_PRICE,SEM_OPTION_TYPE,SEM_TICK_SIZE,SEM_EXPIRY_FLAG,SEM_EXCH_INSTRUMENT_TYPE,SEM_SERIES,SM_SYMBOL_NAME
+BSE,E,500325,EQUITY,0,RELIANCE,1.0,Reliance Industries,,,,0.0500,NA,ES,A,RELIANCE INDUSTRIES LTD
+BSE,D,1,FUTSTK,0,RELIANCE,500.0,RELIANCE FUT,2026-09-25,,,10.0000,NA,FUTSTK,,RELIANCE INDUSTRIES LTD
+"""
+    bse_map = DhanInstrumentMap(pd.read_csv(io.StringIO(bse_only_csv), dtype=str, keep_default_na=False))
+    assert bse_map.underlying_symbols_with_active_derivative(exchange="NSE") == set()
 
 
 def test_lookup_is_deterministic(instrument_map):

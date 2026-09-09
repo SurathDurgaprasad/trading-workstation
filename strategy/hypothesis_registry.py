@@ -2153,4 +2153,95 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "(next-bar-open vs. the raw measurement's same-close assumption) remains completely untested."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_XSECT_006",
+            description=(
+                "Does H_XSECT_005's cross-sectional laggard portfolio effect survive on a materially larger, "
+                "objectively-selected NSE universe -- specifically on the symbols NOT in the original 32-symbol "
+                "universe, the only way to distinguish 'a real, broad phenomenon' from 'an artifact of which 32 "
+                "stocks happened to be chosen first'? Pre-registered BEFORE any code ran: docs/research/"
+                "H_XSECT_006_UNIVERSE_WIDENING_PREREGISTRATION.md, committed as its own commit prior to any "
+                "experiment code."
+            ),
+            rationale=(
+                "H_XSECT_005 was positive in all three splits but only on the original 32-symbol universe, "
+                "whose own selection was found (Phase 0 audit) to have NO documented rationale anywhere in this "
+                "repository's history -- a real, disclosed universe-selection risk this project's own research "
+                "discipline requires checking, not assuming away. Universe widening cannot increase H_XSECT_"
+                "005's own ~120-period sample-size ceiling (an explicit, stated-up-front scope limit), but it "
+                "CAN test cross-sectional external validity and expose selection bias, which is a different "
+                "and independently valuable question."
+            ),
+            expected_effect="No prior assumption -- explicitly designed to be able to reject H_XSECT_005 if the effect does not generalize, not to confirm it.",
+            dataset_restrictions=(
+                "Three frozen groups: ORIGINAL (the unchanged 32-symbol universe, 10y), EXPANDED-ONLY (176 NSE "
+                "equity symbols with an active NSE single-stock futures contract per Dhan's own public "
+                "instrument master -- an exchange-vetted liquidity/market-cap gate, NOT a NIFTY-index-"
+                "membership claim; market_data/universe.py already declined to make that claim for lack of a "
+                "verifiable source, and this entry respects that decision -- excluding the original 32 by "
+                "construction, verified zero-overlap), COMBINED (the 208-symbol union). Current (2026-09-09) "
+                "F&O-eligibility snapshot, NOT point-in-time historical membership -- survivorship bias "
+                "explicitly disclosed as a standing limitation, not resolved."
+            ),
+            experiment_design=(
+                "New module quant_research/universe_expansion.py (6 new tests) builds the three frozen groups "
+                "via a new live.dhan.instruments.DhanInstrumentMap.underlying_symbols_with_active_derivative "
+                "method (5 new tests). Frozen, UNCHANGED H_XSECT_005 strategy (quant_research."
+                "cross_sectional_portfolio.run_cross_sectional_laggard_portfolio_backtest, same parameters, "
+                "same cost model) run independently on each group. One disclosed mechanical fix, found during "
+                "the Phase 1 data-availability audit BEFORE any result was examined: the shared-rebalance-"
+                "calendar reference symbol was picked via arbitrary dict order, silently safe only because the "
+                "original 32 symbols happened to share one start date -- a recently-listed expanded-universe "
+                "symbol could have silently truncated the whole calendar. Fixed via a new, unit-tested "
+                "select_reference_dataset helper (picks the longest-history dataset); verified to reproduce "
+                "H_XSECT_005's own registered ORIGINAL-group numbers byte-for-byte before trusting the "
+                "expanded-universe results."
+            ),
+            success_criteria="EXPANDED-ONLY shows the same sign as ORIGINAL in all three splits, with COMBINED not dominated by ORIGINAL's own symbols (pre-registration S6).",
+            failure_criteria="EXPANDED-ONLY reverses sign relative to ORIGINAL in any split (pre-registration S6).",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REJECTED -- the pre-registration's own explicit failure condition triggered directly. Mean "
+                "portfolio return per rebalance period: ORIGINAL (32 symbols) development +0.76%, validation "
+                "+1.81%, out_of_sample +0.46% (all positive, reproducing H_XSECT_005 exactly). EXPANDED-ONLY "
+                "(176 symbols, 174 built -- 2 excluded for a pre-existing CachedMarketDataProvider path-safety "
+                "limitation on '&' in GVT&D.NS/M&M.NS, not new to this experiment): development -0.29%, "
+                "validation +1.31%, out_of_sample -0.58% -- SIGN REVERSAL in 2 of 3 splits. COMBINED (208 "
+                "symbols): development -0.36%, validation +1.12%, out_of_sample -1.26% -- same pattern, more "
+                "pronounced out-of-sample. evaluate_promotion returns INSUFFICIENT_DATA for all three groups "
+                "(unchanged from H_XSECT_005, exactly as anticipated -- universe widening does not change the "
+                "~120-period ceiling; this is NOT the basis for the REJECTED verdict). "
+                "ADVERSARIAL CHECKS: (1) symbol concentration -- 170 distinct symbols appeared in Q5 at least "
+                "once; removing the single largest-magnitude contributor (YESBANK.NS) and re-aggregating the "
+                "SAME realized trades barely moves the result (development -0.20%, validation +1.35%, "
+                "out_of_sample -0.59%) -- the reversal is NOT a single-outlier artifact. (2) sector "
+                "concentration -- not available for EXPANDED-ONLY, NSE_SECTOR_MAP covers 0 of the 176 new "
+                "symbols, a disclosed gap, not fabricated. (3) liquidity sensitivity -- EXPANDED-ONLY split "
+                "into above-/below-median avg_daily_value halves, each independently re-ranked within its own "
+                "half: both show a similar, modest, largely-neutral-to-positive pattern (below-median "
+                "development +0.46%/validation +2.64%/out_of_sample +0.00%; above-median +0.35%/+1.67%/-0.07%) "
+                "-- the effect is NOT concentrated in illiquid names, easing rather than worsening execution-"
+                "realism concerns, though this diagnostic (independent re-ranking within a smaller peer group) "
+                "does not explain the full-176-ranking reversal and was not designed to. (4) era stability -- "
+                "the reversal is visible at the coarsest development/validation/out_of_sample granularity "
+                "already, no finer split needed. (5) survivorship bias -- disclosed BEFORE this result was "
+                "seen (pre-registration S7) as a limitation that would be expected to INFLATE a positive "
+                "effect (excluding historical underperformers that later delisted/lost F&O eligibility); the "
+                "effect still reversed sign despite this conservative bias, making REJECTED the more, not "
+                "less, credible reading. (6) original vs. expanded-only vs. combined -- the mandatory "
+                "three-way read is a clean 'selection-bias warning escalating to falsification' per the "
+                "pre-registration's own frozen categories. "
+                "CONCLUSION: H_XSECT_001's raw measurement and H_XSECT_005's portfolio result on the ORIGINAL "
+                "32 symbols are NOT invalidated by this entry -- both remain real findings on that specific, "
+                "disclosed universe. What is rejected is the broader claim: the mechanism does not appear to "
+                "be a universe-agnostic NSE cross-sectional phenomenon. A plausible (untested) explanation: "
+                "mean-reversion in mega-cap 'quality' names (temporary overreaction, institutional dip-buying, "
+                "index-flow effects) may be a different economic mechanism from mean-reversion in a broader, "
+                "more volatile mid-cap/small-cap-inclusive universe, where a bottom-quintile stock is more "
+                "likely there for a genuine, non-reverting deterioration. Pursuing this would need its own new, "
+                "honestly pre-registered hypothesis, not a same-session follow-up. Full writeup, including the "
+                "complete reproducibility record, in docs/research/"
+                "H_XSECT_006_UNIVERSE_WIDENING_PREREGISTRATION.md."
+            ),
+        ),
     )

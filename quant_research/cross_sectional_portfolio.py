@@ -135,6 +135,23 @@ def _period_for_date(date: pd.Timestamp, development_end: pd.Timestamp, validati
     return "out_of_sample"
 
 
+def select_reference_dataset(datasets: dict[str, SymbolDataset]) -> SymbolDataset:
+    """H_XSECT_006: the reference for the shared rebalance calendar must
+    be the dataset with the EARLIEST start date (i.e. the longest
+    available history), not an arbitrary dict-order pick. The original
+    32-symbol universe happened to share one common start date, so this
+    never mattered for H_XSECT_005 -- but a wider universe can include
+    recently-listed names with genuinely shorter history, and picking
+    one of THOSE as the reference would silently truncate the rebalance
+    calendar to their own shorter window, discarding real, available
+    years of data for every other symbol. A symbol still missing on a
+    given rebalance date is excluded from that period's own basket
+    exactly as before (see run_cross_sectional_laggard_portfolio_
+    backtest's own per-symbol membership check) -- this only changes
+    which dates are considered at all."""
+    return min(datasets.values(), key=lambda dataset: dataset.frame.index[0])
+
+
 def compute_member_return(
     frame: pd.DataFrame, *, signal_idx: int, holding_bars: int, capital_per_slot: float, cost_model: CostModel,
 ) -> float | None:
@@ -206,7 +223,7 @@ def run_cross_sectional_laggard_portfolio_backtest(
         n_buckets=n_buckets, min_symbols_per_date=min_symbols_per_date,
     )
 
-    reference = next(iter(datasets.values()))
+    reference = select_reference_dataset(datasets)
     split = split_periods(reference.frame.index[0], reference.frame.index[-1])
     rebalance_dates = reference.frame.index[::rebalance_every_bars]
 

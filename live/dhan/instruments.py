@@ -115,6 +115,34 @@ class DhanInstrumentMap:
             trading_symbol=row["SEM_TRADING_SYMBOL"], display_name=row["SEM_CUSTOM_SYMBOL"],
         )
 
+    def underlying_symbols_with_active_derivative(self, *, exchange: str = "NSE", instrument_name: str = "FUTSTK") -> set[str]:
+        """The set of EQ-series trading symbols (this exchange's own
+        convention, e.g. NSE's "RELIANCE") that are the underlying of at
+        least one `instrument_name` derivative contract currently in this
+        instrument master -- an exchange-vetted liquidity/market-cap gate
+        (NSE only permits single-stock derivatives on names meeting
+        SEBI's own eligibility criteria), used by quant_research/
+        universe_expansion.py's H_XSECT_006 universe-widening
+        pre-registration as an objective alternative to an unverifiable
+        NIFTY-index-membership claim (market_data/universe.py's own
+        module docstring already declined to implement that, for lack of
+        a verifiable membership source). Excludes NSE's own exchange-
+        connectivity test instruments (any trading symbol containing
+        "NSETEST", never a real security)."""
+        derivatives = self._frame[
+            (self._frame["SEM_EXM_EXCH_ID"] == exchange)
+            & (self._frame["SEM_SEGMENT"] == "D")
+            & (self._frame["SEM_INSTRUMENT_NAME"] == instrument_name)
+        ]
+        underlyings = {symbol.split("-")[0] for symbol in derivatives["SEM_TRADING_SYMBOL"]}
+        underlyings = {symbol for symbol in underlyings if "NSETEST" not in symbol}
+
+        equity = self._frame[
+            (self._frame["SEM_EXM_EXCH_ID"] == exchange) & (self._frame["SEM_SEGMENT"] == "E") & (self._frame["SEM_SERIES"] == "EQ")
+        ]
+        equity_symbols = set(equity["SEM_TRADING_SYMBOL"])
+        return underlyings & equity_symbols
+
     def lookup_yahoo_symbol(self, yahoo_symbol: str) -> DhanInstrument:
         """"RELIANCE.NS" -> NSE equity lookup; "RELIANCE.BO" -> BSE. Never
         treats the Yahoo symbol itself as a broker identifier -- this is

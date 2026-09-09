@@ -174,6 +174,41 @@ directional-but-inconclusive is reported as exactly that, never
 rounded up to a positive claim. Full addendum in `docs/research/
 CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §15.
 
+**Same day, next mission continuation: does H_XSECT_005's effect
+survive on a wider, objectively-selected NSE universe? No —
+`H_XSECT_006`, REJECTED.** Pre-registered *before* any code ran
+(`docs/research/H_XSECT_006_UNIVERSE_WIDENING_PREREGISTRATION.md`,
+committed as its own commit ahead of the experiment): an objective,
+exchange-vetted expansion using the already-integrated Dhan instrument
+master — every NSE equity symbol with an active NSE single-stock
+futures contract (a real, regulator-vetted liquidity/market-cap gate,
+deliberately NOT a NIFTY-100/200 claim, since `market_data/
+universe.py` already declined to make that claim for lack of a
+verifiable source). 208 symbols total, the original 32 a strict
+subset, leaving 176 genuinely new symbols with zero overlap. Same
+frozen `H_XSECT_005` methodology run independently on ORIGINAL (32),
+EXPANDED-ONLY (176), and COMBINED (208). **Result: EXPANDED-ONLY
+reverses sign relative to ORIGINAL in two of three splits**
+(development +0.76%→-0.29%, out-of-sample +0.46%→-0.58%; only
+validation stays positive, and more weakly). COMBINED shows the same
+pattern, more pronounced out-of-sample (-1.26%). This is exactly the
+pre-registration's own frozen failure condition. Adversarial checks
+ruled out a single-outlier artifact (removing the largest contributor,
+`YESBANK.NS`, barely moves the result) and illiquid-name concentration
+(both liquidity halves show a similar pattern, if anything the
+below-median-liquidity half performs slightly *better*) — the reversal
+is broad, not a fragile artifact of one name or one liquidity segment.
+Survivorship bias (current F&O eligibility, not point-in-time) was
+disclosed up front as a limitation that would be expected to *inflate*
+a positive result, making the REJECTED verdict more credible, not
+less. **`H_XSECT_001`'s raw measurement and `H_XSECT_005`'s portfolio
+result on the original 32 symbols are not invalidated** — both remain
+real findings on that specific, now-explicitly-disclosed universe.
+What is rejected is the broader claim that this is a universe-agnostic
+NSE phenomenon; it looks specific to large-cap "quality" names, a
+plausible but untested mechanism. Full results in `docs/research/
+H_XSECT_006_UNIVERSE_WIDENING_PREREGISTRATION.md` §9.
+
 Overnight gap-fade was this project's second-most promising raw finding
 (H_GAP_001/002) and was put through a deep, deliberately adversarial
 validation this segment (H_GAP_003) — cost sensitivity, pre-specified
@@ -236,30 +271,27 @@ Nothing is promoted. Nothing should be traded.
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(39 hypotheses tested to date).
+(40 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
 None FORMALLY carry that status in the registry yet (this project's own
-`HypothesisStatus` enum doesn't have a PROMISING tier), but the picture
-around H_XSECT_001 has shifted meaningfully this segment.
-**H_XSECT_005 (the genuine portfolio reproduction) is now the closest
-this project has come to a validated executable design**: positive in
-all three splits, no sign reversal, an out-of-sample figure nearly
-identical to the raw measurement's own — but held back from PROMISING
-purely by sample size (INSUFFICIENT_DATA at n=24 for validation/
-out-of-sample), not by a weak or negative effect. This reframes
-H_XSECT_002's earlier NEGATIVE verdict: it now looks substantially
-attributable to that test's own structural choices (a trend-
-continuation stop mechanic; independent undiversified single-symbol
-trades) rather than to the underlying cross-sectional signal itself.
-See the CURRENT ACTIVE EDGE STATUS section above for the full story.
-H_CALENDAR_001 (Tuesday effect) remains the strongest PURELY
-STATISTICAL replication (broad, Bonferroni-surviving, no decay) but
-fails economically (doesn't clear costs, no execution vehicle) — a
-different way of falling short than H_XSECT_005's own gap (a real,
-directionally-positive executable design that simply doesn't have
-enough independent periods yet to call decisive).
+`HypothesisStatus` enum doesn't have a PROMISING tier), and **the
+picture has sobered meaningfully since the last update**: `H_XSECT_005`
+was the closest this project had come to a validated executable design
+(positive in all three splits, no sign reversal on the original
+32-symbol universe) — but the very next test, `H_XSECT_006` (universe
+widening), found that effect does **not** generalize beyond that
+specific 32-symbol universe: development and out-of-sample both
+reverse sign on the 176 genuinely new symbols. `H_XSECT_005`'s own
+result on the original 32 is unchanged and real, but "closest to
+promising" no longer applies with the same confidence it did a few
+hours ago — the honest read now is universe-selection risk, not
+statistical-power-only. See CURRENT ACTIVE EDGE STATUS above for the
+full story. H_CALENDAR_001 (Tuesday effect) remains the strongest
+PURELY STATISTICAL replication (broad, Bonferroni-surviving, no decay)
+but fails economically — still, on balance, no weaker a candidate than
+the cross-sectional thread is right now.
 
 ## INCONCLUSIVE HYPOTHESES (17)
 
@@ -277,16 +309,17 @@ underpowered; a mild fade direction echoed gap-fade's own finding but
 never reached decisive significance), H_CALENDAR_001 (the Tuesday
 effect — this project's most statistically robust PURE finding, real
 but not tradeable — see above), H_XSECT_001 (cross-sectional laggard
-raw measurement — this project's strongest PRICE-BEHAVIOR finding),
-H_XSECT_003 (sector-relative score variant — genuinely replicates
-H_XSECT_001's pattern, CI-decisive in all three splits, its own
-executable behavior untested), and **H_XSECT_005 (the genuine
-portfolio reproduction — positive in all three splits, no sign
-reversal, but INSUFFICIENT_DATA at n=24 per validation/out-of-sample
-split — see PROMISING HYPOTHESES above)**. Full evidence for each in
-`strategy/hypothesis_registry.py`.
+raw measurement, on the original 32-symbol universe specifically — see
+H_XSECT_006 below for why this can no longer be described as a broad,
+universe-agnostic finding), H_XSECT_003 (sector-relative score variant
+— genuinely replicates H_XSECT_001's pattern on the original universe,
+its own broader generalizability now also an open question), and
+H_XSECT_005 (the genuine portfolio reproduction — positive in all
+three splits on the original 32 symbols, but INSUFFICIENT_DATA at n=24
+per validation/out-of-sample split — see above). Full evidence for
+each in `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (21)
+## REJECTED HYPOTHESES (22)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
@@ -300,14 +333,17 @@ sector-regime tests — found a real, sensible, monotonic ordinal
 pattern, leading sectors beat lagging ones, but the magnitude was too
 small and the "best" bucket still went decisively negative
 out-of-sample), H_CALENDAR_002 (the Tuesday effect does not hold on
-NIFTY 50 itself — see above), **H_XSECT_002 (the real, cost-aware,
+NIFTY 50 itself — see above), H_XSECT_002 (the real, cost-aware,
 risk-sized backtest of H_XSECT_001's own finding — out-of-sample shows
 CI-decisive harm, driven mechanistically by an ATR stop mis-calibrated
-for a reversal signal — see above)**, and **H_XSECT_004 (does a
-wider/absent stop rescue H_XSECT_002's result? Both pre-specified
-variants performed WORSE, not better — a genuine correction to
-H_XSECT_002's own diagnostic reading; see above for the full
-mechanism)**. Full evidence for each in `strategy/
+for a reversal signal — see above), H_XSECT_004 (does a wider/absent
+stop rescue H_XSECT_002's result? Both pre-specified variants performed
+WORSE, not better — a genuine correction to H_XSECT_002's own
+diagnostic reading; see above for the full mechanism), and **H_XSECT_006
+(universe widening — the laggard effect reverses sign on 176 genuinely
+new NSE symbols not in the original universe; a selection-bias warning
+escalating to falsification per the pre-registration's own frozen
+criteria — see above)**. Full evidence for each in `strategy/
 hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
@@ -442,66 +478,79 @@ rebuilt, this segment.
    recurring, since undisturbed live observation (risk #1 above) is
    only possible if the scheduler actually stays running.
 7. **The temptation to round H_XSECT_005's INSUFFICIENT_DATA up to a
-   positive claim.** It is the most encouraging executable result this
-   project has produced — positive in all three splits, no sign
-   reversal — which is exactly the situation where it's tempting to
-   describe it as "working" rather than "underpowered." It is
-   INSUFFICIENT_DATA, not SUPPORTED, and stays that way until either
-   more independent periods exist or a principled variance-reduction
-   lever (a wider universe, not a shorter/riskier rebalance cadence) is
-   tested and pre-registered on its own.
+   positive claim.** Now more clearly resolved than hypothetical: the
+   principled variance-reduction lever this risk named (a wider
+   universe) WAS tested, pre-registered, and found a sign reversal
+   (H_XSECT_006) — a direct, healthy correction of the temptation this
+   item warned about. Kept as a standing reminder of the discipline
+   that produced that correction, not because the specific worry is
+   still live.
+8. **Universe-selection risk is real, not hypothetical, for every
+   remaining INCONCLUSIVE cross-sectional finding.** H_XSECT_006 proved
+   it concretely for the laggard effect: a result that looked robust
+   across 5 separate tests on the original 32 symbols reversed sign on
+   176 different, objectively-selected NSE symbols. H_XSECT_003's own
+   sector-relative replication was ALSO only ever tested on the
+   original 32/21-symbol universe — its own broader generalizability is
+   now an open question by the same logic, not yet checked.
 
 ## NEXT HIGHEST-VALUE RESEARCH QUESTION
 
-**Current answer (2026-09-09, "EXECUTION-MECHANICS INVESTIGATION"
-mission continuation)**: the mission's own central question —
-*why does H_XSECT_001 work as a raw measurement but fail when converted
-into an executable strategy?* — has a real, structural answer now, not
-just a diagnosis. A precise reconciliation (`docs/research/
-CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §14) found FOUR genuine
-mismatches between the raw measurement and every prior executable test
-(entry-timing lag, path-dependent early exits, a restrictive "newly
-entered" sampling rule, and no portfolio-level diversification). Fixing
-the two most consequential of these — path-dependence and portfolio
-construction — in a new, genuine equal-weight portfolio backtest
-(`H_XSECT_005`) produced the most encouraging executable result in this
-project's history: positive in all three splits, no sign reversal, an
-out-of-sample figure nearly identical to the raw measurement's own —
-but INSUFFICIENT_DATA, not SUPPORTED, because only n=24 independent
-20-day periods exist per validation/out-of-sample split at 10 years of
-history. **This is a genuine statistical-power problem, not a weak or
-false effect** — see §15 and the CURRENT ACTIVE EDGE STATUS section
-above for the full story.
+**Current answer (2026-09-09, universe-widening mission continuation)**:
+does H_XSECT_005's cross-sectional laggard effect survive on a wider,
+objectively-selected NSE universe? **No — H_XSECT_006, REJECTED.** A
+precise, pre-registered test (208 NSE F&O-eligible symbols vs. the
+original 32) found the effect reverses sign on the 176 genuinely new
+symbols in 2 of 3 splits, survives a battery of adversarial checks
+(not a single-outlier artifact, not concentrated in illiquid names),
+and is not explained away by survivorship bias (which would have been
+expected to inflate, not weaken, a positive result). See CURRENT
+ACTIVE EDGE STATUS above and `docs/research/
+H_XSECT_006_UNIVERSE_WIDENING_PREREGISTRATION.md` §9 for the full
+writeup.
 
-**Immediate next candidates, not yet pursued (each needs its own
-pre-registration before any code runs, per this project's own
-discipline)**:
-1. A wider universe (more NSE symbols beyond the current 32) would
-   reduce PER-PERIOD portfolio variance through greater diversification
-   without needing more historical time — a distinct, legitimate lever
-   from "get more data," and the most promising near-term way to
-   tighten H_XSECT_005's own confidence intervals on the SAME 120
-   periods it already has.
-2. The entry-timing mismatch (raw measurement assumes same-close entry;
-   every executable backtest including H_XSECT_005 uses next-bar-open)
-   remains completely unquantified.
-3. A shorter, still-principled rebalance cadence is tempting but risky:
-   it was NOT validated for independence the way the 20-day cadence
-   was, and would reintroduce overlapping 20-day holding windows across
-   staggered rebalances — flagged explicitly so it is not chased
-   casually.
+**What this changes and does not change**: `H_XSECT_001`'s raw
+measurement and `H_XSECT_005`'s portfolio result on the *original*
+32-symbol universe remain real, unmodified findings — nothing about
+today's own numbers changed. What changes is the CLAIM those findings
+can support: not "a broad NSE cross-sectional phenomenon," but
+possibly "a large-cap-specific mean-reversion mechanism" — plausible,
+untested, and not pursued further in this same run.
 
-**Standing discipline reminder, unchanged from the prior update**: a
-*tighter* stop for the single-symbol H_XSECT_002/004 family remains
-untested and deliberately not pursued — narrowing stop parameters
-after each negative result would be exactly the undisclosed parameter
-search this project's own discipline exists to prevent.
+**The cross-sectional research thread has now reached a genuine
+natural stopping point.** In order: `H_XSECT_002` (executable backtest,
+REJECTED) → `H_XSECT_003` (relative-score variants, INCONCLUSIVE) →
+`H_XSECT_004` (stop-width variants, REJECTED, closed) → `H_XSECT_005`
+(portfolio reproduction, INSUFFICIENT_DATA) → `H_XSECT_006` (universe
+widening, REJECTED). Every well-motivated, pre-registered follow-up
+this thread's own results generated has now been run. Remaining
+options all require a genuinely NEW, separately-motivated hypothesis,
+not a continuation of this one:
+1. Whether the effect is specifically large-cap/"quality"-name
+   mean-reversion (H_XSECT_006's own closing hypothesis) — would need
+   an explicit large-cap-only universe definition (e.g. a market-cap
+   or long-listing-history filter) and its own pre-registration.
+2. The entry-timing mismatch (raw measurement assumes same-close
+   entry; every executable backtest including H_XSECT_005/006 uses
+   next-bar-open) remains completely unquantified.
+3. A *tighter* stop for the single-symbol H_XSECT_002/004 family
+   remains untested and deliberately not pursued — narrowing stop
+   parameters after each negative result would be exactly the
+   undisclosed parameter search this project's own discipline exists
+   to prevent.
 
-Beyond the cross-sectional thread, the mission's own lower-priority
-research families (multi-horizon momentum map, relative-strength
-quality conditions, volatility contraction, breakout quality,
-extreme-move research, regime-dependent effects, market microstructure)
-remain open and untouched.
+**Given the thread has now produced two REJECTED results in a row
+(H_XSECT_004, H_XSECT_006) plus one closed-out variant test
+(H_XSECT_003) and one underpowered-but-real result (H_XSECT_005),
+the single highest-EV action for whoever picks this up next is
+probably NOT another cross-sectional variant** — it is the mission's
+own lower-priority research families (multi-horizon momentum map,
+relative-strength quality conditions, volatility contraction, breakout
+quality, extreme-move research, regime-dependent effects, market
+microstructure), which remain open and completely untouched. A
+research program that keeps refining one thread after two consecutive
+rejections risks exactly the "endless hypothesis generation on a dying
+lead" pattern this project's own discipline warns against.
 
 Separately, and lower priority: let the 15 real directional forecasts
 recorded 2026-09-08 (and the 10-11 existing BUY predictions) resolve,

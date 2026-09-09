@@ -143,10 +143,28 @@ target, `CostModel.india_nse_intraday_2026()`,
 default — noted as potentially conservative for the 176-symbol
 EXPANDED-ONLY group, which has more than enough symbols to clear it
 easily; not adjusted either way). **No parameter is retuned for the
-larger universe.** If running the existing code against a larger
-symbol list requires any mechanical adaptation (not a parameter
-change, but e.g. a data-volume/performance accommodation), that will
-be disclosed here before results are examined.
+larger universe.**
+
+**Disclosed mechanical adaptation (found during Phase 1 data-
+availability audit, before any backtest was run or any return
+examined)**: `run_cross_sectional_laggard_portfolio_backtest` picked
+its shared-rebalance-calendar reference symbol via `next(iter(
+datasets.values()))` — arbitrary dict-insertion order. This was silently
+safe for the original 32-symbol universe only because every one of
+those 32 symbols happened to share the same ~10-year start date. A
+5-symbol feasibility sample from the expanded universe found at least
+one recently-listed name (`360ONE.NS`, ~7 years of history, not 10) —
+had it been picked as the reference, the shared rebalance calendar
+would have been silently truncated to its own shorter window,
+discarding real, available years of data for every other symbol.
+Fixed by extracting `select_reference_dataset` (new, unit-tested): the
+reference is now explicitly the dataset with the **earliest start
+date** (longest available history) among the group being tested. This
+is a correctness fix to calendar selection, not a strategy-parameter
+change — every other frozen parameter in this section is unchanged,
+and the fix applies identically to all three comparison groups
+(verified to leave ORIGINAL's own result unaffected, since its 32
+symbols share one start date regardless of which is picked).
 
 ## 6. Success / failure criteria (frozen)
 
@@ -213,18 +231,144 @@ diagnosed (§7).
 6. **Original vs. expanded-only vs. combined comparison**: the
    mandatory three-way read described in §6.
 
-## 8. Reproducibility record (to be filled in at execution time, not altered afterward)
+## 8. Reproducibility record
 
-- Dhan instrument-master download/cache timestamp.
-- Exact 176-symbol EXPANDED-ONLY list and 208-symbol COMBINED list.
-- Any symbol excluded for a data-availability failure, with the reason.
-- Data period (`10y`), interval (`1d`), split boundaries per group.
-- Strategy parameters (all frozen, listed in §5 — repeated verbatim,
-  not re-derived).
-- Cost model parameters (`CostModel.india_nse_intraday_2026()`,
-  repeated verbatim).
+- Dhan instrument-master snapshot: `data/dhan/scrip-master.csv`,
+  downloaded/cached 2026-09-09 (this session), 197,288 rows.
+- 208-symbol COMBINED / 176-symbol EXPANDED-ONLY / 32-symbol ORIGINAL
+  lists: exact, reproducible output of
+  `quant_research.universe_expansion.build_universe_groups` given that
+  same instrument-master snapshot — not re-typed by hand anywhere.
+- **Symbols excluded for a data-availability failure**: `GVT&D.NS` and
+  `M&M.NS` (2 of 176 EXPANDED-ONLY symbols) — both fail with *"Refusing
+  to use symbol ... to construct a filesystem path — contains
+  characters outside the safe set"*, a pre-existing, already-documented
+  `CachedMarketDataProvider` limitation (path-safety validator rejects
+  `&`), not new to this experiment. 174/176 symbols built successfully;
+  170/174 were selected into the bottom quintile at least once across
+  the 120 rebalance periods actually tested (the remaining 4 built
+  successfully but were never ranked into Q5 in this run — not an
+  error).
+- Data period `10y`, interval `1d`, via the existing
+  `CachedMarketDataProvider`/`quant_research.market_behavior.
+  build_universe_datasets` path, unchanged.
+- Split boundaries: computed independently per group via
+  `quant_research.cross_sectional_portfolio.select_reference_dataset`
+  (see §5's disclosed fix) + `backtesting.splits.split_periods`, from
+  each group's own longest-history member.
+- Strategy parameters: exactly as frozen in §5, unmodified.
+- Cost model: `CostModel.india_nse_intraday_2026()`, unmodified.
 
-## 9. Explicitly out of scope for this experiment
+## 9. Results — REJECTED (selection-bias / sign-reversal, per the frozen §6 criteria)
+
+Full evidence: `H_XSECT_006` in `strategy/hypothesis_registry.py`.
+
+**Mean portfolio return per rebalance period, all three groups, same
+frozen methodology:**
+
+| Group (n symbols) | Development (n=72) | Validation (n=24) | Out-of-sample (n=24) |
+|---|---|---|---|
+| ORIGINAL (32) | **+0.76%** | **+1.81%** | **+0.46%** |
+| EXPANDED-ONLY (176, 174 built) | **-0.29%** | +1.31% | **-0.58%** |
+| COMBINED (208) | **-0.36%** | +1.12% | **-1.26%** |
+
+`evaluate_promotion` returns `INSUFFICIENT_DATA` for all three groups
+(unchanged from `H_XSECT_005` — as §1/§6 explicitly anticipated,
+widening the universe does not change the ~120-period ceiling).
+
+**This is exactly the §6 "Failure" condition, triggered directly**:
+EXPANDED-ONLY reverses sign relative to ORIGINAL in *two* of three
+splits (development and out-of-sample both flip from positive to
+negative; only validation stays positive, and more weakly than
+ORIGINAL's own +1.81%). COMBINED shows the same pattern, more
+pronounced in out-of-sample (-1.26%). **Verdict: REJECTED** — the
+laggard-outperformance pattern that looked real and robust across
+`H_XSECT_001`–`H_XSECT_005` does *not* generalize beyond the original
+32-symbol universe; it looks substantially attributable to
+universe-selection risk (survivorship into a specific set of blue-chip
+large-caps), exactly the failure mode this experiment was designed to
+be able to detect.
+
+### Adversarial checks
+
+**1. Symbol concentration (EXPANDED-ONLY).** 170 distinct symbols were
+selected into Q5 at least once. The pooled contribution total is
+itself near zero (+0.79, summed across all member-period returns),
+which makes a "% of total" concentration metric numerically unstable
+(division by a near-zero denominator) — reported honestly as unusable
+rather than a misleading number. The direct, meaningful diagnostic
+instead: removing the single largest-magnitude contributor
+(`YESBANK.NS`, a well-known distressed/volatile bank stock) and
+re-aggregating the *same* realized trades barely moves the result —
+development -0.20% (was -0.29%), validation +1.35% (was +1.31%),
+out-of-sample -0.59% (was -0.58%). **The sign reversal is not a
+single-outlier artifact.**
+
+**2. Sector concentration.** Not available for EXPANDED-ONLY — `NSE_
+SECTOR_MAP` covers 0 of the 176 new symbols, a disclosed gap per §4/§7,
+not fabricated. Building sector coverage for 176 more symbols was
+explicitly out of scope (§10).
+
+**3. Liquidity sensitivity.** EXPANDED-ONLY (174 fetchable symbols)
+split into above-/below-median `avg_daily_value` halves (median
+≈₹1.36B), each **re-ranked independently within its own half** (a
+different diagnostic design from check 1's same-trades
+re-aggregation — this asks whether the *strategy itself* behaves
+differently against a smaller, liquidity-segmented peer group, not
+whether one name's realized path drove the pooled number). Both halves
+show a similar, modest pattern — below-median: dev +0.46%, val +2.64%,
+oos +0.00%; above-median: dev +0.35%, val +1.67%, oos -0.07% — **the
+effect is not concentrated in illiquid names**; if anything the
+below-median half is marginally stronger. This diagnostic does not
+explain, and was not designed to explain, why the full 176-symbol
+ranking (a different peer group again) reversed sign — that deeper
+mechanism question is not chased further in this same run.
+
+**4. Era stability.** Already shown in the main table — no split, in
+any group, needed a finer yearly cut to see the reversal; it is
+visible at the coarsest dev/val/oos granularity already.
+
+**5. Survivorship bias.** As disclosed in §7 before any result was
+seen: this is a **current** (2026-09-09) F&O-eligibility snapshot, not
+point-in-time historical membership. The REJECTED verdict makes this
+limitation directionally conservative, not concerning — a
+survivorship-biased universe would be expected to *inflate* a positive
+effect (by excluding historical underperformers that have since
+delisted or lost eligibility), yet the effect still reversed sign. If
+anything, a true point-in-time universe (unavailable to this project)
+might show an even *weaker* result on the expanded universe, not a
+stronger one.
+
+**6. Original vs. expanded-only vs. combined.** The mandatory
+three-way read (§6): this is a clean **selection-bias warning
+escalating to falsification** — ORIGINAL positive in all three splits,
+EXPANDED-ONLY/COMBINED negative in two of three, with validation the
+only split where the sign survives (and even there, weaker than
+ORIGINAL). Per §6's own frozen language, ORIGINAL positive +
+EXPANDED-ONLY negative is explicitly the "selection-bias warning"
+category, and the two-split reversal specifically meets the stronger
+"Failure" bar.
+
+### What this does and does not mean
+
+This does **not** invalidate `H_XSECT_001`'s own raw measurement or
+`H_XSECT_005`'s own portfolio result on the *original* 32 symbols —
+both remain exactly what they were, real findings on that specific,
+disclosed universe. What it does mean: the mechanism does not appear
+to be a broad, universe-agnostic NSE cross-sectional phenomenon. It
+looks specific to the kind of large-cap, "well-known, established,
+liquid, mostly blue-chip" names the original 32 happen to be (the
+project's own `starter_nse.yaml` describes them as exactly that) —
+plausibly because mean-reversion in mega-cap "quality" names (temporary
+overreaction, institutional dip-buying, index-flow effects) is a
+different economic mechanism than mean-reversion in a broader,
+more volatile mid-cap/small-cap-inclusive universe, where a stock in
+the bottom quintile is more likely to be there for a genuine,
+non-reverting deterioration ("catching a falling knife" risk). This is
+offered as a plausible explanation, not a tested one — pursuing it
+further would need its own new, honestly pre-registered hypothesis.
+
+## 10. Explicitly out of scope for this experiment
 
 - Building a sector map for the 176 new symbols (a real, disclosed gap
   in §4/§7, not silently patched with a fabricated mapping).

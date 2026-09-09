@@ -10,7 +10,9 @@ from quant_research.cross_sectional_portfolio import (
     PortfolioBacktestResult,
     PortfolioPeriodResult,
     compute_member_return,
+    select_reference_dataset,
 )
+from quant_research.market_behavior import SymbolDataset
 
 _ZERO_COST_MODEL = CostModel(brokerage_per_fill=0.0, fees_pct=0.0, taxes_pct=0.0, entry_slippage_bps=0.0, exit_slippage_bps=0.0)
 
@@ -18,6 +20,33 @@ _ZERO_COST_MODEL = CostModel(brokerage_per_fill=0.0, fees_pct=0.0, taxes_pct=0.0
 def _frame(opens: list[float], closes: list[float]) -> pd.DataFrame:
     dates = pd.date_range("2024-01-01", periods=len(opens), freq="D")
     return pd.DataFrame({"open": opens, "close": closes, "high": closes, "low": closes}, index=dates)
+
+
+# --- select_reference_dataset --------------------------------------------------
+
+
+def _dataset(symbol: str, start: str, periods: int) -> SymbolDataset:
+    dates = pd.date_range(start, periods=periods, freq="D")
+    frame = pd.DataFrame({"close": [100.0] * periods}, index=dates)
+    return SymbolDataset(symbol=symbol, market="NSE", raw_market="NSE", frame=frame, development_end=None, validation_end=None)
+
+
+def test_select_reference_dataset_picks_longest_history_not_dict_order():
+    """H_XSECT_006: a recently-listed symbol with a SHORT history must
+    never become the reference just because it happens to be first in
+    dict order -- that would silently truncate the shared rebalance
+    calendar for the whole universe."""
+    datasets = {
+        "NEWLISTING": _dataset("NEWLISTING", "2023-01-01", 100),  # short history, inserted first
+        "OLDSTOCK": _dataset("OLDSTOCK", "2016-01-01", 2000),  # long history
+    }
+    reference = select_reference_dataset(datasets)
+    assert reference.symbol == "OLDSTOCK"
+
+
+def test_select_reference_dataset_single_symbol():
+    datasets = {"ONLY": _dataset("ONLY", "2020-01-01", 50)}
+    assert select_reference_dataset(datasets).symbol == "ONLY"
 
 
 # --- compute_member_return --------------------------------------------------
