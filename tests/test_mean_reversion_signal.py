@@ -9,6 +9,7 @@ from market.data_provider import OHLCV
 from market.indicators import compute_indicator_series
 from quant_research.mean_reversion_signal import (
     CANDIDATES,
+    REGIME_GATED_CANDIDATES,
     MeanReversionSignalStrategy,
     add_mean_reversion_columns,
 )
@@ -191,3 +192,113 @@ def test_run_universe_mean_reversion_experiment_isolates_a_failing_symbol(_fake_
 
     assert "BADSYMBOL" in result.failed_symbols
     assert "AAA" not in result.failed_symbols
+
+
+# --- H_MEANREV_004: regime-gated candidates -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "name,zscore,regime,expected",
+    [
+        ("A_oversold_2std_trending_up", -2.5, "TRENDING_UP", True),
+        ("A_oversold_2std_trending_up", -2.5, "TRENDING_DOWN", False),  # oversold but wrong regime
+        ("A_oversold_2std_trending_up", -2.5, "SIDEWAYS", False),
+        ("A_oversold_2std_trending_up", -1.0, "TRENDING_UP", False),  # right regime, not oversold enough
+        ("A_oversold_2std_trending_up", -2.0, "TRENDING_UP", False),  # boundary is strict <
+        ("B_oversold_1_5std_trending_up", -1.6, "TRENDING_UP", True),
+        ("B_oversold_1_5std_trending_up", -1.6, "TRENDING_DOWN", False),
+        ("B_oversold_1_5std_trending_up", -1.5, "TRENDING_UP", False),  # boundary is strict <
+    ],
+)
+def test_regime_gated_candidate_requires_both_conditions(name, zscore, regime, expected):
+    row = pd.Series({"zscore_close_20": zscore, "market_trend_regime": regime})
+    assert REGIME_GATED_CANDIDATES[name](row) is expected
+
+
+@pytest.mark.parametrize("candidate_name", list(REGIME_GATED_CANDIDATES))
+def test_regime_gated_candidate_fails_closed_on_missing_regime_column(candidate_name):
+    """A row with no market_trend_regime attached at all (e.g. before
+    the external overlay runs) must never fire -- NaN/missing must
+    never be silently treated as a matching regime."""
+    row = pd.Series({"zscore_close_20": -3.0})
+    assert REGIME_GATED_CANDIDATES[candidate_name](row) is False
+
+
+@pytest.mark.parametrize("candidate_name", list(REGIME_GATED_CANDIDATES))
+def test_regime_gated_candidate_fails_closed_on_missing_zscore(candidate_name):
+    row = pd.Series({"zscore_close_20": float("nan"), "market_trend_regime": "TRENDING_UP"})
+    assert REGIME_GATED_CANDIDATES[candidate_name](row) is False
+
+
+def test_strategy_accepts_regime_gated_candidates_dict():
+    series = _series(n=100, dip_at=60)
+    series["market_trend_regime"] = "TRENDING_UP"
+    strategy = MeanReversionSignalStrategy("B_oversold_1_5std_trending_up", candidates=REGIME_GATED_CANDIDATES)
+
+    fired = [strategy.generate_signal(series, i, "TEST") for i in range(len(series))]
+    real_signals = [s for s in fired if s is not None]
+
+    assert real_signals, "expected at least one signal from a real dip while TRENDING_UP holds throughout"
+    assert all(s.reason_codes == [ReasonCode.MEAN_REVERSION_OVERSOLD] for s in real_signals)
+
+
+def test_strategy_regime_gated_never_fires_when_regime_never_matches():
+    series = _series(n=100, dip_at=60)
+    series["market_trend_regime"] = "TRENDING_DOWN"  # never TRENDING_UP, despite a real dip
+    strategy = MeanReversionSignalStrategy("B_oversold_1_5std_trending_up", candidates=REGIME_GATED_CANDIDATES)
+
+    fired = [strategy.generate_signal(series, i, "TEST") for i in range(len(series))]
+    assert all(s is None for s in fired)
+
+
+def test_default_candidates_dict_is_still_the_original_when_unspecified():
+    """Regression guard: not passing `candidates` at all must still use
+    the original, frozen H_MEANREV_001 CANDIDATES dict unchanged."""
+    strategy = MeanReversionSignalStrategy("A_oversold_2std")
+    assert strategy._predicate is CANDIDATES["A_oversold_2std"]
+
+
+# --- run_universe_regime_gated_mean_reversion_experiment -----------------------
+
+
+def test_run_universe_regime_gated_mean_reversion_experiment_pools_across_symbols_and_candidates(_fake_mean_reversion_universe_provider):
+    _fake_mean_reversion_universe_provider({"AAA", "BBB", "^NSEI"})
+
+    from quant_research.mean_reversion_signal import (
+        UniverseRegimeGatedMeanReversionExperimentResult,
+        run_universe_regime_gated_mean_reversion_experiment,
+    )
+
+    result = run_universe_regime_gated_mean_reversion_experiment(["AAA", "BBB"], initial_capital=100_000.0)
+
+    assert isinstance(result, UniverseRegimeGatedMeanReversionExperimentResult)
+    assert result.failed_symbols == {}
+    assert set(result.development_trades) == set(REGIME_GATED_CANDIDATES)
+    assert set(result.validation_trades) == set(REGIME_GATED_CANDIDATES)
+    assert set(result.out_of_sample_trades) == set(REGIME_GATED_CANDIDATES)
+    for candidate_name in REGIME_GATED_CANDIDATES:
+        assert isinstance(result.development_trades[candidate_name], list)
+
+
+def test_run_universe_regime_gated_mean_reversion_experiment_isolates_a_failing_symbol(_fake_mean_reversion_universe_provider):
+    _fake_mean_reversion_universe_provider({"AAA", "^NSEI"})
+
+    from quant_research.mean_reversion_signal import run_universe_regime_gated_mean_reversion_experiment
+
+    result = run_universe_regime_gated_mean_reversion_experiment(["AAA", "BADSYMBOL"], initial_capital=100_000.0)
+
+    assert "BADSYMBOL" in result.failed_symbols
+    assert "AAA" not in result.failed_symbols
+
+
+def test_run_universe_regime_gated_mean_reversion_experiment_raises_if_benchmark_unavailable(_fake_mean_reversion_universe_provider):
+    """The benchmark's own regime series is fetched ONCE, shared across
+    every symbol -- if it cannot be built at all, this must fail loudly
+    (no candidate can ever be gated correctly) rather than silently
+    running with an unset/fabricated regime."""
+    _fake_mean_reversion_universe_provider({"AAA"})  # ^NSEI deliberately NOT in the good set
+
+    from quant_research.mean_reversion_signal import run_universe_regime_gated_mean_reversion_experiment
+
+    with pytest.raises(ValueError, match="benchmark"):
+        run_universe_regime_gated_mean_reversion_experiment(["AAA"], initial_capital=100_000.0)

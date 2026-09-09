@@ -2399,4 +2399,79 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "fact. Full writeup in docs/research/H_MEANREV_003_REGIME_CONDITIONING_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_MEANREV_004",
+            description=(
+                "Does H_MEANREV_003's raw finding (oversold mean-reversion entries gated on NIFTY's own "
+                "TRENDING_UP regime, CI-decisive positive across all three splits and both frozen candidates at "
+                "every horizon tested) survive becoming a real, cost-aware, risk-sized trade? Pre-registered "
+                "BEFORE any experiment code ran: docs/research/"
+                "H_MEANREV_004_EXECUTABLE_REGIME_GATED_PREREGISTRATION.md, committed as its own commit prior to "
+                "any implementation."
+            ),
+            rationale=(
+                "The natural, explicitly-flagged next step from H_MEANREV_003's own entry, matching this "
+                "project's established H_XSECT_001-to-H_XSECT_002 precedent exactly: a raw measurement, however "
+                "clean, is not the same claim as a real trade, and this project's own repeated lesson (H_XSECT_"
+                "002/004) is that a wide raw-measurement cost margin does not guarantee an executable, stop/"
+                "target-managed strategy survives."
+            ),
+            expected_effect="No prior assumption stronger than the working hypothesis already on record from H_MEANREV_003's own entry -- that this conversion might fail the same way H_XSECT_001's own did, for a structurally similar reason (a trend-continuation-calibrated stop mismatched to a reversal signal).",
+            dataset_restrictions="Same as H_MEANREV_003: full original 32-symbol NSE universe, 10 years daily.",
+            experiment_design=(
+                "New candidates in quant_research/mean_reversion_signal.py: REGIME_GATED_CANDIDATES "
+                "(A_oversold_2std_trending_up / B_oversold_1_5std_trending_up), H_MEANREV_001's own frozen "
+                "-2.0/-1.5 thresholds with H_MEANREV_003's own market_trend_regime == TRENDING_UP gate added, "
+                "kept as a SEPARATE dict from the original frozen CANDIDATES so H_MEANREV_001's own registered "
+                "candidate set is never mutated. MeanReversionSignalStrategy's exit mechanic (strategy.baseline's "
+                "frozen STOP_ATR_MULTIPLIER/TARGET_RISK_REWARD) reused completely unchanged -- tests the "
+                "entry-timing question in isolation, not a new exit design. New "
+                "run_universe_regime_gated_mean_reversion_experiment mirrors H_MEANREV_001's own runner "
+                "structure, fetching ^NSEI's own trend regime ONCE via quant_research.context_experiments."
+                "build_benchmark_regime_series and forward-filling it onto each symbol's own calendar (the same "
+                "alignment convention attach_external_regime already uses). CostModel.india_nse_intraday_2026() "
+                "-- a disclosed, deliberate improvement over H_MEANREV_001's own original runner, which used the "
+                "generic, non-NSE-specific default CostModel(). 18 new tests in tests/"
+                "test_mean_reversion_signal.py (verified via the full-suite count delta: 1858 -> 1876)."
+            ),
+            success_criteria="At least one candidate reaches a confident POSITIVE_PERFORMANCE verdict (development AND validation AND out-of-sample) via strategy.promotion_gate.evaluate_promotion.",
+            failure_criteria="Neither candidate reaches a positive verdict in all three splits -- i.e. the raw price-behavior edge does not survive becoming an actual, cost-aware, risk-sized trade.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REAL BACKTEST RESULT (32/32 symbols built, 10y, cost-aware via CostModel."
+                "india_nse_intraday_2026(), risk-sized via risk.engine.RiskEngine, both frozen candidates, no "
+                "parameter search performed): Candidate A (-2.0std) development n=428 mean=+0.43% "
+                "(CI=[-0.15%,+1.00%], STATISTICALLY_MEANINGLESS); validation n=126 mean=-0.14% "
+                "(CI=[-1.00%,+0.71%], STATISTICALLY_MEANINGLESS); out_of_sample n=134 mean=+0.57% "
+                "(CI=[-0.20%,+1.34%], STATISTICALLY_MEANINGLESS). Candidate B (-1.5std) development n=708 "
+                "mean=+0.42% (CI=[-0.02%,+0.85%], STATISTICALLY_MEANINGLESS); validation n=208 mean=+0.20% "
+                "(CI=[-0.46%,+0.86%], STATISTICALLY_MEANINGLESS); out_of_sample n=233 mean=+0.42% "
+                "(CI=[-0.15%,+0.99%], STATISTICALLY_MEANINGLESS). evaluate_promotion overall verdict: Candidate "
+                "A REJECTED, Candidate B INCONCLUSIVE -- NEITHER candidate clears the frozen success criterion "
+                "(no split for either candidate reaches a CI-decisive positive verdict; every CI straddles "
+                "zero). This is the pre-registration's own explicit failure condition. "
+                "MECHANISM (exit-reason diagnostic on the already-computed trades, per the pre-registration's "
+                "own frozen discipline -- not a signal to retune anything): STOP exits dominate in every split "
+                "for both candidates (Candidate A: 58.9%/63.5%/58.2% of trades in dev/val/oos; Candidate B: "
+                "58.1%/59.1%/57.1%) -- the SAME shape H_XSECT_002's own exit-reason diagnostic already found for "
+                "the cross-sectional laggard signal. strategy.baseline's frozen ATR stop, built for "
+                "TrendMomentumBaseline's trend-CONTINUATION logic, plausibly clips this reversal-type entry "
+                "before the recovery H_MEANREV_003's own raw measurement captured can complete. "
+                "PER THE PRE-REGISTRATION'S OWN FROZEN DISCIPLINE: no stop/target retuning follows from this "
+                "result. H_XSECT_004 already tested exactly this idea (wider stop, no stop at all) for an "
+                "analogous reversal signal and found BOTH performed WORSE, not better -- a meaningful fraction "
+                "of reversal candidates simply keep moving against the position and never revert, and the stop "
+                "was doing real, protective work invisible in the raw pooled measurement. No reason to expect a "
+                "different outcome here without testing it, and doing so would itself need to be a new, "
+                "honestly pre-registered hypothesis, not assumed or chased in this same run. "
+                "CONCLUSION: H_MEANREV_003's own raw-measurement finding is NOT invalidated -- it remains a "
+                "real, well-validated statistical fact about NSE price behavior under TRENDING_UP conditioning. "
+                "What is rejected is this specific executable design. This is the SECOND time in this project's "
+                "history a cleanly-validated raw NSE measurement has failed this exact conversion (H_XSECT_001 "
+                "-> H_XSECT_002 being the first) -- a notable, recurring pattern about this project's frozen "
+                "stop/target design more than about either individual signal, worth carrying forward as a "
+                "standing observation for any future raw-measurement-to-executable conversion. Full writeup in "
+                "docs/research/H_MEANREV_004_EXECUTABLE_REGIME_GATED_PREREGISTRATION.md."
+            ),
+        ),
     )

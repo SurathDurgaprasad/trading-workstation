@@ -89,6 +89,37 @@ CANDIDATES = {
 }
 
 
+def _oversold_2std_trending_up(row: pd.Series) -> bool:
+    """H_MEANREV_004 (strategy/hypothesis_registry.py): Candidate A's own
+    frozen -2.0std threshold, with H_MEANREV_003's own regime gate added
+    -- requires a `market_trend_regime` column (attached externally via
+    quant_research.context_experiments.attach_external_regime-style
+    forward-fill, the same machinery H_MEANREV_003 already used; this
+    predicate does not compute it) equal to "TRENDING_UP". Isolates the
+    entry-TIMING question (does gating on market regime help) from the
+    exit mechanic, which stays completely unchanged from Candidate A."""
+    if pd.isna(row.get("zscore_close_20")):
+        return False
+    return bool(row["zscore_close_20"] < -2.0 and row.get("market_trend_regime") == "TRENDING_UP")
+
+
+def _oversold_1_5std_trending_up(row: pd.Series) -> bool:
+    """H_MEANREV_004: Candidate B's own frozen -1.5std threshold, same
+    regime gate as _oversold_2std_trending_up."""
+    if pd.isna(row.get("zscore_close_20")):
+        return False
+    return bool(row["zscore_close_20"] < -1.5 and row.get("market_trend_regime") == "TRENDING_UP")
+
+
+REGIME_GATED_CANDIDATES = {
+    "A_oversold_2std_trending_up": _oversold_2std_trending_up,
+    "B_oversold_1_5std_trending_up": _oversold_1_5std_trending_up,
+}
+"""H_MEANREV_004 -- kept as a SEPARATE dict from CANDIDATES rather than
+merged into it, so H_MEANREV_001's own already-registered, frozen
+candidate set is never silently mutated by a later hypothesis."""
+
+
 class MeanReversionSignalStrategy:
     """STANDALONE signal generator -- ignores SMA20/50 crossover, RSI
     level, and MACD entirely (unlike TrendMomentumBaseline). Tests
@@ -100,9 +131,14 @@ class MeanReversionSignalStrategy:
     deployed strategy, the same posture every other hypothesis
     candidate in this project already takes."""
 
-    def __init__(self, candidate_name: str):
+    def __init__(self, candidate_name: str, candidates: dict | None = None):
+        """`candidates` defaults to the original, frozen CANDIDATES dict
+        (H_MEANREV_001) -- pass REGIME_GATED_CANDIDATES explicitly for
+        H_MEANREV_004's own candidates rather than merging the two dicts,
+        so neither hypothesis's own frozen candidate set can be silently
+        mutated by the other."""
         self.candidate_name = candidate_name
-        self._predicate = CANDIDATES[candidate_name]
+        self._predicate = (candidates or CANDIDATES)[candidate_name]
         self.name = f"mean_reversion_signal+{candidate_name}"
         self.version = "meanrev-001-candidate"
 
@@ -196,6 +232,88 @@ def run_universe_mean_reversion_experiment(
                 sliced = indicator_series.loc[(indicator_series.index >= start) & (indicator_series.index <= end)]
                 run_result = run_backtest(
                     symbol=symbol, indicator_series=sliced, strategy=strategy,
+                    initial_capital=initial_capital, period_label=period_label,
+                )
+                pooled_trades[candidate_name].extend(run_result.trades)
+
+    return result
+
+
+@dataclass
+class UniverseRegimeGatedMeanReversionExperimentResult:
+    """H_MEANREV_004: same pooling shape as UniverseMeanReversionExperimentResult,
+    keyed by REGIME_GATED_CANDIDATES instead of CANDIDATES."""
+
+    development_trades: dict[str, list[Trade]] = field(default_factory=lambda: {name: [] for name in REGIME_GATED_CANDIDATES})
+    validation_trades: dict[str, list[Trade]] = field(default_factory=lambda: {name: [] for name in REGIME_GATED_CANDIDATES})
+    out_of_sample_trades: dict[str, list[Trade]] = field(default_factory=lambda: {name: [] for name in REGIME_GATED_CANDIDATES})
+    failed_symbols: dict[str, str] = field(default_factory=dict)
+
+
+def run_universe_regime_gated_mean_reversion_experiment(
+    symbols: list[str],
+    *,
+    period: str = "10y",
+    interval: str = "1d",
+    initial_capital: float = 100_000.0,
+    cost_model=None,
+    benchmark_symbol: str = "^NSEI",
+) -> UniverseRegimeGatedMeanReversionExperimentResult:
+    """H_MEANREV_004 (strategy/hypothesis_registry.py): does H_MEANREV_003's
+    raw finding (oversold entries gated on NIFTY's own TRENDING_UP
+    regime) survive becoming a real, cost-aware, risk-sized trade?
+    Mirrors run_universe_mean_reversion_experiment's own structure
+    exactly, with two additions: (1) the benchmark's own trend regime is
+    fetched ONCE (not per-symbol) via quant_research.context_experiments.
+    build_benchmark_regime_series, then forward-filled onto each symbol's
+    own calendar -- the identical alignment convention
+    quant_research.context_experiments.attach_external_regime already
+    uses for SymbolDataset objects, inlined here since this runner works
+    on raw indicator_series DataFrames instead; (2) cost_model defaults
+    to CostModel.india_nse_intraday_2026() -- H_MEANREV_001's own
+    original runner used the generic, non-NSE-specific default
+    CostModel() instead, a disclosed, deliberate improvement here, not a
+    silent change (see the H_MEANREV_004 pre-registration S3)."""
+    from backtesting.cache import CachedMarketDataProvider
+    from backtesting.costs import CostModel
+    from backtesting.engine import run_backtest
+    from backtesting.splits import split_periods
+    from market.data_provider import MarketDataError, get_market_data_provider
+    from market.indicators import compute_indicator_series
+    from quant_research.context_experiments import build_benchmark_regime_series
+
+    cost_model = cost_model or CostModel.india_nse_intraday_2026()
+
+    provider = CachedMarketDataProvider(get_market_data_provider())
+    result = UniverseRegimeGatedMeanReversionExperimentResult()
+
+    benchmark_regime = build_benchmark_regime_series(benchmark_symbol, period=period, interval=interval)
+    if benchmark_regime is None:
+        raise ValueError(f"Could not build a trend regime series for benchmark {benchmark_symbol!r}; cannot gate any candidate on it.")
+
+    for symbol in symbols:
+        try:
+            ohlcv = provider.fetch_ohlcv(symbol, period=period, interval=interval)
+            indicator_series = add_mean_reversion_columns(compute_indicator_series(ohlcv))
+        except (MarketDataError, ValueError) as exc:
+            result.failed_symbols[symbol] = str(exc)
+            continue
+
+        indicator_series["market_trend_regime"] = benchmark_regime.reindex(indicator_series.index, method="ffill")
+
+        split = split_periods(indicator_series.index[0], indicator_series.index[-1])
+        periods = {
+            "development": (split.development_start, split.development_end, result.development_trades),
+            "validation": (split.validation_start, split.validation_end, result.validation_trades),
+            "out_of_sample": (split.out_of_sample_start, split.out_of_sample_end, result.out_of_sample_trades),
+        }
+
+        for candidate_name in REGIME_GATED_CANDIDATES:
+            strategy: Strategy = MeanReversionSignalStrategy(candidate_name, candidates=REGIME_GATED_CANDIDATES)
+            for period_label, (start, end, pooled_trades) in periods.items():
+                sliced = indicator_series.loc[(indicator_series.index >= start) & (indicator_series.index <= end)]
+                run_result = run_backtest(
+                    symbol=symbol, indicator_series=sliced, strategy=strategy, cost_model=cost_model,
                     initial_capital=initial_capital, period_label=period_label,
                 )
                 pooled_trades[candidate_name].extend(run_result.trades)
