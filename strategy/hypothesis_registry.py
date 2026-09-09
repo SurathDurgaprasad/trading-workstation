@@ -1470,4 +1470,126 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "carried forward together, not selectively cited."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_SECTOR_ROTATION_001",
+            description=(
+                "Does a stock's own sector's CROSS-SECTIONAL momentum RANK among all 9 real NIFTY sector "
+                "indices (leading vs. lagging, a continuous ranking) -- not a binary UP/DOWN regime label, "
+                "already tested by H_CONTEXT_SECTOR_001/002 -- condition the baseline BUY signal's forward "
+                "returns?"
+            ),
+            rationale=(
+                "EDGE VALIDATION mission, Family E (sector rotation) explicitly asks 'does sector information "
+                "actually improve stock predictions -- test it,' and Family B asks for genuinely different "
+                "relative-strength formulations rather than repeating prior divergence work. This is a "
+                "materially different question from H_CONTEXT_SECTOR_001/002 (which asked 'is the stock's own "
+                "sector index trending up or down'): this asks 'is the stock's own sector currently a momentum "
+                "LEADER or LAGGARD relative to the other 8 sectors' -- classic sector-rotation logic, only "
+                "practical now that genuine 10-year depth exists for all 9 sector indices simultaneously."
+            ),
+            expected_effect="Stocks whose sector is in the top tercile of cross-sectional momentum rank should show better forward returns than the unconditioned control; bottom-tercile (lagging) sectors should show worse.",
+            dataset_restrictions="21-symbol sector-taggable NSE subset, 10 years daily, each of the 9 NIFTY sector indices' own trailing 20-day return ranked cross-sectionally (percentile rank among the 9) on every date.",
+            experiment_design=(
+                "New cross-sectional ranking logic (genuinely new, not reused from any prior hypothesis, since "
+                "market_behavior.py's existing tooling only ever conditions a stock on ITS OWN or one external "
+                "series' regime, never a rank computed across multiple parallel series): each of the 9 sector "
+                "indices' own trailing 20-day return computed via market.indicators.compute_indicator_series "
+                "(unchanged), assembled into one DataFrame indexed by date, ranked cross-sectionally via pandas "
+                "`.rank(axis=1, pct=True)`, then each stock's own sector's rank forward-filled onto its own "
+                "calendar via the same causal alignment pattern used throughout this project. baseline_buy_"
+                "condition unchanged. Top/bottom tercile thresholds (2/3, 1/3) are fixed, round, pre-specified "
+                "cutoffs, not fit to this data."
+            ),
+            success_criteria="Top-tercile sector momentum shows a materially larger, CI-decisive positive effect than the unconditioned control across all three splits; bottom-tercile shows a materially worse one.",
+            failure_criteria="The difference from the unconditioned control is small in magnitude even where statistically decisive, or the top-tercile bucket still fails to hold a stable positive result out-of-sample.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "CONTROL (unconditioned, 21-symbol sector-taggable subset), h5/h10: development n=11715 "
+                "+0.331%/+0.604% (CI-decisive); validation n=4039 +0.270%/+0.547% (CI-decisive); out-of-sample "
+                "n=3180/3153 -0.168%/-0.304% (CI-decisive negative) -- the same era-dependent shape "
+                "H_CONTEXT_MARKET_005 already found for the 10-year window generally. "
+                "TOP TERCILE (leading sector), h5/h10: development n=6905 +0.389%/+0.648% (CI-decisive, only "
+                "+0.058/+0.044 points better than control); validation n=2349 +0.327%/+0.701% (CI-decisive, "
+                "similar modest margin over control); out-of-sample n=2109/2098 -0.156%/-0.246% (CI-decisive "
+                "NEGATIVE, only marginally less negative than control's own -0.168%/-0.304%). "
+                "BOTTOM TERCILE (lagging sector), h5/h10: development n=2269 +0.082%(not decisive)/+0.392%"
+                "(decisive but weaker than control); validation n=881 +0.119%/+0.269% (neither decisive); "
+                "out-of-sample n=425 +0.044%/+0.089% (neither decisive, both near zero). "
+                "A real, sensible, MONOTONIC ordinal pattern exists (leading sector > control > lagging sector) "
+                "in every split -- economically plausible, not reversed or noisy. But the magnitude is small: "
+                "top-tercile's own advantage over the unconditioned control is a few tenths of a percentage "
+                "point at every horizon, and critically, the TOP TERCILE bucket -- the supposedly BEST case -- "
+                "still goes decisively NEGATIVE out-of-sample, meaning this conditioning does not resolve the "
+                "underlying era-instability H_CONTEXT_MARKET_005 already found; it only nudges the same "
+                "unstable pattern slightly in either direction. "
+                "Per-symbol concentration (h5, top tercile, full period pooled): broadly distributed across all "
+                "21 symbols (from DRREDDY.NS -0.224% to BAJAJFINSV.NS +1.022%), not concentrated in one or two "
+                "names, though with real cross-symbol heterogeneity. "
+                "REJECTED: the ranking effect is real and directionally sensible but too small in magnitude and "
+                "too unstable out-of-sample to treat as an improvement over the already-known market/sector-"
+                "divergence findings -- it does not clear the bar of a materially different, more decisive "
+                "signal. Negative knowledge worth keeping: sector MOMENTUM RANK (as opposed to sector "
+                "AGREEMENT/DIVERGENCE, already tested) is not where this project's next edge is likely to come "
+                "from, at least not in this simple time-series-momentum form."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_OPENRANGE_001",
+            description="Does an NSE stock's first-30-minute (opening range) return predict its own REST-OF-DAY return -- continuation or fade?",
+            rationale=(
+                "EDGE VALIDATION mission, Family A (opening market behaviour). The mission's own instructions "
+                "explicitly require checking real intraday data availability before assuming it doesn't exist, "
+                "and explicitly forbid faking intraday behaviour from daily candles -- this hypothesis honors "
+                "both: real intraday data WAS found and used, not skipped, but the data's own limitations turned "
+                "out to be the actual finding."
+            ),
+            expected_effect="A large opening-range return should predict either continuation (momentum) or reversal (fade) in the rest of the same day's return, decisively across development, validation, and out-of-sample.",
+            dataset_restrictions=(
+                "All 32 NSE universe symbols, REAL 15-minute intraday bars via market.data_provider (confirmed "
+                "with a live fetch before use, not assumed) -- ~58 usable trading days, 2026-06-18 to 2026-09-08, "
+                "the genuine Yahoo Finance sub-daily history limit (~60 calendar days) for this data source. No "
+                "paid or alternative intraday source is integrated in this project."
+            ),
+            experiment_design=(
+                "opening_return = (close of the 2nd 15-minute bar / day's own open) - 1 (the first ~30 minutes); "
+                "rest_of_day_return = (day's close / that same opening-range close) - 1 -- both purely intraday, "
+                "same-day, no cross-day look-ahead. Top/bottom-quintile opening_return thresholds frozen from a "
+                "development split (60% of trading DATES, not rows) only. HONEST, DISCLOSED LIMITATION, stated "
+                "before any result: with only 58 total trading days, a 60/20/20 date split gives validation and "
+                "out-of-sample windows of roughly 12 CONSECUTIVE calendar days each -- far less regime diversity "
+                "than this project's multi-year daily-bar research can offer, regardless of how many symbols are "
+                "pooled into each window. This limitation was expected to bind before the experiment ran, and did."
+            ),
+            success_criteria="A CI-decisive effect (continuation or fade) across development, validation, AND out-of-sample.",
+            failure_criteria="No split reaches a decisive result, per this project's own 'sample size fundamentally insufficient -> stop' rule.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "CONTROL (unconditioned rest-of-day return): development n=1088 +0.003%, validation n=384 "
+                "-0.024%, out-of-sample n=384 -0.010% -- all three CI include zero, as expected for an "
+                "unconditioned baseline. "
+                "STRONG OPEN (top 20% opening_return, threshold frozen at +0.589% from development): "
+                "development n=218 -0.037% (not decisive); validation n=38 -0.169% (not decisive); "
+                "out-of-sample n=42 -0.165% (not decisive) -- direction is consistently NEGATIVE (a mild "
+                "same-day fade) in all three splits, never reversing, which is directionally consistent with "
+                "(though far weaker evidence than) H_GAP_001's own overnight gap-fade finding on daily bars -- "
+                "but no split individually clears a decisive CI, so this can only be read as a suggestive "
+                "corroboration, not independent confirming evidence. "
+                "WEAK OPEN (bottom 20%, threshold -0.513%): development n=218 +0.024%, validation n=79 -0.062%, "
+                "out-of-sample n=74 +0.272% (widest CI of any cell, [-0.037%,+0.580%], closest to decisive but "
+                "still includes zero) -- no consistent direction across splits. "
+                "Per-symbol concentration (STRONG OPEN, full period): extremely noisy even pooled -- individual "
+                "symbols range from DRREDDY.NS -1.196% (n=7) to MARUTI.NS +0.425% (n=6), with most symbols "
+                "carrying single-digit-to-teens sample counts -- exactly the kind of small-sample noise this "
+                "project's own multiple-testing discipline warns against over-interpreting. "
+                "INCONCLUSIVE, and per this mission's own explicit stop condition ('sample size is fundamentally "
+                "insufficient... required data is unavailable [at adequate depth]'), this specific branch should "
+                "STOP here rather than be pursued further with quintile/threshold tuning on the same 58-day "
+                "window -- that would only be fitting noise. Negative knowledge worth keeping: this project's "
+                "existing free (Yahoo) data path can supply REAL intraday bars, but only ~60 days of them -- "
+                "any future opening-range/intraday-microstructure research would need either a longer-history "
+                "intraday data source (not currently integrated, and not investigated further this session "
+                "since none of this project's existing providers offer one) or patience to let more calendar "
+                "time accumulate before revisiting this specific question."
+            ),
+        ),
     )

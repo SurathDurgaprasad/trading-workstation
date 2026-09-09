@@ -1,26 +1,35 @@
 # Indian Trading Brain — Current Status
 
-Last updated: 2026-09-08, end of the "INDIAN NSE EDGE VALIDATION AND
-LEARNING LOOP" mission segment. This is a living status snapshot, not a
-narrative report — see `docs/INDIAN_NSE_PREDICTION_ENGINE_REPORT.md`
-and `docs/INDIAN_TRADING_DECISION_BRAIN_REPORT.md` for the fuller
-writeups this distills.
+Last updated: 2026-09-09, mid-session of the "BUILD THE REAL
+PROFIT-SEEKING INDIAN NSE TRADING BRAIN" autonomous loop. This is a
+living status snapshot, not a narrative report — see `docs/
+INDIAN_NSE_PREDICTION_ENGINE_REPORT.md` and `docs/
+INDIAN_TRADING_DECISION_BRAIN_REPORT.md` for the fuller writeups this
+distills.
 
 ## CURRENT SYSTEM STATE
 
 Paper-trading only, structurally incapable of a real order (no
-order-placement code path exists anywhere in this project). Live
-scheduler (`schedule loop --paper-execute --live-source dhan`) has run
-continuously and untouched throughout this segment; last real tick
-completed its `post_market` slot at 15:30 IST 2026-09-08 and has been
-correctly idling since (`[SKIPPED] No configured slot is due at this
-time.`) — market closed, nothing due until tomorrow. Full pipeline
-(scan → decision → critic → risk → paper) real and tested; a
-`MarketRegimeReport` snapshot is now persisted per shadow-run and every
+order-placement code path exists anywhere in this project). **The live
+scheduler was found STOPPED at the start of this session** (last real
+run was yesterday's `post_market` slot at 15:30 IST 2026-09-08; no
+process was running this morning, confirmed via `Get-CimInstance
+Win32_Process` — a clean stop with no crash/error in its own log, most
+likely a machine restart or closed terminal overnight, not a software
+defect). Restarted with the exact same established command line
+(`schedule loop --watchlist-file market_data/watchlists/starter_nse.yaml
+--paper-execute --initial-capital 100000 --paper-db data/paper_trading.db
+--state-db data/live_state.db --live-source dhan --resilient
+--staleness-seconds 120`) right at today's market open; confirmed
+healthy — its `pre_market` slot completed cleanly (15 candidates
+scanned, 1 BUY, 1 prediction recorded) within minutes of restart. Full
+pipeline (scan → decision → critic → risk → paper) real and tested; a
+`MarketRegimeReport` snapshot is persisted per shadow-run and every
 `Decision` carries a `scan_id` back to it; a `daily-report` command
-produces a real, ranked, evidence-labeled NSE view; UP/DOWN/NO_EDGE
-directional forecasts now have their own outcome-tracking loop,
-independent of the BUY-only trade-prediction journal.
+produces a real, ranked, evidence-labeled NSE view (now with a
+cache-staleness pre-flight check); UP/DOWN/NO_EDGE directional
+forecasts have their own outcome-tracking loop, independent of the
+BUY-only trade-prediction journal.
 
 ## CURRENT ACTIVE EDGE STATUS
 
@@ -71,7 +80,7 @@ Nothing is promoted. Nothing should be traded.
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(30 hypotheses tested to date).
+(32 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -83,7 +92,7 @@ own sign is unstable across the full available history, which is a
 step BACKWARD from "promising," not forward, even though the compound
 condition's OOS sample is now properly powered for the first time.
 
-## INCONCLUSIVE HYPOTHESES (12)
+## INCONCLUSIVE HYPOTHESES (13)
 
 H_ENTRY_003, H_ENTRY_005, H_EXIT_002, H_MEANREV_002, H_CONTEXT_MARKET_002,
 H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_CONTEXT_MARKET_004,
@@ -91,18 +100,29 @@ H_CONTEXT_MARKET_005 (the 10-year re-run — found real sign-instability
 pre-2022 alongside improved OOS power for the compound condition — see
 above), H_GAP_001, H_GAP_002 (the original gap-fade discovery record —
 kept as history; see H_GAP_003 for why the underlying idea did not
-ultimately survive), and H_TRANSMISSION_001 (Nasdaq → NIFTY IT, honest
-decline/advance asymmetry). Full evidence for each in `strategy/
-hypothesis_registry.py`.
+ultimately survive), H_TRANSMISSION_001 (Nasdaq → NIFTY IT, honest
+decline/advance asymmetry), and two new entries from today's session —
+H_OPENRANGE_001 (real intraday opening-range research, genuinely tested
+with real 15-minute Yahoo data, but the ~60-day intraday history limit
+made every split fundamentally underpowered; a mild fade direction
+echoed gap-fade's own finding but never reached decisive significance)
+and see REJECTED below for H_SECTOR_ROTATION_001. Full evidence for
+each in `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (17)
+## REJECTED HYPOTHESES (18)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
 H_CONTEXT_MARKET_003, H_CONTEXT_SECTOR_001, H_CONTEXT_VIX_001,
 H_CONTEXT_VIX_002, H_TRANSMISSION_002, H_TRANSMISSION_003,
 H_TRANSMISSION_004, H_GAP_003 (the deep-validation follow-up to
-H_GAP_001/002 — see above). Full evidence for each in `strategy/
+H_GAP_001/002 — see above), and H_SECTOR_ROTATION_001 (new today: a
+stock's own sector's cross-sectional momentum RANK among the 9 NIFTY
+sector indices, a genuinely different formulation from the earlier
+binary sector-regime tests — found a real, sensible, monotonic ordinal
+pattern, leading sectors beat lagging ones, but the magnitude was too
+small and the "best" bucket still went decisively negative
+out-of-sample). Full evidence for each in `strategy/
 hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
@@ -110,20 +130,39 @@ hypothesis_registry.py`.
 
 ## CURRENT PREDICTION SAMPLE SIZE
 
-- **BUY-shaped trade predictions** (`data/predictions.db`): 10 total,
-  **all still ACTIVE, zero resolved.**
+- **BUY-shaped trade predictions** (`data/predictions.db`): 10 total as
+  of this writing, **all still ACTIVE, zero resolved.** The live
+  scheduler's `pre_market` slot today (2026-09-09) added 1 more real
+  prediction after its restart (see below) — still effectively zero
+  resolved history.
 - **Directional (UP/DOWN/NO_EDGE) forecasts** (`data/
-  direction_forecasts.db`): 15 recorded against the live 15-symbol
-  watchlist (13 DOWN, 2 UP — market was in a real NIFTY downtrend at
-  recording time), plus 4 OLDER real forecasts (RELIANCE.NS/TCS.NS/
-  INFY.NS/HDFCBANK.NS, as_of 2026-08-25/26) discovered already resolved
-  in the same database from an earlier debugging session — 1 correct,
-  3 incorrect, but **known to be built on a stale reference price** (see
-  the data-integrity finding below) and should be excluded from any
-  calibration read, not treated as real evidence either way.
+  direction_forecasts.db`): 15 recorded 2026-09-08 against the live
+  15-symbol watchlist (13 DOWN, 2 UP — market was in a real NIFTY
+  downtrend at recording time), plus 4 OLDER real forecasts
+  (RELIANCE.NS/TCS.NS/INFY.NS/HDFCBANK.NS, as_of 2026-08-25/26)
+  discovered already resolved in the same database from an earlier
+  debugging session — 1 correct, 3 incorrect, but **known to be built
+  on a stale reference price** (see the data-integrity finding below)
+  and should be excluded from any calibration read, not treated as
+  real evidence either way.
 
 Both sample sizes are far too small for any statistical conclusion.
 This is the actual current bottleneck — not a missing capability.
+
+**The live scheduler was found stopped at the start of today's
+session** (2026-09-09) — last real activity was yesterday's
+`post_market` slot; nothing had run overnight or this morning despite
+market open approaching. Confirmed via `Get-CimInstance Win32_Process`
+(authoritative, not just the tailed log) that no scheduler process was
+running at all — a clean stop (no error in its own log), most likely an
+overnight machine restart or closed terminal, not a bug. Restarted with
+the identical established command line right at market open; confirmed
+healthy within minutes (a real `pre_market` tick completed, 1 new
+prediction recorded). This is disclosed here because it is exactly the
+kind of "assume nothing, verify with the authoritative source" finding
+this project's own research discipline keeps demonstrating the value
+of — the tailed log file alone would NOT have revealed this (its last
+line was a normal, non-alarming `[SKIPPED]`).
 
 **Real data-integrity finding this segment, now fixed**: `daily-report`
 had no cache-freshness check at all — `CachedMarketDataProvider` never
@@ -207,7 +246,7 @@ rebuilt, this segment.
 
 Given the evidence-starvation finding above, the single highest-EV
 action is **not another new hypothesis** — it is time: let the 15 real
-directional forecasts recorded 2026-09-08 (and the 10 existing BUY
+directional forecasts recorded 2026-09-08 (and the 10-11 existing BUY
 predictions) resolve, then re-run `evaluate-forecasts`/`evaluate`/
 `learn` for the first real calibration read this project has ever had.
 
@@ -220,3 +259,19 @@ H_TRANSMISSION_001 were both 5-year-or-shorter US/global-linked studies
 worth the same scrutiny). A finding that only ever survived a 5-year
 window has not yet earned the same confidence as one checked against
 the decade this project's own data now makes available for free.
+
+Two new negative-knowledge findings from 2026-09-09, worth remembering
+so they aren't re-investigated blindly: (1) sector momentum RANK
+(leading vs. lagging among the 9 NIFTY sector indices, distinct from
+the already-tested binary sector-regime conditioning) shows a real but
+too-small, too-unstable effect (H_SECTOR_ROTATION_001, REJECTED) — the
+next genuinely different sector-related question, if pursued, should
+probably look at something other than momentum ranking specifically.
+(2) Real intraday opening-range research is now possible via this
+project's existing Yahoo-backed data path (confirmed: real 5m/15m/30m/
+60m bars, ~60 trading days of history) — but that ~60-day window is
+fundamentally too short for this project's own dev/val/oos rigor
+(H_OPENRANGE_001, INSUFFICIENT_DATA/INCONCLUSIVE) and should not be
+revisited on the same window; either wait for more calendar time to
+accumulate or source a longer-history intraday provider before trying
+Family A again.
