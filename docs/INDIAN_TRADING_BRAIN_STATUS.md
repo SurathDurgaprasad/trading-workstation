@@ -132,6 +132,48 @@ untested and would need its own new, honestly pre-registered
 hypothesis. Full addendum in `docs/research/
 CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §13.
 
+**New mission, new segment (2026-09-09, "EXECUTION-MECHANICS
+INVESTIGATION"): a precise reconciliation between the raw H_XSECT_001
+measurement and every executable test against it identified FOUR real
+structural mismatches, not one** — entry timing (raw assumes a
+same-close entry; every executable backtest uses next-bar-open),
+path-dependence (the raw measurement is a pure fixed-horizon return;
+H_XSECT_002's own diagnostic shows a TARGET exit fired in EVERY
+variant tested so far, including H_XSECT_004's `no_stop`, meaning
+none of them actually measured the same quantity H_XSECT_001 reports),
+sampling ("newly entered" trades are ~7% of the raw measurement's own
+pooled sample, never checked for representativeness), and portfolio
+construction (the raw measurement's daily pooling is economically a
+diversified basket; H_XSECT_002/004 test independent, undiversified
+single-symbol trades). Full reconciliation in `docs/research/
+CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §14.
+
+**The resulting test (`H_XSECT_005`, INCONCLUSIVE/INSUFFICIENT_DATA)
+is the most encouraging result in the entire executable-strategy
+family so far.** A genuine equal-weight, periodically-rebalanced
+(every 20 bars, non-overlapping) portfolio backtest — current
+bottom-quintile membership, a PURE fixed 20-bar hold with NO stop and
+NO target at all (the first test in this family with no path-dependent
+exit whatsoever) — shows **no sign reversal in any split**: development
++0.76% (n=72), validation +1.81% (n=24), out-of-sample +0.46% (n=24),
+all positive, in sharp contrast to H_XSECT_002/004's negative
+out-of-sample results. The out-of-sample figure is strikingly close to
+H_XSECT_001's own raw out-of-sample measurement for this exact
+configuration (+0.487%) — net of real costs, the portfolio reproduction
+lands almost exactly where the cost-free raw measurement predicted.
+**But this does not clear the promotion gate — purely on sample size,
+not a weak effect**: `evaluate_promotion` returns INSUFFICIENT_DATA
+because validation and out-of-sample (n=24 each) fall below its own
+30-observation minimum, a structural consequence of only ~126 periods
+existing at a 20-day non-overlapping cadence across 10 years of data,
+not a fixable bug. This strongly suggests H_XSECT_002/004's own
+negative verdicts were substantially attributable to THEIR OWN
+structural choices (a trend-continuation stop mechanic; no
+diversification), not to the underlying signal being illusory — but
+directional-but-inconclusive is reported as exactly that, never
+rounded up to a positive claim. Full addendum in `docs/research/
+CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §15.
+
 Overnight gap-fade was this project's second-most promising raw finding
 (H_GAP_001/002) and was put through a deep, deliberately adversarial
 validation this segment (H_GAP_003) — cost sensitivity, pre-specified
@@ -194,27 +236,32 @@ Nothing is promoted. Nothing should be traded.
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(38 hypotheses tested to date).
+(39 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
 None FORMALLY carry that status in the registry yet (this project's own
-`HypothesisStatus` enum doesn't have a PROMISING tier), and
-**H_XSECT_001 no longer looks like the closest candidate to that status
-it did earlier today**: its raw measurement remains the strongest, most
-adversarially-validated PRICE-BEHAVIOR finding this project has
-produced, but the mandatory next step — a real, cost-aware, risk-sized
-backtest (`H_XSECT_002`) — came back NEGATIVE (out-of-sample
-CI-decisive harm), so it does not advance to PROMISING or shadow mode
-on the strength of this execution design. See the CURRENT ACTIVE EDGE
-STATUS section above for the full story. H_CALENDAR_001 (Tuesday
-effect) remains the strongest PURELY STATISTICAL replication (broad,
-Bonferroni-surviving, no decay) but fails economically (doesn't clear
-costs, no execution vehicle) — a different way of falling short than
-H_XSECT_001's own gap (a real measurement whose only tested execution
-design failed, rather than one untested).
+`HypothesisStatus` enum doesn't have a PROMISING tier), but the picture
+around H_XSECT_001 has shifted meaningfully this segment.
+**H_XSECT_005 (the genuine portfolio reproduction) is now the closest
+this project has come to a validated executable design**: positive in
+all three splits, no sign reversal, an out-of-sample figure nearly
+identical to the raw measurement's own — but held back from PROMISING
+purely by sample size (INSUFFICIENT_DATA at n=24 for validation/
+out-of-sample), not by a weak or negative effect. This reframes
+H_XSECT_002's earlier NEGATIVE verdict: it now looks substantially
+attributable to that test's own structural choices (a trend-
+continuation stop mechanic; independent undiversified single-symbol
+trades) rather than to the underlying cross-sectional signal itself.
+See the CURRENT ACTIVE EDGE STATUS section above for the full story.
+H_CALENDAR_001 (Tuesday effect) remains the strongest PURELY
+STATISTICAL replication (broad, Bonferroni-surviving, no decay) but
+fails economically (doesn't clear costs, no execution vehicle) — a
+different way of falling short than H_XSECT_005's own gap (a real,
+directionally-positive executable design that simply doesn't have
+enough independent periods yet to call decisive).
 
-## INCONCLUSIVE HYPOTHESES (16)
+## INCONCLUSIVE HYPOTHESES (17)
 
 H_ENTRY_003, H_ENTRY_005, H_EXIT_002, H_MEANREV_002, H_CONTEXT_MARKET_002,
 H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_CONTEXT_MARKET_004,
@@ -229,13 +276,15 @@ the ~60-day intraday history limit made every split fundamentally
 underpowered; a mild fade direction echoed gap-fade's own finding but
 never reached decisive significance), H_CALENDAR_001 (the Tuesday
 effect — this project's most statistically robust PURE finding, real
-but not tradeable — see above), **H_XSECT_001 (cross-sectional
-laggard raw measurement — this project's strongest PRICE-BEHAVIOR
-finding, but its only tested execution design failed as H_XSECT_002 —
-see PROMISING HYPOTHESES above)**, and **H_XSECT_003 (sector-relative
-score variant — genuinely replicates H_XSECT_001's pattern, CI-decisive
-in all three splits, but its own executable behavior is untested — see
-above)**. Full evidence for each in `strategy/hypothesis_registry.py`.
+but not tradeable — see above), H_XSECT_001 (cross-sectional laggard
+raw measurement — this project's strongest PRICE-BEHAVIOR finding),
+H_XSECT_003 (sector-relative score variant — genuinely replicates
+H_XSECT_001's pattern, CI-decisive in all three splits, its own
+executable behavior untested), and **H_XSECT_005 (the genuine
+portfolio reproduction — positive in all three splits, no sign
+reversal, but INSUFFICIENT_DATA at n=24 per validation/out-of-sample
+split — see PROMISING HYPOTHESES above)**. Full evidence for each in
+`strategy/hypothesis_registry.py`.
 
 ## REJECTED HYPOTHESES (21)
 
@@ -392,95 +441,90 @@ rebuilt, this segment.
    this process) — worth the user's own attention if it keeps
    recurring, since undisturbed live observation (risk #1 above) is
    only possible if the scheduler actually stays running.
+7. **The temptation to round H_XSECT_005's INSUFFICIENT_DATA up to a
+   positive claim.** It is the most encouraging executable result this
+   project has produced — positive in all three splits, no sign
+   reversal — which is exactly the situation where it's tempting to
+   describe it as "working" rather than "underpowered." It is
+   INSUFFICIENT_DATA, not SUPPORTED, and stays that way until either
+   more independent periods exist or a principled variance-reduction
+   lever (a wider universe, not a shorter/riskier rebalance cadence) is
+   tested and pre-registered on its own.
 
 ## NEXT HIGHEST-VALUE RESEARCH QUESTION
 
-**Already answered, same session**: does H_XSECT_001's raw measurement
-survive becoming a real, cost-aware, risk-sized trade? **No**
-(H_XSECT_002, REJECTED — out-of-sample CI-decisive negative, driven by
-an ATR stop mis-calibrated for a reversal signal; see above). This
-closes off "rush straight to shadow mode" but does NOT close off the
-underlying price-behavior finding, which remains real.
+**Current answer (2026-09-09, "EXECUTION-MECHANICS INVESTIGATION"
+mission continuation)**: the mission's own central question —
+*why does H_XSECT_001 work as a raw measurement but fail when converted
+into an executable strategy?* — has a real, structural answer now, not
+just a diagnosis. A precise reconciliation (`docs/research/
+CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §14) found FOUR genuine
+mismatches between the raw measurement and every prior executable test
+(entry-timing lag, path-dependent early exits, a restrictive "newly
+entered" sampling rule, and no portfolio-level diversification). Fixing
+the two most consequential of these — path-dependence and portfolio
+construction — in a new, genuine equal-weight portfolio backtest
+(`H_XSECT_005`) produced the most encouraging executable result in this
+project's history: positive in all three splits, no sign reversal, an
+out-of-sample figure nearly identical to the raw measurement's own —
+but INSUFFICIENT_DATA, not SUPPORTED, because only n=24 independent
+20-day periods exist per validation/out-of-sample split at 10 years of
+history. **This is a genuine statistical-power problem, not a weak or
+false effect** — see §15 and the CURRENT ACTIVE EDGE STATUS section
+above for the full story.
 
-**Also already answered, same session**: do the sector-relative and
-NIFTY-relative score variants replicate independently? NIFTY-relative
-turned out not to be an independent test at all (mathematically and
-empirically identical to the absolute version); sector-relative is
-genuinely independent and DOES replicate the laggard-outperformance
-pattern, CI-decisive in all three splits (H_XSECT_003, INCONCLUSIVE —
-see above). This closes out report §10's entire next-steps list.
+**Immediate next candidates, not yet pursued (each needs its own
+pre-registration before any code runs, per this project's own
+discipline)**:
+1. A wider universe (more NSE symbols beyond the current 32) would
+   reduce PER-PERIOD portfolio variance through greater diversification
+   without needing more historical time — a distinct, legitimate lever
+   from "get more data," and the most promising near-term way to
+   tighten H_XSECT_005's own confidence intervals on the SAME 120
+   periods it already has.
+2. The entry-timing mismatch (raw measurement assumes same-close entry;
+   every executable backtest including H_XSECT_005 uses next-bar-open)
+   remains completely unquantified.
+3. A shorter, still-principled rebalance cadence is tempting but risky:
+   it was NOT validated for independence the way the 20-day cadence
+   was, and would reintroduce overlapping 20-day holding windows across
+   staggered rebalances — flagged explicitly so it is not chased
+   casually.
 
-**Also already answered, same session**: does a wider or absent stop
-rescue H_XSECT_002's executable backtest? **No — and both tested
-variants performed WORSE than the original** (H_XSECT_004, REJECTED —
-see above for the full mechanism, a genuine correction to H_XSECT_002's
-own diagnostic reading). This was the exact question flagged as the
-project's next step as of the previous update to this document, tested
-with the two variants that update itself had already named — no new
-parameters were introduced after seeing any result.
-
-The cross-sectional research thread has now reached a real stopping
-point: every pre-specified next step from the original validation
-report AND its own natural follow-up is done. What remains — a
-*tighter* stop than H_XSECT_002's own 1.5×ATR, which H_XSECT_004's own
-mechanism explanation would predict might do even better by capping
-the same tail-risk trades even earlier — is deliberately NOT being
-pursued in the same breath as this result. It would need its own
-honest, upfront pre-registration (economic rationale, a fixed
-parameter choice, success/failure criteria written BEFORE any code
-runs) written on its own, later, not as a same-session chase of this
-result — continuing to narrow the stop after each negative result
-would itself become exactly the undisclosed parameter search this
-project's own discipline exists to prevent. The cross-sectional thread
-should rest here for now.
+**Standing discipline reminder, unchanged from the prior update**: a
+*tighter* stop for the single-symbol H_XSECT_002/004 family remains
+untested and deliberately not pursued — narrowing stop parameters
+after each negative result would be exactly the undisclosed parameter
+search this project's own discipline exists to prevent.
 
 Beyond the cross-sectional thread, the mission's own lower-priority
-Phase 4-9 research families (multi-horizon momentum map, relative-
-strength quality conditions, volatility contraction, breakout quality,
-extreme-move research, interaction research) remain open and untouched
-this segment — the natural next place to look for a genuinely new
-research direction rather than continuing to narrow this one.
+research families (multi-horizon momentum map, relative-strength
+quality conditions, volatility contraction, breakout quality,
+extreme-move research, regime-dependent effects, market microstructure)
+remain open and untouched.
 
 Separately, and lower priority: let the 15 real directional forecasts
 recorded 2026-09-08 (and the 10-11 existing BUY predictions) resolve,
 then re-run `evaluate-forecasts`/`evaluate`/`learn` for the first real
 calibration read this project has ever had.
 
-**Already answered, same session**: does the Tuesday effect hold on
-NIFTY 50 itself (`^NSEI`), not just the 32-stock universe? No
-(H_CALENDAR_002, REJECTED) — none of the three splits are individually
-decisive on the index alone (n=97-295 vs. the pooled version's
-n=3000-9000+). The pooled-stock result's own statistical power came
-specifically from combining 32 correlated-but-distinct series, exactly
-how a real single-instrument trade would NOT be implemented. This
-closes off the "trade it via one cheap index instrument" idea
-completely — the Tuesday effect is now disqualified from practical
-tradeability by two independent reasons (cost margin at the pooled
-level, no statistical power at the single-instrument level), not just
-one.
-
-If a genuinely new research question is wanted before then: **the
-10-year NSE cache is now available for every symbol in this universe —
-re-run the era-stability check H_CONTEXT_MARKET_005 just did on the
-divergence family against every other still-INCONCLUSIVE hypothesis**
-(gap-fade already REJECTED, so lower priority; H_MEANREV_002 and
-H_TRANSMISSION_001 were both 5-year-or-shorter US/global-linked studies
-worth the same scrutiny). A finding that only ever survived a 5-year
-window has not yet earned the same confidence as one checked against
-the decade this project's own data now makes available for free.
-
-Two new negative-knowledge findings from 2026-09-09, worth remembering
-so they aren't re-investigated blindly: (1) sector momentum RANK
-(leading vs. lagging among the 9 NIFTY sector indices, distinct from
-the already-tested binary sector-regime conditioning) shows a real but
-too-small, too-unstable effect (H_SECTOR_ROTATION_001, REJECTED) — the
-next genuinely different sector-related question, if pursued, should
-probably look at something other than momentum ranking specifically.
-(2) Real intraday opening-range research is now possible via this
-project's existing Yahoo-backed data path (confirmed: real 5m/15m/30m/
-60m bars, ~60 trading days of history) — but that ~60-day window is
-fundamentally too short for this project's own dev/val/oos rigor
-(H_OPENRANGE_001, INSUFFICIENT_DATA/INCONCLUSIVE) and should not be
-revisited on the same window; either wait for more calendar time to
-accumulate or source a longer-history intraday provider before trying
-Family A again.
+**Prior segments' answered questions, kept brief so this section stays
+focused on what's actually next:**
+- Does the Tuesday effect hold on NIFTY 50 itself, not just the pooled
+  32-stock universe? No (`H_CALENDAR_002`, REJECTED) — no statistical
+  power at the single-instrument level, closing off a cheap index-only
+  trade vehicle for that effect entirely.
+- Sector momentum RANK among the 9 NIFTY sector indices: real but
+  too-small, too-unstable (`H_SECTOR_ROTATION_001`, REJECTED) — the
+  next sector-related question, if pursued, should look at something
+  other than momentum ranking specifically.
+- Real intraday opening-range research is possible (confirmed 5m/15m/
+  30m/60m Yahoo bars) but the ~60-trading-day history ceiling makes
+  every split fundamentally underpowered (`H_OPENRANGE_001`,
+  INSUFFICIENT_DATA) — do not revisit on the same window; either wait
+  for more calendar time or source a longer-history intraday provider.
+- The 10-year NSE cache is available for every symbol in this
+  universe — an era-stability re-check (matching H_CONTEXT_MARKET_005's
+  own 5-year-to-10-year re-run) remains a well-motivated, not-yet-done
+  standing option for H_MEANREV_002/H_TRANSMISSION_001, both originally
+  tested on 5 years or less.

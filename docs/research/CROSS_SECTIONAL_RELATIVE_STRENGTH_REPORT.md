@@ -358,3 +358,105 @@ would predict might do even better by capping the same tail-risk
 trades even earlier. That remains untested and would need its own new,
 honestly pre-registered hypothesis before any code is written, not a
 same-session follow-up chasing this result.
+
+## 14. Reconciliation — why does the raw measurement (§5) diverge from every executable test so far (§11, §13)?
+
+Per the "EDGE DISCOVERY mission" continuation's own explicit instruction
+before any further code was written: a precise reconciliation between
+§5's raw forward-return measurement and every executable backtest
+tested against it (`H_XSECT_002`, `H_XSECT_004`). Four real, disclosed
+structural differences, not one:
+
+1. **Entry timing.** §5's `fwd_return_h = close.shift(-h)/close - 1`
+   implicitly assumes a trade can be entered at the *same* close used
+   to compute the ranking score — a same-day, zero-lag entry. Every
+   executable backtest in this project, `H_XSECT_002`/`H_XSECT_004`
+   included, enters at the *next* bar's open instead (with slippage).
+   This is a real, disclosed, one-day lag that has never been
+   separately isolated or quantified.
+2. **Path-dependence.** §5 is a pure, unconditional fixed-horizon
+   return — nothing exits early under any condition. `H_XSECT_002`'s
+   own exit-reason diagnostic (§11) shows a TARGET exit fired in every
+   variant tested so far, including `H_XSECT_004`'s `no_stop`
+   configuration (29–197 trades per split, every time) — meaning *none*
+   of the executable tests to date actually measured the same
+   fixed-horizon quantity §5 reports. This was a genuine, previously
+   unexamined confound.
+3. **Sampling.** §5 pools every `(date, symbol)` observation where a
+   symbol is *currently* in the bottom quintile that day (development
+   n=8,538 for this configuration). `H_XSECT_002`/`H_XSECT_004` only
+   trade a symbol's *first* day newly entering the bottom quintile
+   (development n=623 — about 7% of §5's own sample). Whether that
+   much smaller, specifically-selected sub-population behaves like the
+   full pooled population was never checked.
+4. **Portfolio construction.** §5's daily cross-sectional pooling is
+   economically closest to holding a continuously diversified basket
+   of every current bottom-quintile member at once. `H_XSECT_002`/
+   `H_XSECT_004` test independent, symbol-isolated trades with no
+   capital allocation, concurrent-position, or rebalance-calendar
+   concept at all.
+
+`H_XSECT_005` (below) addresses (3) and (4) directly, and (2)
+completely — while deliberately holding (1) fixed, to keep this a
+single, well-scoped test rather than changing four variables in one
+shot.
+
+## 15. Addendum — does a genuine portfolio reproduction change the answer? (`H_XSECT_005`)
+
+Full record: `H_XSECT_005` in `strategy/hypothesis_registry.py`,
+status `INCONCLUSIVE` (`INSUFFICIENT_DATA`). New module
+`quant_research/cross_sectional_portfolio.py` (8 new tests): an
+equal-weight, periodically-rebalanced portfolio backtest reproducing
+§5's own exact economic design — rebalance every 20 trading bars
+(non-overlapping, the same cadence §6's own independence check already
+validated), form a basket of every symbol *currently* in the bottom
+quintile by trailing 60-day return, hold for a pure fixed 20-bar
+horizon with **no stop and no target of any kind**, real per-position
+transaction costs (`CostModel.india_nse_intraday_2026()`).
+
+**Result: no sign reversal in any split, unlike every prior executable
+test.** 120 total rebalance periods (72/24/24 across
+development/validation/out-of-sample). Mean portfolio return per
+period: development **+0.76%** (n=72, win rate 54.2%); validation
+**+1.81%** (n=24, win rate 66.7%); out-of-sample **+0.46%** (n=24, win
+rate 50.0%) — positive in all three, in sharp contrast to
+`H_XSECT_002`'s out-of-sample -0.76% and both `H_XSECT_004` variants.
+The out-of-sample figure is strikingly close to §5's own raw
+out-of-sample measurement for this exact configuration (+0.487%) —
+net of real transaction costs, a portfolio-level reproduction lands
+almost exactly where the cost-free raw measurement predicted.
+
+**But this is not a promotion, and the reason is purely statistical
+power, not a weak effect.** `evaluate_promotion`'s own verdict is
+`INSUFFICIENT_DATA`: development is statistically meaningless
+(CI=[-0.71%,+2.23%], straddles zero), and validation/out-of-sample
+both fall below the promotion gate's own 30-observation minimum at
+n=24 each — a structural consequence of collapsing ten years of daily
+data into 20-day non-overlapping portfolio periods (~126 periods is
+close to the ceiling this dataset can ever provide at this cadence),
+not a fixable implementation gap. Basket size is a constant 6 members
+per rebalance; turnover is a disclosed 48% per 20-day period (52%
+basket overlap between consecutive rebalances).
+
+**What this means for the mission's central question.** `H_XSECT_001`'s
+raw finding does *not* clearly fail once genuinely reproduced at the
+portfolio level with no path-dependent exit — the negative verdicts
+from `H_XSECT_002`/`H_XSECT_004` look substantially attributable to
+those tests' own structural choices (a stop/target mechanic borrowed
+from a trend-continuation strategy; independent single-symbol trades
+rather than a diversified basket), not to the underlying cross-sectional
+signal being illusory. This result is directionally the most
+encouraging in the entire `H_XSECT_00x` executable-strategy family —
+but it is explicitly *not* strong enough to promote or move to shadow
+mode. Directional-but-inconclusive is reported as exactly that, not
+rounded up.
+
+**Open, not pursued in this same run** (each would need its own
+pre-registration): a wider universe would reduce per-period portfolio
+variance through more diversification without increasing the number of
+independent time periods — a distinct, legitimate lever from more raw
+data; a shorter rebalance cadence would roughly double the period count
+but has not been validated for independence the way the 20-day cadence
+was, and would reintroduce overlapping 20-day holding windows across
+staggered rebalances; and the entry-timing mismatch (point 1 above)
+remains completely untested.
