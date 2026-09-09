@@ -71,11 +71,24 @@ class CrossSectionalLaggardStrategy:
     pattern RelativeStrengthSignalStrategy already established for its
     own benchmark-relative column."""
 
-    def __init__(self, bucket_column: str = BUCKET_COLUMN, bottom_bucket_label: str = BOTTOM_BUCKET_LABEL):
+    def __init__(
+        self, bucket_column: str = BUCKET_COLUMN, bottom_bucket_label: str = BOTTOM_BUCKET_LABEL,
+        stop_atr_multiplier: float = STOP_ATR_MULTIPLIER, variant_name: str = "original_stop",
+    ):
         self.bucket_column = bucket_column
         self.bottom_bucket_label = bottom_bucket_label
+        self.stop_atr_multiplier = stop_atr_multiplier
+        """H_XSECT_004 (strategy/hypothesis_registry.py): overrides ONLY
+        the stop distance -- the target distance below always uses the
+        frozen strategy.baseline.STOP_ATR_MULTIPLIER/TARGET_RISK_REWARD
+        formula unchanged, so a caller testing a wider or effectively-
+        absent stop is changing exactly one variable, not conflating it
+        with a change in profit-taking behavior too. Defaults to the
+        ORIGINAL H_XSECT_002 value -- an unmodified default preserves
+        that entry's own exact, already-registered behavior byte for
+        byte."""
         self.name = "cross_sectional_laggard"
-        self.version = "xsect-001-q5-60d"
+        self.version = f"xsect-001-q5-60d-{variant_name}"
 
     def generate_signal(self, indicator_series: pd.DataFrame, index: int, symbol: str) -> Signal | None:
         if index == 0:
@@ -97,9 +110,10 @@ class CrossSectionalLaggardStrategy:
         if atr <= 0:
             return None
 
-        stop_distance = atr * STOP_ATR_MULTIPLIER
+        stop_distance = atr * self.stop_atr_multiplier
         stop_price = reference_price - stop_distance
-        target_price = reference_price + stop_distance * TARGET_RISK_REWARD
+        original_stop_distance = atr * STOP_ATR_MULTIPLIER
+        target_price = reference_price + original_stop_distance * TARGET_RISK_REWARD
 
         return Signal(
             symbol=symbol, generated_at=indicator_series.index[index], side=Side.LONG,
@@ -136,13 +150,18 @@ def run_cross_sectional_laggard_backtest(
     n_buckets: int = DEFAULT_N_BUCKETS,
     min_symbols_per_date: int = DEFAULT_MIN_SYMBOLS_PER_DATE,
     max_holding_bars: int = DEFAULT_MAX_HOLDING_BARS,
+    stop_atr_multiplier: float = STOP_ATR_MULTIPLIER,
+    variant_name: str = "original_stop",
 ) -> CrossSectionalBacktestResult:
     """The real, cost-aware, risk-sized backtest report §10 step 1
     asked for. cost_model defaults to CostModel.india_nse_intraday_2026()
     -- the SAME realistic ~0.21% round-trip estimate the report's own
     cost-sensitivity check (§6.1) used as its benchmark, not the
     zero-cost default run_time_based_exit_backtest would otherwise
-    silently apply."""
+    silently apply. stop_atr_multiplier/variant_name pass straight
+    through to CrossSectionalLaggardStrategy -- H_XSECT_004's own
+    pre-specified stop-width variants (default reproduces H_XSECT_002's
+    exact original behavior unchanged)."""
     cost_model = cost_model or CostModel.india_nse_intraday_2026()
 
     datasets: dict[str, SymbolDataset] = build_universe_datasets(symbols, period=period, interval=interval)
@@ -165,7 +184,7 @@ def run_cross_sectional_laggard_backtest(
 
     reference = next(iter(datasets.values()))
     split = split_periods(reference.frame.index[0], reference.frame.index[-1])
-    strategy: Strategy = CrossSectionalLaggardStrategy()
+    strategy: Strategy = CrossSectionalLaggardStrategy(stop_atr_multiplier=stop_atr_multiplier, variant_name=variant_name)
 
     for symbol, dataset in datasets.items():
         for label, start, end, bucket in (

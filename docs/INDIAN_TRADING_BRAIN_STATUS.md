@@ -109,6 +109,29 @@ executable behavior has explicitly not been tested and is not assumed
 to mirror `H_XSECT_002`'s negative result either way. Full addendum in
 `docs/research/CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §12.
 
+**Same day, one more test, and a genuinely humbling correction:
+does a wider or absent stop rescue H_XSECT_002's result
+(`H_XSECT_004`, REJECTED)?** H_XSECT_002's own diagnostic showed STOP
+exits driving nearly all the loss while EXPIRED exits were only mildly
+negative — the obvious next question, already named in this document
+before it was tested. **Both pre-specified variants performed WORSE,
+not better.** `wide_stop` (3× the original ATR multiplier):
+out-of-sample -1.47%, worse than the original -0.76%. `no_stop`
+(effectively unbounded): CI-decisive negative in **all three splits**
+(-5.46%/-2.66%/-4.61%), far worse than either configuration. The
+mechanism corrects the earlier diagnostic's own naive reading: the
+trades landing in the EXPIRED bucket are not fixed — widening the stop
+lets the *same* deteriorating trades that used to get cut at a bounded
+loss instead run to a far larger, uncapped one by day 20, dragging the
+EXPIRED bucket's own average down. A real, meaningful fraction of
+laggards simply keep falling and never reverse within the 20-day
+window; the original tight stop was doing real protective work
+invisible in the pooled mean-return statistic. This closes the
+"wider/absent stop" direction only — a *tighter* stop remains
+untested and would need its own new, honestly pre-registered
+hypothesis. Full addendum in `docs/research/
+CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §13.
+
 Overnight gap-fade was this project's second-most promising raw finding
 (H_GAP_001/002) and was put through a deep, deliberately adversarial
 validation this segment (H_GAP_003) — cost sensitivity, pre-specified
@@ -171,7 +194,7 @@ Nothing is promoted. Nothing should be traded.
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(37 hypotheses tested to date).
+(38 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -214,7 +237,7 @@ score variant — genuinely replicates H_XSECT_001's pattern, CI-decisive
 in all three splits, but its own executable behavior is untested — see
 above)**. Full evidence for each in `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (20)
+## REJECTED HYPOTHESES (21)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
@@ -228,11 +251,15 @@ sector-regime tests — found a real, sensible, monotonic ordinal
 pattern, leading sectors beat lagging ones, but the magnitude was too
 small and the "best" bucket still went decisively negative
 out-of-sample), H_CALENDAR_002 (the Tuesday effect does not hold on
-NIFTY 50 itself — see above), and **H_XSECT_002 (the real, cost-aware,
+NIFTY 50 itself — see above), **H_XSECT_002 (the real, cost-aware,
 risk-sized backtest of H_XSECT_001's own finding — out-of-sample shows
 CI-decisive harm, driven mechanistically by an ATR stop mis-calibrated
-for a reversal signal — see above)**. Full evidence for each in
-`strategy/hypothesis_registry.py`.
+for a reversal signal — see above)**, and **H_XSECT_004 (does a
+wider/absent stop rescue H_XSECT_002's result? Both pre-specified
+variants performed WORSE, not better — a genuine correction to
+H_XSECT_002's own diagnostic reading; see above for the full
+mechanism)**. Full evidence for each in `strategy/
+hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
 "entry timing underperforms random" — confirmatory, not an edge.)
@@ -383,23 +410,36 @@ genuinely independent and DOES replicate the laggard-outperformance
 pattern, CI-decisive in all three splits (H_XSECT_003, INCONCLUSIVE —
 see above). This closes out report §10's entire next-steps list.
 
-The cross-sectional research thread has now reached a natural pause
+**Also already answered, same session**: does a wider or absent stop
+rescue H_XSECT_002's executable backtest? **No — and both tested
+variants performed WORSE than the original** (H_XSECT_004, REJECTED —
+see above for the full mechanism, a genuine correction to H_XSECT_002's
+own diagnostic reading). This was the exact question flagged as the
+project's next step as of the previous update to this document, tested
+with the two variants that update itself had already named — no new
+parameters were introduced after seeing any result.
+
+The cross-sectional research thread has now reached a real stopping
 point: every pre-specified next step from the original validation
-report is done, and the remaining open question is deliberately NOT
-being pursued casually — whether an exit design built for
-mean-reversion's own known dynamics (e.g. a wider stop, or no hard stop
-within the fixed 20-day hold) changes H_XSECT_002's executable-backtest
-outcome. This needs its own honest, upfront pre-registration (economic
-rationale, fixed parameters, success/failure criteria written BEFORE
-any code runs) exactly the discipline H_XSECT_002 itself was built to
-test — not a quiet retry with looser parameters. Whoever picks this up
-next should write that registration first.
+report AND its own natural follow-up is done. What remains — a
+*tighter* stop than H_XSECT_002's own 1.5×ATR, which H_XSECT_004's own
+mechanism explanation would predict might do even better by capping
+the same tail-risk trades even earlier — is deliberately NOT being
+pursued in the same breath as this result. It would need its own
+honest, upfront pre-registration (economic rationale, a fixed
+parameter choice, success/failure criteria written BEFORE any code
+runs) written on its own, later, not as a same-session chase of this
+result — continuing to narrow the stop after each negative result
+would itself become exactly the undisclosed parameter search this
+project's own discipline exists to prevent. The cross-sectional thread
+should rest here for now.
 
 Beyond the cross-sectional thread, the mission's own lower-priority
 Phase 4-9 research families (multi-horizon momentum map, relative-
 strength quality conditions, volatility contraction, breakout quality,
 extreme-move research, interaction research) remain open and untouched
-this segment.
+this segment — the natural next place to look for a genuinely new
+research direction rather than continuing to narrow this one.
 
 Separately, and lower priority: let the 15 real directional forecasts
 recorded 2026-09-08 (and the 10-11 existing BUY predictions) resolve,

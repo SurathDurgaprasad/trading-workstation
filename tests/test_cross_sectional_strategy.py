@@ -68,6 +68,44 @@ def test_never_fires_when_atr_is_zero_or_missing():
     assert strategy.generate_signal(frame, 1, "TEST.NS") is None
 
 
+def test_stop_atr_multiplier_override_changes_only_the_stop_not_the_target():
+    """H_XSECT_004: overriding stop_atr_multiplier must change ONLY the
+    stop distance -- the target must always use the frozen original
+    STOP_ATR_MULTIPLIER/TARGET_RISK_REWARD formula, so a wider/no-stop
+    variant changes exactly one variable, never conflated with a
+    change in profit-taking behavior too."""
+    from strategy.baseline import STOP_ATR_MULTIPLIER, TARGET_RISK_REWARD
+
+    frame = _frame(buckets=["Q3", "Q5"], closes=[100.0, 100.0], atrs=[4.0, 4.0])
+    original = CrossSectionalLaggardStrategy()
+    wide = CrossSectionalLaggardStrategy(stop_atr_multiplier=4.5, variant_name="wide_stop")
+
+    signal_original = original.generate_signal(frame, 1, "TEST.NS")
+    signal_wide = wide.generate_signal(frame, 1, "TEST.NS")
+    assert signal_original is not None and signal_wide is not None
+
+    original_stop_distance = 4.0 * STOP_ATR_MULTIPLIER
+    assert signal_original.stop_price == pytest.approx(100.0 - original_stop_distance)
+    assert signal_wide.stop_price == pytest.approx(100.0 - 4.0 * 4.5)
+    assert signal_wide.stop_price != pytest.approx(signal_original.stop_price)
+    # target is IDENTICAL across variants -- only the stop moved
+    expected_target = 100.0 + original_stop_distance * TARGET_RISK_REWARD
+    assert signal_original.target_price == pytest.approx(expected_target)
+    assert signal_wide.target_price == pytest.approx(expected_target)
+
+
+def test_default_stop_atr_multiplier_reproduces_original_h_xsect_002_behavior():
+    """Regression guard: not passing stop_atr_multiplier at all must
+    produce byte-identical stop/target prices to H_XSECT_002's own
+    already-registered backtest."""
+    frame = _frame(buckets=["Q3", "Q5"], closes=[100.0, 100.0], atrs=[4.0, 4.0])
+    default_strategy = CrossSectionalLaggardStrategy()
+    assert default_strategy.stop_atr_multiplier == pytest.approx(1.5)
+    signal = default_strategy.generate_signal(frame, 1, "TEST.NS")
+    assert signal is not None
+    assert signal.stop_price == pytest.approx(100.0 - 4.0 * 1.5)
+
+
 def test_bottom_bucket_label_is_configurable_not_hardcoded_q5():
     """Guards against silently assuming n_buckets=5 always -- a caller
     using terciles (n_buckets=3) must be able to point at 'Q3' as the

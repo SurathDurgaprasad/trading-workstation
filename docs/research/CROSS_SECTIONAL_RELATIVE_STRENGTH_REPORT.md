@@ -305,3 +305,56 @@ this sector-relative variant's own executable behavior is **explicitly
 not assumed** to behave any differently — it has not been tested, and
 doing so would need its own new, honestly pre-registered hypothesis,
 not an assumption carried over from a different variant's result.
+
+## 13. Addendum — does a wider/absent stop rescue the executable backtest? (`H_XSECT_004`)
+
+Full record: `H_XSECT_004` in `strategy/hypothesis_registry.py`,
+status `REJECTED`. §11's own mechanism finding — that STOP exits drove
+nearly all of the loss while EXPIRED exits were only mildly negative —
+raised an obvious, disclosed follow-up question, already named in
+`docs/INDIAN_TRADING_BRAIN_STATUS.md` before this test was written:
+would a wider (or effectively absent) stop rescue the edge? Two, and
+only two, pre-specified variants were tested — `wide_stop`
+(`stop_atr_multiplier=4.5`, 3× the original) and `no_stop`
+(`stop_atr_multiplier=20.0`, wide enough that a STOP exit within a
+20-bar hold is not realistically reachable) — with the target distance
+held fixed at the original formula in both, so only one variable
+changed at a time.
+
+**Result: both variants REJECTED, and both performed WORSE than the
+original.** `wide_stop`: development and validation statistically
+meaningless, out-of-sample **-1.47%** (CI=[-2.29%,-0.65%]) — worse
+than §11's own -0.76%. `no_stop`: **all three splits** CI-decisive
+negative — development -5.46%, validation -2.66%, out-of-sample
+-4.61% — far worse than either the original or `wide_stop`, including
+in development and validation, which were mixed-to-positive under the
+original tight stop.
+
+**The mechanism is a genuine correction to §11's own reading.** §11
+observed STOP-exited trades looked terrible and EXPIRED-exited trades
+looked only mildly negative, and inferred that removing the stop would
+let those same trades land in the mild EXPIRED bucket instead. That
+inference was wrong: the trades that populate the EXPIRED bucket are
+not fixed — they change when the stop changes. Under the tight stop, a
+trade that keeps deteriorating gets cut at a bounded loss (~1.5×ATR)
+and is recorded as STOP; under a wide or absent stop, that *same*
+trade is instead held to day 20's close, which can be a far larger,
+uncapped loss, now recorded as EXPIRED — dragging that bucket's own
+average down sharply. A meaningful fraction of laggards simply do not
+reverse within 20 days and keep falling further; the original stop was
+doing real, protective work bounding that tail risk, work invisible in
+§5's pooled, unconditioned mean-return statistic, which reports only
+the average outcome, not the per-trade downside variance a real
+position is actually exposed to. This is the same kind of lesson
+`H_GAP_003`'s small-sample illusion and `H_CONTEXT_MARKET_005`'s
+era-instability already taught this project in different forms: a
+pooled average can look robust while hiding structure that only
+becomes visible once real trade mechanics are actually simulated.
+
+**What remains open.** This closes the "wider/absent stop" direction
+only. It does not test the opposite direction — a *tighter* stop than
+the original 1.5×ATR, which this entry's own mechanism explanation
+would predict might do even better by capping the same tail-risk
+trades even earlier. That remains untested and would need its own new,
+honestly pre-registered hypothesis before any code is written, not a
+same-session follow-up chasing this result.

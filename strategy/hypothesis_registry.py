@@ -1959,4 +1959,83 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "pre-registered hypothesis, not an assumption carried over from a different variant's result."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_XSECT_004",
+            description=(
+                "Does a mean-reversion-appropriate exit design -- a wider stop, or an effectively-absent stop "
+                "-- recover H_XSECT_002's own negative out-of-sample result? Two, and only two, pre-specified "
+                "variants, both named in docs/INDIAN_TRADING_BRAIN_STATUS.md and docs/research/"
+                "CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md BEFORE this entry's own experiment code was "
+                "written (both already committed and pushed to main at the time this hypothesis was tested): "
+                "wide_stop (stop_atr_multiplier=4.5, 3x H_XSECT_002's 1.5) and no_stop (stop_atr_multiplier=20.0 "
+                "-- never literally infinite since Trade/OpenPosition require a concrete stop_price, but wide "
+                "enough that a STOP exit inside a 20-bar hold is not realistically reachable for this "
+                "large/mid-cap NSE universe)."
+            ),
+            rationale=(
+                "H_XSECT_002's own exit-reason diagnostic showed STOP exits (51-57% of trades) driving nearly "
+                "all of the loss in every split, while EXPIRED (pure time-cap) exits were only mildly negative "
+                "in out-of-sample by comparison -- a real, disclosed, economically-motivated reason to test "
+                "whether the stop itself, not the underlying signal, was the problem. Per this project's own "
+                "multiple-testing discipline, this was written down as the specific, limited, pre-registered "
+                "next step (not an open-ended parameter search) BEFORE any code for it existed."
+            ),
+            expected_effect="No prior assumption stated stronger than the working hypothesis already on record: that a wider/absent stop would reduce or reverse H_XSECT_002's negative out-of-sample result by letting the 20-day reversal play out instead of being cut short.",
+            dataset_restrictions="Identical to H_XSECT_002: full 32-symbol NSE universe, 10 years daily (2016-2026).",
+            experiment_design=(
+                "quant_research/cross_sectional_strategy.py's CrossSectionalLaggardStrategy extended with a "
+                "stop_atr_multiplier constructor override (default unchanged, reproducing H_XSECT_002's own "
+                "exact behavior byte-for-byte -- verified by a new regression test) -- deliberately changes "
+                "ONLY the stop distance; the target distance always uses the frozen original "
+                "STOP_ATR_MULTIPLIER/TARGET_RISK_REWARD formula regardless of variant, so exactly one variable "
+                "changes at a time, never conflated with a change in profit-taking behavior (a new test "
+                "confirms this directly). run_cross_sectional_laggard_backtest exposes stop_atr_multiplier/ "
+                "variant_name as pass-through parameters. Same cost model (CostModel."
+                "india_nse_intraday_2026()), same risk sizing (risk.engine.RiskEngine, unchanged), same "
+                "strategy/promotion_gate.py::evaluate_promotion verdict mechanism as H_XSECT_002 -- a "
+                "like-for-like comparison, not a new or looser bar."
+            ),
+            success_criteria="Either variant's evaluate_promotion verdict improves on H_XSECT_002's own NEGATIVE verdict -- ideally reaching POSITIVE, or at minimum reducing the out-of-sample split's confident-negative magnitude.",
+            failure_criteria="Both variants remain NEGATIVE, or perform WORSE than H_XSECT_002's original configuration.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "BOTH VARIANTS REJECTED -- and, importantly, BOTH PERFORMED WORSE than H_XSECT_002's own "
+                "original (tighter) stop, the opposite of the working hypothesis. wide_stop: development "
+                "n=524 STATISTICALLY_MEANINGLESS (mean=-0.32%, CI=[-0.93%,+0.29%]); validation n=187 "
+                "STATISTICALLY_MEANINGLESS (mean=+0.35%, CI=[-0.32%,+1.02%]); out_of_sample n=179 "
+                "NEGATIVE_PERFORMANCE (mean=-1.47%, CI=[-2.29%,-0.65%] -- WORSE than H_XSECT_002's own "
+                "-0.76% out-of-sample result). no_stop: ALL THREE splits NEGATIVE_PERFORMANCE, decisively -- "
+                "development n=209 mean=-5.46% (CI=[-6.46%,-4.46%]); validation n=107 mean=-2.66% "
+                "(CI=[-3.69%,-1.63%]); out_of_sample n=85 mean=-4.61% (CI=[-5.90%,-3.31%]) -- far worse than "
+                "either wide_stop or the original H_XSECT_002 configuration in every split, including "
+                "development and validation, which were mixed/positive under the original stop. "
+                "evaluate_promotion verdict for both variants: NEGATIVE. "
+                "MECHANISM -- a genuine, humbling correction to H_XSECT_002's own naive diagnostic reading: "
+                "that diagnostic observed STOP-exited trades looked terrible on average and EXPIRED-exited "
+                "trades looked only mildly negative, and the working hypothesis (stated in H_XSECT_002's own "
+                "entry and in docs/INDIAN_TRADING_BRAIN_STATUS.md) was that REMOVING the stop would let those "
+                "same trades reach the mild EXPIRED outcome instead. This was WRONG, and the reason is a "
+                "composition trap: the set of trades that land in the EXPIRED bucket is not fixed -- it "
+                "changes when the stop changes. Under a tight stop, a trade that keeps falling hard gets cut "
+                "at a BOUNDED loss (~1.5x ATR) and is recorded as a STOP exit; under a wide/absent stop, that "
+                "SAME deteriorating trade is instead held all the way to day 20's close, which can be a FAR "
+                "LARGER, uncapped loss, and gets recorded as an EXPIRED exit instead -- dragging the EXPIRED "
+                "bucket's own average down sharply rather than leaving it at its original mild level. In other "
+                "words: a meaningful fraction of laggards do NOT reverse within 20 days and keep falling "
+                "further, and the original tight stop was doing real, protective work bounding that tail risk "
+                "-- work that is invisible in a raw, pooled, unconditioned forward-return measurement (H_XSECT_"
+                "001's own §5 statistic), which reports only the MEAN outcome, not the per-trade path or "
+                "downside variance any real position is actually exposed to. This is the SAME kind of lesson "
+                "H_GAP_003's small-sample illusion and H_CONTEXT_MARKET_005's era-instability already taught "
+                "this project in different forms: a pooled average can look robust while hiding structure that "
+                "only becomes visible once real trade mechanics (here, an exit rule) are actually simulated. "
+                "CONCLUSION: this closes off the 'a different stop width rescues H_XSECT_002' line of inquiry "
+                "in the tested (wider/absent) direction. It does NOT test the opposite direction (a TIGHTER "
+                "stop than H_XSECT_002's own 1.5x ATR, which this entry's own mechanism explanation would "
+                "predict might do even better by capping the same tail-risk trades even earlier) -- that "
+                "remains untested and, per this project's own discipline, would need to be its own new, "
+                "honestly pre-registered hypothesis before any code for it is written, not a same-session "
+                "follow-up chasing this result."
+            ),
+        ),
     )
