@@ -174,9 +174,112 @@ window); symbol concentration; sector concentration (via the existing,
 disclosed-as-partial `NSE_SECTOR_MAP`); liquidity split; non-overlapping
 sample check if overlapping windows are used; realistic cost margin.
 
-## 11. Reproducibility record (filled in at execution time)
+## 11. Reproducibility record
 
-To be completed after the experiment runs: exact bucket sample counts
-per split, `^NSEI` data window used, any symbol exclusion, and the
-`H_MEANREV_001`-derived control numbers this experiment compares
-against.
+- Universe: `quant_research.universe_expansion.ORIGINAL_32_NSE_UNIVERSE`, all 32 built successfully, 10y daily via `CachedMarketDataProvider`.
+- `^NSEI` trend + volatility regime series: `build_benchmark_regime_series`/`build_benchmark_volatility_series`, `period="10y"`, cached.
+- No symbol exclusions.
+- `H_MEANREV_001`-derived NSE-only control (Step 0, never measured before): h20, Candidate A dev n=2195 +0.92%, val n=523 +1.79%, oos n=785 +0.47%; Candidate B dev n=5568 +0.97%, val n=1541 +1.79%, oos n=2080 +0.73%. All positive at h20 (unlike H_MEANREV_001's own original pooled NSE+US result, which was flat/mixed) — a genuinely new observation in its own right, though not decisive at every horizon.
+
+## 12. Results — market TREND regime alone: `TRENDING_UP` is a real, broad, non-decaying finding; `TRENDING_DOWN`/`SIDEWAYS` unstable; volatility regime rejected; interaction not pursued
+
+Full evidence: `H_MEANREV_003` in `strategy/hypothesis_registry.py`.
+
+**Step 1 — market trend regime, marginal.** At h5/h10/h20,
+`market_trend_regime == TRENDING_UP` is **CI-decisive positive in
+development, validation, AND out-of-sample, for BOTH candidates, at
+every one of those three horizons — no sign reversal anywhere**:
+
+| Candidate | Split | h5 | h10 | h20 |
+|---|---|---|---|---|
+| A (−2.0σ) | dev (n=775) | +0.77% | +1.47% | +1.75% |
+| A | val (n=225) | +0.44% | +0.78% | +1.31% |
+| A | oos (n=250/238) | +0.65% | +1.31% | +1.47% |
+| B (−1.5σ) | dev (n=2053) | +0.73% | +1.25% | +1.72% |
+| B | val (n=617) | +0.60% | +1.07% | +1.73% |
+| B | oos (n=616/583) | +0.57% | +0.99% | +1.37% |
+
+`TRENDING_DOWN` and `SIDEWAYS` both show the familiar "development/
+validation decisive, out-of-sample reverses toward zero or negative"
+shape this registry has repeatedly flagged as disqualifying (e.g.
+`SIDEWAYS` h20: dev/val decisive positive for both candidates,
+out-of-sample -0.77%/-0.47%, CI touching zero) — neither clears the
+frozen success criteria.
+
+**Step 2 — market volatility regime, marginal.** Both `LOW_VOLATILITY`
+and `HIGH_VOLATILITY` show clear sign reversals between splits for
+both candidates (e.g. `LOW_VOLATILITY` h20 Candidate A: dev +6.23%,
+validation **-2.00%**, out-of-sample **-2.22%**), and the validation
+split for these extreme buckets is severely underpowered (n=8-36 across
+both candidates) — consistent with this project's own repeated finding
+(`H_CONTEXT_VIX_001`, `H_VOL_001`) that volatility regimes are rare and
+temporally clustered, not a stable conditioning dimension at this
+universe size. **REJECTED as a marginal conditioner.**
+
+**Step 3 — interaction, not pursued.** Per the pre-registration's own
+frozen sample-size gate: volatility regime's own informative buckets
+(LOW/HIGH) are far too small even at the marginal level (validation
+n=8-36) to support a further 2-D split with trend regime — proceeding
+would only produce smaller, less meaningful cells. Correctly not
+attempted, per §4's own pre-specified rule.
+
+### Adversarial checks on the `TRENDING_UP` finding
+
+**Symbol concentration** (full period, h20): both candidates fire on
+all 32 symbols at least once. Candidate A: 24/32 symbols show a
+positive mean; top-5 contributors (`DIVISLAB.NS`, `BAJAJFINSV.NS`,
+`EICHERMOT.NS`, `SBIN.NS`, `NTPC.NS`) are large but not implausible per
+trade, and losses are modest and spread across the bottom-5. Candidate
+B: 29/32 positive — broader still. **Not concentrated in a handful of
+names.**
+
+**Cost sensitivity** (full-period pooled, h20): mean +1.62%/+1.66%
+(A/B). Survives a **0.30% round-trip cost** with a wide margin (net
++1.32%/+1.36%) — comparable margin to this project's strongest prior
+findings. This is the raw-measurement cost check only; this project's
+own `H_XSECT_002`/`004` already demonstrated a wide raw-measurement
+cost margin does *not* guarantee an executable, stop/target-managed
+strategy survives — that remains untested here.
+
+**Era stability — year-by-year** (Candidate B, h20, the check that
+resolved an initial ambiguity from a simple 50/50 split): 2017 +2.80%
+(decisive), 2018 -0.02% (flat, not decisive), 2019 +3.07% (decisive),
+2020 +4.98% (decisive, the COVID crash/recovery year), 2021 +1.98%
+(decisive), **2022 -3.36% (decisive NEGATIVE — the one real
+exception)**, 2023 +1.57% (decisive), 2024 +1.36% (decisive), 2025
++3.25% (decisive, one of the strongest years on record), 2026 -0.26%
+(partial year, not decisive). **7 of 9 complete years are CI-decisive
+positive; only 2022 is decisively negative; the most recent complete
+year (2025) is among the strongest.** This is normal year-to-year
+variation around a real, non-decaying effect, not a clean decay
+pattern — a materially different, more reassuring shape than gap-fade's
+own (`H_GAP_003`) "decisive 2021-2024, flat 2025-2026" decay signature.
+The initial 50/50 era-split (`docs/research/...` §10 diagnostic run)
+showed "early half strong (+2.61%), late half weak (+0.58%)" purely
+because 2022's single bad year sits at the start of that split's late
+half and drags its average down — resolved, not a genuine finding of
+its own once the year-by-year breakdown is examined.
+
+### Verdict
+
+**INCONCLUSIVE — a genuine, well-validated raw price-behavior finding,
+not yet an executable-strategy claim**, following this project's own
+established `H_XSECT_001` precedent exactly: `market_trend_regime ==
+TRENDING_UP` conditions `H_MEANREV_001`'s oversold entry into a
+CI-decisive-positive, broad-based, cost-margin-surviving, non-decaying
+signal across all three splits and both frozen candidates — the
+cleanest, most complete NSE-only regime-conditioning result this
+registry has produced (in contrast to every one of the 14 prior
+baseline-signal regime hypotheses, all of which showed at least one
+sign reversal or a severe sample-size limitation). It is **not**
+promoted to SUPPORTED because — exactly as this project's own
+`H_XSECT_002`/`004`/`005` sequence already demonstrated for a different
+signal — a raw, cost-free measurement is not the same claim as a real,
+risk-sized, stop/target-managed trade, and that conversion has not yet
+been attempted here. The next well-motivated step, if pursued, is
+building the equivalent of `H_MEANREV_001`'s own executable wrapper
+(`quant_research/mean_reversion_signal.py`'s `MeanReversionSignalStrategy`,
+already exists) gated additionally on `market_trend_regime ==
+TRENDING_UP`, run through `strategy/promotion_gate.py`'s real dev/val/
+oos verdict — its own new, honestly pre-registered hypothesis, not
+folded into this one after the fact.

@@ -2311,4 +2311,92 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "own bar for further investment."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_MEANREV_003",
+            description=(
+                "Does H_MEANREV_001's oversold mean-reversion entry (zscore_close_20 below a frozen threshold) "
+                "behave differently depending on the broader NIFTY market's own trend regime and volatility "
+                "regime -- tested NSE-only for the first time (the original H_MEANREV_001 pooled NSE and US "
+                "together and found a directionless null result)? Pre-registered BEFORE any experiment code ran: "
+                "docs/research/H_MEANREV_003_REGIME_CONDITIONING_PREREGISTRATION.md, committed as its own commit "
+                "prior to any experiment code."
+            ),
+            rationale=(
+                "REGIME-DEPENDENT SIGNAL VALIDATION mission continuation. An audit of all 14 prior regime "
+                "hypotheses in this registry found market-trend x volatility interaction on the baseline BUY "
+                "signal technically untested, but both marginal dimensions on THAT signal already show real "
+                "instability (H_CONTEXT_MARKET_003/H_CONTEXT_VIX_001/002: clean sign reversals; H_CONTEXT_"
+                "MARKET_005: era-dependence) -- interacting two already-shaky dimensions on an already-"
+                "extensively-mined signal (14 hypotheses) risked low information value. H_MEANREV_001 x regime "
+                "was genuinely novel (never regime-conditioned at all), economically motivated (mean reversion "
+                "is classically regime-dependent), and ties to this project's own recurring finding that mean "
+                "reversion is the more promising NSE family (H_XSECT_001/005, H_MEANREV_002's own directional "
+                "shape)."
+            ),
+            expected_effect="No prior assumption -- tests both trend-regime and volatility-regime conditioning as separate marginal effects first, per a frozen sample-size-first hierarchy, before any interaction is considered.",
+            dataset_restrictions="Full original 32-symbol NSE universe (quant_research.universe_expansion.ORIGINAL_32_NSE_UNIVERSE), 10 years daily -- NSE-only, a deliberate, disclosed change from H_MEANREV_001's own pooled NSE+US design.",
+            experiment_design=(
+                "Zero new production code -- pure reuse. zscore_close_20 already computed by every SymbolDataset "
+                "via quant_research.market_behavior.build_symbol_dataset's own add_alpha_features call. Market "
+                "trend/volatility regime attached via quant_research.context_experiments."
+                "build_benchmark_regime_series/build_benchmark_volatility_series/attach_external_regime -- the "
+                "exact machinery H_CONTEXT_MARKET_001/002/003 already used, applied to ^NSEI, unchanged. "
+                "H_MEANREV_001's own frozen thresholds (zscore_close_20 < -2.0 / < -1.5) reused verbatim, not "
+                "retuned. Horizons 1/5/10/20 bars. Measured via quant_research.market_behavior.measure_condition, "
+                "market_filter='NSE'."
+            ),
+            success_criteria="Same directional sign (positive) across development, validation, AND out-of-sample, >=30 observations per split, CI excluding zero in at least development and out-of-sample, no single-symbol concentration.",
+            failure_criteria="Sign reverses between any two splits with an adequate sample, no regime bucket improves on the unconditioned control, an apparently promising cell is driven by a single symbol/narrow window, or every cell is underpowered.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "STEP 0 (unconditioned NSE-only control, never measured before -- H_MEANREV_001's own original "
+                "test pooled NSE+US): h20, Candidate A dev n=2195 +0.92%, val n=523 +1.79%, oos n=785 +0.47%; "
+                "Candidate B dev n=5568 +0.97%, val n=1541 +1.79%, oos n=2080 +0.73% -- all positive at h20, "
+                "unlike the original pooled study's directionless result, though not decisive at every horizon. "
+                "STEP 1 (market TREND regime, marginal): market_trend_regime == TRENDING_UP is CI-decisive "
+                "POSITIVE in development, validation, AND out-of-sample, for BOTH candidates, at h5/h10/h20 -- "
+                "NO SIGN REVERSAL ANYWHERE. h20: Candidate A dev n=775 +1.75%, val n=225 +1.31%, oos n=238 "
+                "+1.47%; Candidate B dev n=2053 +1.72%, val n=617 +1.73%, oos n=583 +1.37%. TRENDING_DOWN and "
+                "SIDEWAYS both show the familiar 'dev/val decisive, oos reverses toward zero or negative' shape "
+                "this registry has repeatedly flagged as disqualifying (e.g. SIDEWAYS h20 oos: -0.77%/-0.47%, CI "
+                "touching zero) -- neither clears the frozen success criteria. "
+                "STEP 2 (market VOLATILITY regime, marginal): REJECTED. Both LOW_VOLATILITY and HIGH_VOLATILITY "
+                "show clear sign reversals between splits for both candidates (e.g. LOW_VOLATILITY h20 Candidate "
+                "A: dev +6.23%, validation -2.00%, out_of_sample -2.22%), and the validation split for these "
+                "extreme buckets is severely underpowered (n=8-36 across both candidates) -- consistent with "
+                "this project's own repeated finding (H_CONTEXT_VIX_001/002, H_VOL_001) that volatility regimes "
+                "are rare and temporally clustered at this universe size, not a stable conditioning dimension. "
+                "STEP 3 (interaction): correctly NOT pursued, per the pre-registration's own frozen sample-size "
+                "gate -- volatility regime's own informative buckets are far too small even at the marginal "
+                "level to support a further 2-D split. "
+                "ADVERSARIAL CHECKS on TRENDING_UP: symbol concentration -- both candidates fire on all 32 "
+                "symbols at least once (Candidate A: 24/32 positive mean; Candidate B: 29/32 positive mean), not "
+                "concentrated in a handful of names. Cost sensitivity (full-period pooled, h20): mean "
+                "+1.62%/+1.66% (A/B), survives a 0.30% round-trip cost with a wide margin (net +1.32%/+1.36%) -- "
+                "the raw-measurement check only; H_XSECT_002/004 already demonstrated this does not guarantee an "
+                "executable, stop/target-managed strategy survives. Era stability (year-by-year, Candidate B, "
+                "h20, resolving an initial ambiguity from a simple 50/50 split): 2017 +2.80% (decisive), 2018 "
+                "-0.02% (flat), 2019 +3.07% (decisive), 2020 +4.98% (decisive, COVID crash/recovery), 2021 "
+                "+1.98% (decisive), 2022 -3.36% (decisive NEGATIVE -- the one real exception), 2023 +1.57% "
+                "(decisive), 2024 +1.36% (decisive), 2025 +3.25% (decisive, one of the strongest years), 2026 "
+                "-0.26% (partial year). 7 of 9 complete years CI-decisive positive; only 2022 decisively "
+                "negative; the most recent complete year (2025) among the strongest -- normal year-to-year "
+                "variation around a real, NON-DECAYING effect, a materially more reassuring shape than gap-fade's "
+                "own (H_GAP_003) clean 'decisive-then-flat' decay signature. The initial 50/50 era-split's "
+                "'early half strong, late half weak' appearance was resolved as an artifact of 2022's single bad "
+                "year sitting at the start of that split's late half, not a genuine decay finding. "
+                "VERDICT: INCONCLUSIVE -- a genuine, well-validated raw price-behavior finding, not yet an "
+                "executable-strategy claim, following H_XSECT_001's own precedent exactly. The cleanest, most "
+                "complete NSE-only regime-conditioning result this registry has produced (in contrast to all 14 "
+                "prior baseline-signal regime hypotheses, every one of which showed a sign reversal or a severe "
+                "sample-size limitation). Not promoted to SUPPORTED because a raw, cost-free measurement is not "
+                "the same claim as a real, risk-sized, stop/target-managed trade -- exactly the lesson H_XSECT_"
+                "002/004/005 already taught this project for a different signal, and that conversion has not yet "
+                "been attempted here. Next step, if pursued: build the executable wrapper (quant_research/"
+                "mean_reversion_signal.py's MeanReversionSignalStrategy already exists) gated additionally on "
+                "market_trend_regime == TRENDING_UP, run through strategy/promotion_gate.py's real dev/val/oos "
+                "verdict -- its own new, honestly pre-registered hypothesis, not folded into this one after the "
+                "fact. Full writeup in docs/research/H_MEANREV_003_REGIME_CONDITIONING_PREREGISTRATION.md."
+            ),
+        ),
     )
