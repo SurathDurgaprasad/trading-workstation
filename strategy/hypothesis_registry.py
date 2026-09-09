@@ -2244,4 +2244,71 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "H_XSECT_006_UNIVERSE_WIDENING_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_VOL_001",
+            description=(
+                "Volatility contraction (the classic 'quiet before the storm' pattern): does a stock currently "
+                "in a LOW volatility regime -- backtesting.regime.classify_volatility_at's own existing, "
+                "UNMODIFIED default thresholds (ATR-14-as-percent-of-close below its own trailing 60-bar "
+                "baseline) -- show a forward-return advantage over NORMAL/HIGH volatility regimes or over the "
+                "unconditioned baseline, across pre-specified horizons (1/5/10/20 bars)?"
+            ),
+            rationale=(
+                "Per the EDGE DISCOVERY mission's own priority order, this project's cross-sectional thread "
+                "(H_XSECT_001-006) had just produced two consecutive rejections plus one closed variant, "
+                "making it the wrong place to keep digging (priority order explicitly ranks 'new hypothesis "
+                "families' below replicating/killing existing findings, but ALSO explicitly warns against "
+                "continuing to narrow an exhausted thread). Volatility contraction is a well-established, "
+                "economically-motivated market phenomenon in traditional TA/quant literature, genuinely "
+                "UNTESTED in this registry (unlike breakout quality H_BREAKOUT_001 and relative-strength "
+                "H_RELSTRENGTH_001, both already REJECTED), and buildable at essentially zero engineering cost: "
+                "quant_research.market_behavior.build_symbol_dataset ALREADY computes and attaches a "
+                "volatility_regime column to every SymbolDataset via backtesting.regime.classify_volatility_at "
+                "(built for the H_CONTEXT family), and measure_condition_by_market ALREADY supports filtering "
+                "by it -- no new production code needed, a pure reuse of existing, already-tested "
+                "infrastructure for a genuinely new economic question."
+            ),
+            expected_effect="No prior assumption -- tests whether LOW_VOL shows a forward-return advantage over NORMAL_VOL (the natural baseline, ~90% of all bars) and HIGH_VOL, in either direction, before drawing any conclusion.",
+            dataset_restrictions="Same original 32-symbol NSE universe, 10 years daily (2016-2026) -- this project's own established first-pass universe, per the H_XSECT thread's own precedent and H_XSECT_006's own lesson that universe generalization is a separate, later question.",
+            experiment_design=(
+                "Pure measurement, zero new modules: quant_research.market_behavior.build_universe_datasets + "
+                "measure_condition_by_market, condition_fn filtering on the row's own already-attached "
+                "volatility_regime column (LOW_VOLATILITY / NORMAL_VOLATILITY / HIGH_VOLATILITY), horizons "
+                "(1, 5, 10, 20) matching FORWARD_HORIZONS's own pre-specified set. No new thresholds invented -- "
+                "classify_volatility_at's own existing DEFAULT_VOLATILITY_LOOKBACK/DEFAULT_HIGH_VOLATILITY_"
+                "MULTIPLIER/DEFAULT_LOW_VOLATILITY_MULTIPLIER (built for the H_CONTEXT family, unrelated to "
+                "this hypothesis) reused completely unchanged."
+            ),
+            success_criteria="LOW_VOL shows a CI-decisive forward-return advantage over the NORMAL_VOL baseline, in the SAME direction, across development, validation, AND out-of-sample -- the same 'no sign reversal in any split' bar every other hypothesis in this registry is held to.",
+            failure_criteria="The LOW_VOL-vs-baseline comparison reverses direction in any split, or the effect (where present) is small relative to realistic costs.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REAL MEASUREMENT (h20, the horizon with the clearest signal): LOW_VOL absolute forward return "
+                "is CI-decisive positive in all three splits (development +2.697% n=2618 CI=[+2.393%,+3.001%]; "
+                "validation +1.549% n=442 CI=[+1.036%,+2.061%]; out_of_sample +0.549% n=371 "
+                "CI=[+0.121%,+0.977%]) -- but absolute positivity alone is not informative here, since this "
+                "10-year large-cap NSE universe shows a general positive drift in EVERY volatility bucket "
+                "(NORMAL_VOL, ~90% of all bars, is itself decisive-positive in development +1.497% and "
+                "validation +1.852%). The economically meaningful comparison is LOW_VOL VERSUS the NORMAL_VOL "
+                "baseline, and that comparison is NOT consistent across splits: development LOW_VOL is "
+                "CI-decisively ABOVE baseline (+2.697% vs +1.497%, non-overlapping CIs); validation LOW_VOL is "
+                "BELOW the baseline point estimate (+1.549% vs +1.852%, wrong direction, though CIs overlap so "
+                "not itself CI-decisive); out_of_sample LOW_VOL is again CI-decisively above baseline (+0.549% "
+                "vs +0.006%, barely non-overlapping) but the excess-over-baseline has decayed by roughly 2.4x "
+                "from development's own margin. HIGH_VOL shows an even more unstable pattern across splits -- "
+                "decisive positive in development (+1.765%) and validation (a striking +4.329%, n=474, "
+                "CI=[+3.786%,+4.872%]), then NOT CI-decisive in out_of_sample (-0.544%, CI=[-1.278%,+0.189%], "
+                "straddles zero) -- a large validation-only spike with no out-of-sample confirmation, exactly "
+                "the pattern this project's own discipline treats as a red flag rather than a promising lead. "
+                "CONCLUSION: this fails the 'no sign reversal in any split' bar every other hypothesis in this "
+                "registry is held to (validation reverses the LOW_VOL-vs-baseline direction seen in development "
+                "and out_of_sample), and where the comparison IS favorable, the excess-over-baseline margin is "
+                "small (out_of_sample: +0.54 percentage points at h20) and decaying -- unlikely to survive "
+                "realistic transaction costs (~0.21% round-trip) even before considering execution mechanics, "
+                "the exact lesson H_XSECT_002/004/006 already taught this project applies to any raw "
+                "measurement before it becomes a claim. REJECTED without proceeding to any executable-strategy "
+                "design or adversarial-check stage -- the raw measurement itself does not clear this project's "
+                "own bar for further investment."
+            ),
+        ),
     )

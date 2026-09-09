@@ -266,12 +266,30 @@ sidestep the cost problem) isn't statistically supported either. Real
 evidence of a genuine market phenomenon; not yet evidence of an
 exploitable one, and now closed off from two different directions.
 
+**Same session, first venture outside the cross-sectional thread since
+it hit two consecutive rejections: volatility contraction
+(`H_VOL_001`, REJECTED).** Does a LOW volatility regime (existing,
+unmodified `backtesting.regime.classify_volatility_at` thresholds)
+show a forward-return advantage over the baseline? A genuinely
+untested, economically-motivated question, answerable with zero new
+production code (the `volatility_regime` column and measurement
+function already existed, built for the H_CONTEXT family). Result:
+LOW_VOL's raw absolute return is positive in every split, but that
+merely reflects this large-cap universe's own general 10-year positive
+drift — the meaningful comparison (LOW_VOL vs. the NORMAL_VOL
+baseline, ~90% of all bars) reverses direction in validation
+(LOW_VOL underperforms baseline there) after favoring LOW_VOL in
+development, and even where favorable the margin decays sharply
+(development +1.2 points over baseline → out-of-sample +0.54 points)
+— too small and inconsistent to survive realistic costs. Rejected at
+the pure-measurement stage, before any executable-strategy work.
+
 Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(40 hypotheses tested to date).
+(41 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -319,7 +337,7 @@ three splits on the original 32 symbols, but INSUFFICIENT_DATA at n=24
 per validation/out-of-sample split — see above). Full evidence for
 each in `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (22)
+## REJECTED HYPOTHESES (23)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
@@ -339,11 +357,16 @@ CI-decisive harm, driven mechanistically by an ATR stop mis-calibrated
 for a reversal signal — see above), H_XSECT_004 (does a wider/absent
 stop rescue H_XSECT_002's result? Both pre-specified variants performed
 WORSE, not better — a genuine correction to H_XSECT_002's own
-diagnostic reading; see above for the full mechanism), and **H_XSECT_006
+diagnostic reading; see above for the full mechanism), H_XSECT_006
 (universe widening — the laggard effect reverses sign on 176 genuinely
 new NSE symbols not in the original universe; a selection-bias warning
 escalating to falsification per the pre-registration's own frozen
-criteria — see above)**. Full evidence for each in `strategy/
+criteria — see above), and **H_VOL_001 (volatility contraction — does a
+LOW volatility regime beat the baseline forward return? Reverses
+direction in validation versus development/out-of-sample, and the
+effect where favorable is small and decaying — a real, pure-measurement
+test reusing entirely existing infrastructure, no new module needed)**.
+Full evidence for each in `strategy/
 hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
@@ -544,13 +567,27 @@ not a continuation of this one:
 (H_XSECT_003) and one underpowered-but-real result (H_XSECT_005),
 the single highest-EV action for whoever picks this up next is
 probably NOT another cross-sectional variant** — it is the mission's
-own lower-priority research families (multi-horizon momentum map,
-relative-strength quality conditions, volatility contraction, breakout
-quality, extreme-move research, regime-dependent effects, market
-microstructure), which remain open and completely untouched. A
-research program that keeps refining one thread after two consecutive
-rejections risks exactly the "endless hypothesis generation on a dying
-lead" pattern this project's own discipline warns against.
+own lower-priority research families. A research program that keeps
+refining one thread after two consecutive rejections risks exactly the
+"endless hypothesis generation on a dying lead" pattern this project's
+own discipline warns against.
+
+**Already tried this session: volatility contraction (`H_VOL_001`,
+REJECTED).** A LOW-volatility-regime forward-return advantage over
+baseline reverses direction in validation and decays sharply where
+favorable — see CURRENT ACTIVE EDGE STATUS above. This closes off that
+specific candidate; do not retest the same LOW/HIGH volatility-regime
+split with different thresholds, that would be exactly the parameter
+search this project's discipline exists to prevent. Untested
+candidates from the same lower-priority family list remain: extreme-move
+research, multi-horizon single-stock momentum (distinct from the
+already-tested cross-sectional and relative-strength formulations,
+both REJECTED), regime-dependent effects (though this family already
+has 14 prior hypotheses — diminishing-returns risk, audit for a
+genuinely new angle before adding a 15th), and market microstructure
+(likely blocked by the same ~60-day intraday-history ceiling that
+constrained `H_OPENRANGE_001` — check data availability before
+committing to this one).
 
 Separately, and lower priority: let the 15 real directional forecasts
 recorded 2026-09-08 (and the 10-11 existing BUY predictions) resolve,
