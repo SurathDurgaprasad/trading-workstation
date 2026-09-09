@@ -1666,4 +1666,41 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "attempted this session)."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_CALENDAR_002",
+            description="Does H_CALENDAR_001's Tuesday effect hold on NIFTY 50 (^NSEI) itself, not just pooled across the 32-stock universe?",
+            rationale=(
+                "Direct, cheap follow-up to H_CALENDAR_001's own stated cost problem: trading the Tuesday "
+                "effect efficiently would want ONE index-level round trip per week rather than 32 individual "
+                "stock round trips. Before treating that as a real possibility, the underlying question is "
+                "whether the effect even exists at the index level, or whether it only appeared because "
+                "pooling 32 correlated-but-distinct stocks manufactured statistical power a single index series "
+                "does not have on its own."
+            ),
+            expected_effect="^NSEI's own Tuesday returns should be CI-decisive and positive across development, validation, and out-of-sample, matching the pooled-stock finding.",
+            dataset_restrictions="^NSEI only, 10 years daily.",
+            experiment_design="Identical condition_fn and split discipline to H_CALENDAR_001, applied to the single ^NSEI series (no market_filter, since exchange_for_symbol classifies index tickers as OTHER/'US' for market_behavior.py's own bookkeeping purposes -- irrelevant here, only one symbol is being measured).",
+            success_criteria="CI-decisive positive Tuesday return on the index alone, across all three splits.",
+            failure_criteria="No split is individually decisive on the index alone.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "TUESDAY on ^NSEI: development n=295 +0.0795% (NOT decisive, CI=[-0.030%,+0.189%]); validation "
+                "n=97 +0.0503% (NOT decisive, CI=[-0.094%,+0.194%], and actually WEAKER than the index's own "
+                "unconditioned control that period, +0.0712% -- the clean 'Tuesday beats control in every "
+                "split' pattern the pooled-stock version showed does not hold here); out-of-sample n=101 "
+                "+0.1058% (NOT decisive, CI=[-0.038%,+0.250%]). CONTROL (all days) on ^NSEI: +0.0532%/+0.0712%/"
+                "-0.0074% -- similar shape to the pooled-stock control, as expected. "
+                "REJECTED: none of the three splits reach statistical decisiveness on the index alone. The "
+                "pooled-stock result's own statistical power (H_CALENDAR_001) came specifically from combining "
+                "32 correlated-but-not-identical return series (~9,000+ observations per split vs. this "
+                "entry's own ~100-300) -- exactly how a real single-index trade would NOT be implemented. This "
+                "closes off the 'trade it via one cheap index instrument' idea floated as H_CALENDAR_001's own "
+                "natural next step: even if this project had index/ETF execution capability, the statistical "
+                "case for Tuesday specifically does not survive at the single-instrument level where that "
+                "execution would actually happen. Combined with H_CALENDAR_001's own cost-margin finding, the "
+                "Tuesday effect is now disqualified from practical tradeability by two independent, "
+                "non-overlapping reasons: cost margin at the pooled-stock level, and lack of statistical power "
+                "at the single-instrument level."
+            ),
+        ),
     )

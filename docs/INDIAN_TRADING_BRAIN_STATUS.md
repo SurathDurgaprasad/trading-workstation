@@ -82,20 +82,23 @@ reversing), even after a conservative Bonferroni correction for testing
 all 5 weekdays, broad-based across 31 of 32 symbols, and positive in 9
 of 11 individual years with no decay trend — genuinely the strongest
 replication in this project's history by every measure that has
-disqualified other candidates. **Still not a tradeable edge**: the
-effect size (~0.08-0.12% per week) does not clear a realistic weekly
-round-trip cost (~0.21%), and this project has no index/ETF execution
-capability to trade it efficiently even if it did (32 individual-stock
-round trips would be far more expensive than one index-level trade).
-Real evidence of a genuine market phenomenon; not yet evidence of an
-exploitable one.
+disqualified other candidates. **Still not a tradeable edge, for two independent reasons**: the effect
+size (~0.08-0.12% per week) does not clear a realistic weekly
+round-trip cost (~0.21%) if traded stock-by-stock; and a same-day
+follow-up (H_CALENDAR_002) found the effect does NOT hold on NIFTY 50
+itself with any statistical decisiveness — the pooled-stock
+significance came specifically from combining 32 correlated-but-
+distinct series, so a cheap single-index-instrument trade (which would
+sidestep the cost problem) isn't statistically supported either. Real
+evidence of a genuine market phenomenon; not yet evidence of an
+exploitable one, and now closed off from two different directions.
 
 Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(33 hypotheses tested to date).
+(34 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -126,20 +129,21 @@ effect — this project's most statistically robust finding to date, real
 but not (yet) tradeable — see above). Full evidence for each in
 `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (18)
+## REJECTED HYPOTHESES (19)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
 H_CONTEXT_MARKET_003, H_CONTEXT_SECTOR_001, H_CONTEXT_VIX_001,
 H_CONTEXT_VIX_002, H_TRANSMISSION_002, H_TRANSMISSION_003,
 H_TRANSMISSION_004, H_GAP_003 (the deep-validation follow-up to
-H_GAP_001/002 — see above), and H_SECTOR_ROTATION_001 (new today: a
-stock's own sector's cross-sectional momentum RANK among the 9 NIFTY
-sector indices, a genuinely different formulation from the earlier
-binary sector-regime tests — found a real, sensible, monotonic ordinal
+H_GAP_001/002 — see above), H_SECTOR_ROTATION_001 (a stock's own
+sector's cross-sectional momentum RANK among the 9 NIFTY sector
+indices, a genuinely different formulation from the earlier binary
+sector-regime tests — found a real, sensible, monotonic ordinal
 pattern, leading sectors beat lagging ones, but the magnitude was too
 small and the "best" bucket still went decisively negative
-out-of-sample). Full evidence for each in `strategy/
+out-of-sample), and H_CALENDAR_002 (the Tuesday effect does not hold on
+NIFTY 50 itself — see above). Full evidence for each in `strategy/
 hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
@@ -267,15 +271,18 @@ directional forecasts recorded 2026-09-08 (and the 10-11 existing BUY
 predictions) resolve, then re-run `evaluate-forecasts`/`evaluate`/
 `learn` for the first real calibration read this project has ever had.
 
-Closely following that: **does the Tuesday effect (H_CALENDAR_001) hold
-on NIFTY 50 itself (`^NSEI`), not just the 32-stock universe?** This
-project's existing infrastructure already fetches `^NSEI` for every
-other regime computation — testing whether the SAME index-level series
-shows the same Tuesday pattern is a nearly-free follow-up (no new data
-source needed) and would directly inform whether a single-instrument
-proxy could ever make this economically tradeable, since the cost
-problem (§ above) is specifically about needing 32 stock-level round
-trips instead of one index-level one.
+**Already answered, same session**: does the Tuesday effect hold on
+NIFTY 50 itself (`^NSEI`), not just the 32-stock universe? No
+(H_CALENDAR_002, REJECTED) — none of the three splits are individually
+decisive on the index alone (n=97-295 vs. the pooled version's
+n=3000-9000+). The pooled-stock result's own statistical power came
+specifically from combining 32 correlated-but-distinct series, exactly
+how a real single-instrument trade would NOT be implemented. This
+closes off the "trade it via one cheap index instrument" idea
+completely — the Tuesday effect is now disqualified from practical
+tradeability by two independent reasons (cost margin at the pooled
+level, no statistical power at the single-instrument level), not just
+one.
 
 If a genuinely new research question is wanted before then: **the
 10-year NSE cache is now available for every symbol in this universe —
