@@ -141,6 +141,38 @@ def attach_bucket_membership_column(
         dataset.frame[column_name] = dataset.frame.index.map(assignments[symbol])
 
 
+def attach_relative_score_column(
+    datasets: dict[str, SymbolDataset],
+    *,
+    raw_score_column: str,
+    external_series_by_key: dict[str, pd.Series],
+    key_for_symbol,
+    output_column: str,
+) -> None:
+    """Mutates every dataset's frame in place, adding `output_column` =
+    `raw_score_column` minus the `external_series_by_key` entry keyed by
+    `key_for_symbol(symbol)`, causally forward-filled onto the symbol's
+    own calendar -- the same alignment convention
+    quant_research.context_experiments.attach_external_regime already
+    uses for a single shared series, generalized here to a *per-symbol*
+    lookup key so one function covers both cases the
+    CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT's own S10 step 3 named:
+    NIFTY-relative (key_for_symbol always returns the same key, e.g.
+    'NIFTY') and sector-relative (key_for_symbol =
+    market_intelligence.nse_sector_map.sector_for_symbol). A symbol
+    whose key has no entry in external_series_by_key gets `output_column`
+    set to NaN throughout -- never silently falls back to the raw score,
+    which would misrepresent an unmeasured relative score as computed."""
+    for symbol, dataset in datasets.items():
+        key = key_for_symbol(symbol)
+        external_series = external_series_by_key.get(key) if key is not None else None
+        if external_series is None:
+            dataset.frame[output_column] = float("nan")
+            continue
+        aligned = external_series.reindex(dataset.frame.index, method="ffill")
+        dataset.frame[output_column] = dataset.frame[raw_score_column] - aligned
+
+
 def rank_cross_sectionally(
     datasets: dict[str, SymbolDataset],
     *,

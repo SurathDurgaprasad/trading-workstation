@@ -92,6 +92,23 @@ multiple-testing discipline) — a genuinely different, independently
 motivated exit design would need its own new hypothesis. Shadow mode
 does not start on the strength of this execution design.
 
+**Same day, one more closed loop: the sector-relative and NIFTY-
+relative score variants (`H_XSECT_003`, INCONCLUSIVE).** Report §10
+step 3's two remaining open items, now both resolved.
+NIFTY-relative turned out **not to be an independent test at all** —
+subtracting the same benchmark value from every symbol on a given date
+cannot change that date's rank order (confirmed both mathematically
+and empirically: byte-identical bucket assignments to the absolute
+version in all three splits) — a useful negative-knowledge finding
+that forecloses re-testing it. Sector-relative (21/32 sector-mapped
+symbols, 6 real NIFTY sector indices) **is** genuinely independent and
+**confirms the pattern**: Q5 sector-relative laggards CI-decisive
+positive in all three splits (dev +2.27%, val +2.21%, oos +0.49% —
+matching the absolute-return oos figure almost exactly). Its own
+executable behavior has explicitly not been tested and is not assumed
+to mirror `H_XSECT_002`'s negative result either way. Full addendum in
+`docs/research/CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §12.
+
 Overnight gap-fade was this project's second-most promising raw finding
 (H_GAP_001/002) and was put through a deep, deliberately adversarial
 validation this segment (H_GAP_003) — cost sensitivity, pre-specified
@@ -154,7 +171,7 @@ Nothing is promoted. Nothing should be traded.
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(36 hypotheses tested to date).
+(37 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -174,7 +191,7 @@ costs, no execution vehicle) — a different way of falling short than
 H_XSECT_001's own gap (a real measurement whose only tested execution
 design failed, rather than one untested).
 
-## INCONCLUSIVE HYPOTHESES (15)
+## INCONCLUSIVE HYPOTHESES (16)
 
 H_ENTRY_003, H_ENTRY_005, H_EXIT_002, H_MEANREV_002, H_CONTEXT_MARKET_002,
 H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_CONTEXT_MARKET_004,
@@ -189,11 +206,13 @@ the ~60-day intraday history limit made every split fundamentally
 underpowered; a mild fade direction echoed gap-fade's own finding but
 never reached decisive significance), H_CALENDAR_001 (the Tuesday
 effect — this project's most statistically robust PURE finding, real
-but not tradeable — see above), and **H_XSECT_001 (cross-sectional
+but not tradeable — see above), **H_XSECT_001 (cross-sectional
 laggard raw measurement — this project's strongest PRICE-BEHAVIOR
 finding, but its only tested execution design failed as H_XSECT_002 —
-see PROMISING HYPOTHESES above)**. Full evidence for each in
-`strategy/hypothesis_registry.py`.
+see PROMISING HYPOTHESES above)**, and **H_XSECT_003 (sector-relative
+score variant — genuinely replicates H_XSECT_001's pattern, CI-decisive
+in all three splits, but its own executable behavior is untested — see
+above)**. Full evidence for each in `strategy/hypothesis_registry.py`.
 
 ## REJECTED HYPOTHESES (20)
 
@@ -356,21 +375,31 @@ an ATR stop mis-calibrated for a reversal signal; see above). This
 closes off "rush straight to shadow mode" but does NOT close off the
 underlying price-behavior finding, which remains real.
 
-The single highest-EV action now is testing the sector-relative and
-NIFTY-relative score variants named in `docs/research/
-CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §10 step 3
-(`stock_return_N - nifty_return_N`, `stock_return_N - sector_return_N`)
-as independent replications of the RAW measurement, not assumed to
-behave identically to the absolute-return version already tested —
-still using `quant_research/cross_sectional.py`'s pure-measurement
-engine (§1-9 stage), before considering any new executable wrapper.
-Separately, and a genuinely different, independently-motivated
-question (not a retry of H_XSECT_002): whether an exit design built
-for mean-reversion's own known dynamics (e.g. a wider stop, or no hard
-stop within the fixed 20-day hold) changes the executable-backtest
-outcome — this would need its own honest pre-registration before any
-code is written, exactly the discipline H_XSECT_002 itself was built
-to test.
+**Also already answered, same session**: do the sector-relative and
+NIFTY-relative score variants replicate independently? NIFTY-relative
+turned out not to be an independent test at all (mathematically and
+empirically identical to the absolute version); sector-relative is
+genuinely independent and DOES replicate the laggard-outperformance
+pattern, CI-decisive in all three splits (H_XSECT_003, INCONCLUSIVE —
+see above). This closes out report §10's entire next-steps list.
+
+The cross-sectional research thread has now reached a natural pause
+point: every pre-specified next step from the original validation
+report is done, and the remaining open question is deliberately NOT
+being pursued casually — whether an exit design built for
+mean-reversion's own known dynamics (e.g. a wider stop, or no hard stop
+within the fixed 20-day hold) changes H_XSECT_002's executable-backtest
+outcome. This needs its own honest, upfront pre-registration (economic
+rationale, fixed parameters, success/failure criteria written BEFORE
+any code runs) exactly the discipline H_XSECT_002 itself was built to
+test — not a quiet retry with looser parameters. Whoever picks this up
+next should write that registration first.
+
+Beyond the cross-sectional thread, the mission's own lower-priority
+Phase 4-9 research families (multi-horizon momentum map, relative-
+strength quality conditions, volatility contraction, breakout quality,
+extreme-move research, interaction research) remain open and untouched
+this segment.
 
 Separately, and lower priority: let the 15 real directional forecasts
 recorded 2026-09-08 (and the 10-11 existing BUY predictions) resolve,

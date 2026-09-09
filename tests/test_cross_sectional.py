@@ -9,6 +9,7 @@ import pytest
 
 from quant_research.cross_sectional import (
     add_lookback_return_columns,
+    attach_relative_score_column,
     rank_cross_sectionally,
     shared_period_boundaries,
 )
@@ -63,6 +64,71 @@ def test_shared_period_boundaries_raises_when_reference_has_no_split():
     dataset.development_end = None
     with pytest.raises(ValueError, match="no development/validation split"):
         shared_period_boundaries({"A": dataset})
+
+
+# --- attach_relative_score_column --------------------------------------------------
+
+
+def test_attach_relative_score_column_subtracts_aligned_external_series():
+    dataset = _dataset("A", [100.0, 110.0, 121.0])
+    dataset.frame["raw_score"] = [0.10, 0.20, 0.30]
+    external = pd.Series([0.02, 0.03, 0.04], index=dataset.frame.index)
+    attach_relative_score_column(
+        {"A": dataset}, raw_score_column="raw_score", external_series_by_key={"BENCHMARK": external},
+        key_for_symbol=lambda symbol: "BENCHMARK", output_column="relative_score",
+    )
+    assert dataset.frame["relative_score"].tolist() == pytest.approx([0.08, 0.17, 0.26])
+
+
+def test_attach_relative_score_column_forward_fills_causally():
+    """The external series has fewer dates than the symbol's own frame
+    (e.g. it starts later, or is sparser) -- values must be forward-
+    filled from the LAST available external value, never interpolated
+    from a future one."""
+    dataset = _dataset("A", [100.0, 100.0, 100.0, 100.0])
+    dataset.frame["raw_score"] = [0.10, 0.10, 0.10, 0.10]
+    sparse_dates = [dataset.frame.index[0], dataset.frame.index[2]]
+    external = pd.Series([0.01, 0.05], index=sparse_dates)
+    attach_relative_score_column(
+        {"A": dataset}, raw_score_column="raw_score", external_series_by_key={"BENCHMARK": external},
+        key_for_symbol=lambda symbol: "BENCHMARK", output_column="relative_score",
+    )
+    # bar 1 has no external value yet at that exact date under reindex -- forward-filled from bar 0's 0.01
+    assert dataset.frame["relative_score"].tolist() == pytest.approx([0.09, 0.09, 0.05, 0.05])
+
+
+def test_attach_relative_score_column_uses_per_symbol_key():
+    """key_for_symbol lets different symbols draw from DIFFERENT
+    external series (e.g. each stock's own sector index) rather than
+    one shared benchmark -- the sector-relative use case."""
+    dataset_a = _dataset("A", [100.0, 100.0])
+    dataset_a.frame["raw_score"] = [0.10, 0.10]
+    dataset_b = _dataset("B", [100.0, 100.0])
+    dataset_b.frame["raw_score"] = [0.10, 0.10]
+    dates = dataset_a.frame.index
+    series_x = pd.Series([0.01, 0.01], index=dates)
+    series_y = pd.Series([0.05, 0.05], index=dates)
+    attach_relative_score_column(
+        {"A": dataset_a, "B": dataset_b}, raw_score_column="raw_score",
+        external_series_by_key={"SECTOR_X": series_x, "SECTOR_Y": series_y},
+        key_for_symbol=lambda symbol: {"A": "SECTOR_X", "B": "SECTOR_Y"}[symbol],
+        output_column="relative_score",
+    )
+    assert dataset_a.frame["relative_score"].iloc[0] == pytest.approx(0.09)
+    assert dataset_b.frame["relative_score"].iloc[0] == pytest.approx(0.05)
+
+
+def test_attach_relative_score_column_never_falls_back_to_raw_score_for_an_unmapped_symbol():
+    """A symbol whose key_for_symbol has no matching external series
+    must get NaN throughout -- never silently reuse the raw score,
+    which would misrepresent an unmeasured relative score as computed."""
+    dataset = _dataset("A", [100.0, 100.0])
+    dataset.frame["raw_score"] = [0.10, 0.10]
+    attach_relative_score_column(
+        {"A": dataset}, raw_score_column="raw_score", external_series_by_key={},
+        key_for_symbol=lambda symbol: None, output_column="relative_score",
+    )
+    assert dataset.frame["relative_score"].isna().all()
 
 
 # --- rank_cross_sectionally --------------------------------------------------

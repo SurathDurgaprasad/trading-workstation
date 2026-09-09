@@ -186,7 +186,7 @@ most rigorously-validated finding in this project's history to date.
    mission's own text also named (`stock_return_N - nifty_return_N`,
    `stock_return_N - sector_return_N`) as independent replications, not
    assumed to behave identically to the absolute-return version tested
-   here. Still open.
+   here. **DONE — see §12 below.**
 
 ## 11. Addendum — the real, cost-aware, risk-sized backtest (`H_XSECT_002`)
 
@@ -252,3 +252,56 @@ workflow's "verify costs" step is exactly where this candidate stopped,
 and honestly reporting a real negative result at that stage — rather
 than retrying with looser risk parameters until something clears the
 gate — is the discipline this whole research program is built on.
+
+## 12. Addendum — sector-relative and NIFTY-relative score variants (`H_XSECT_003`)
+
+Full record: `H_XSECT_003` in `strategy/hypothesis_registry.py`,
+status `INCONCLUSIVE`. Two independently-motivated variants, treated
+as two separate questions since — as the result below shows — they
+turned out not to be equally independent.
+
+**NIFTY-relative — not actually an independent test.** Subtracting
+`^NSEI`'s own trailing-60-day return from every stock's score is a
+uniform per-date shift: every symbol loses (or gains) the identical
+amount on a given date, which cannot change that date's cross-sectional
+rank order. This is a mathematical fact, not an empirical claim — and
+it was confirmed empirically on the real 32-symbol dataset anyway: Q5
+bucket assignments (sample size and mean return, to six decimal places)
+were **byte-identical** to the absolute-return version in all three
+splits. The NIFTY-relative variant will always reproduce §5's result
+exactly (up to `^NSEI`'s own handful of warm-up dates) and does not
+need to be tested again — a useful, if modest, finding in its own
+right, since it forecloses a line of "independent confirmation" that
+was never going to be independent.
+
+**Sector-relative — genuinely independent, and confirms the pattern.**
+Each stock's own NIFTY sector index return is subtracted instead — a
+sector-*group*-specific shift, which can and does reorder the
+cross-section differently. Tested on the 21/32 symbols
+`market_intelligence/nse_sector_map.py`'s `NSE_SECTOR_MAP` covers
+(a real, disclosed universe reduction), against the 6 real sector
+indices those symbols map to, each with a full, verified 10-year Yahoo
+history. Result: Q5 (sector-relative laggards) is **CI-decisive
+positive in all three splits, never reversing** — development n=5,692
++2.265% (CI=[+2.011%,+2.519%]); validation n=1,964 +2.214%
+(CI=[+1.935%,+2.493%]); out-of-sample n=1,920 +0.487%
+(CI=[+0.219%,+0.755%]) — the out-of-sample figure matches §5's
+absolute-return out-of-sample result (+0.4872%) to within 0.0002
+percentage points. Q5 beats Q1 (leaders — CI-decisive only in
+development, not out-of-sample) in every split. This is a real,
+independent replication of the laggard-outperformance direction under
+a materially different score formula and a smaller, differently
+composed universe.
+
+**What this does and does not mean.** Promoted the reusable primitive
+behind both checks into `quant_research/cross_sectional.py` as
+`attach_relative_score_column` (4 new tests), since a single function
+covers both a shared-benchmark and a per-symbol-sector lookup with no
+duplicated logic. Status stays `INCONCLUSIVE` for the same reason
+§9/§11 already gave: this is again a raw measurement, not an
+executable-strategy result. Given §11's own negative result for the
+closely-related absolute-return version's naive stop/target wrapper,
+this sector-relative variant's own executable behavior is **explicitly
+not assumed** to behave any differently — it has not been tested, and
+doing so would need its own new, honestly pre-registered hypothesis,
+not an assumption carried over from a different variant's result.

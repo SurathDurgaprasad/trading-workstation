@@ -1891,4 +1891,72 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "not an executable-strategy claim) and is not itself downgraded by this entry's rejection."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_XSECT_003",
+            description=(
+                "docs/research/CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md S10 step 3: does H_XSECT_001's "
+                "cross-sectional laggard-outperformance finding replicate under SECTOR-relative and NIFTY-"
+                "relative score variants (stock_return_N - sector_return_N, stock_return_N - nifty_return_N), "
+                "not just the absolute trailing-return version already tested -- treated as two SEPARATE "
+                "questions since they are not equally independent (see evidence)."
+            ),
+            rationale=(
+                "The report's own next-steps list explicitly named these as open, 'not assumed to behave "
+                "identically to the absolute-return version tested' -- this entry closes that open item "
+                "honestly, including the case where one variant turns out NOT to be a genuine independent test "
+                "at all (a finding worth recording precisely so it is never mistaken for confirmation evidence "
+                "later)."
+            ),
+            expected_effect="No prior assumption for the sector-relative variant. For the NIFTY-relative variant: expected to be mathematically indistinguishable from the absolute-return version already tested, since subtracting the SAME benchmark value from every symbol on a given date cannot change that date's cross-sectional rank order.",
+            dataset_restrictions="NIFTY-relative: same full 32-symbol universe as H_XSECT_001. Sector-relative: the 21/32-symbol subset market_intelligence.nse_sector_map.NSE_SECTOR_MAP actually covers (a real, disclosed universe-size reduction, not a cherry-picked subset).",
+            experiment_design=(
+                "New module function quant_research.cross_sectional.attach_relative_score_column (4 new tests, "
+                "tests/test_cross_sectional.py) -- a single reusable primitive: raw_score_column minus an "
+                "external series (a benchmark's or a stock's own sector index's own trailing-N-day return, "
+                "causally forward-filled onto the stock's own calendar, the same alignment convention "
+                "quant_research.context_experiments.attach_external_regime already uses for a single shared "
+                "series) keyed per-symbol via key_for_symbol -- covers both the NIFTY case (same key for every "
+                "symbol) and the sector case (market_intelligence.nse_sector_map.sector_for_symbol) with no "
+                "duplicated logic. Sector index price series fetched via market_intelligence.regime."
+                "NIFTY_SECTOR_INDICES's own real, verified Yahoo tickers (^NSEBANK, ^CNXIT, ^CNXAUTO, "
+                "^CNXPHARMA, ^CNXFMCG, NIFTY_FIN_SERVICE.NS -- the 6 sectors NSE_SECTOR_MAP's 21 symbols "
+                "actually belong to), each with a full, real 10-year history (2016-2026, confirmed, not just "
+                "the 2-year window NIFTY_SECTOR_INDICES's own docstring says its OTHER caller needs). Ranked via "
+                "quant_research.cross_sectional.rank_cross_sectionally, reused unchanged, same lookback=60/"
+                "horizon=20/quintile parameters as H_XSECT_001's own strongest configuration -- not re-tuned."
+            ),
+            success_criteria="The sector-relative Q5 (laggards) bucket shows a CI-decisive positive effect, in the same direction, across all three splits, replicating H_XSECT_001 under a genuinely different score formula.",
+            failure_criteria="A split reversal, a non-decisive split, or (for the NIFTY-relative variant specifically) a finding that it is not actually an independent test at all.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "NIFTY-RELATIVE VARIANT -- NOT an independent test, confirmed both mathematically and "
+                "empirically: subtracting NIFTY's own trailing_return_60 (the SAME value for every symbol on a "
+                "given date) from each stock's score is a uniform per-date shift, which cannot change that "
+                "date's cross-sectional rank order. Verified empirically on the real 32-symbol dataset: Q5 "
+                "bucket assignments (sample_size AND mean_return, to 6 decimal places) were BYTE-IDENTICAL to "
+                "the absolute-return version in all three splits (development n=8538 mean=+1.652267% both "
+                "versions; validation n=2946 mean=+2.378327% both; out_of_sample n=2879 mean=+0.487187% both). "
+                "This is now a settled fact, not an open question -- the NIFTY-relative variant will always "
+                "reproduce H_XSECT_001's own absolute-return result exactly (up to NIFTY's own handful of "
+                "warm-up-NaN dates) and does not need to be re-tested again. "
+                "SECTOR-RELATIVE VARIANT -- a genuinely different, independent test (each stock's own sector "
+                "index return is subtracted, a sector-GROUP-specific, not uniform, shift, so this CAN and does "
+                "reorder the cross-section differently from the absolute version). Result: Q5 (sector-relative "
+                "laggards) is CI-decisive POSITIVE in ALL THREE splits, never reversing -- development n=5692 "
+                "+2.265% (CI=[+2.011%,+2.519%]); validation n=1964 +2.214% (CI=[+1.935%,+2.493%]); "
+                "out_of_sample n=1920 +0.487% (CI=[+0.219%,+0.755%]) -- the out-of-sample figure matches "
+                "H_XSECT_001's own absolute-return out-of-sample result (+0.4872%) to within 0.0002 percentage "
+                "points, and Q5 beats Q1 (leaders, only CI-decisive in development and NOT decisive in "
+                "out-of-sample: CI=[-0.187%,+0.383%]) in every split. This is a genuine, independent "
+                "replication of H_XSECT_001's laggard-outperformance direction under a materially different "
+                "score formula and a smaller, differently-composed universe. "
+                "STATUS: INCONCLUSIVE, matching H_XSECT_001's own posture, for the identical reason -- this is "
+                "again a raw price-behavior measurement, not an executable-strategy result. Given H_XSECT_002's "
+                "own NEGATIVE result for the closely-related absolute-return version's naive stop/target "
+                "wrapper, this sector-relative variant's own executable behavior is explicitly NOT assumed to "
+                "be positive just because H_XSECT_002 exists or because this measurement is decisive -- it has "
+                "not been tested, and doing so (if ever pursued) would need to be its own new, honestly "
+                "pre-registered hypothesis, not an assumption carried over from a different variant's result."
+            ),
+        ),
     )
