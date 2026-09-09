@@ -2474,4 +2474,99 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "docs/research/H_MEANREV_004_EXECUTABLE_REGIME_GATED_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_EXIT_005",
+            description=(
+                "Is there a structurally different exit architecture -- not a stop-width retune -- that lets "
+                "H_MEANREV_003's TRENDING_UP-gated oversold entry survive execution, after H_XSECT_002 and "
+                "H_MEANREV_004 both failed via the same trend-continuation-calibrated STOP-domination mechanism? "
+                "Tests mean-reversion-completion: exit when zscore_close_20 recovers to >= 0.0 (price back at "
+                "its own trailing mean, the literal completion of the entry's own thesis) or a 20-bar safety "
+                "cap, in place of the project's frozen ATR stop/target. Pre-registered BEFORE any experiment "
+                "code ran: docs/research/H_EXIT_005_MEAN_REVERSION_COMPLETION_PREREGISTRATION.md, committed as "
+                "its own commit prior to any implementation."
+            ),
+            rationale=(
+                "H_XSECT_004 already falsified the naive 'just widen/remove the stop' interpretation for a "
+                "related signal (both variants performed worse). This entry tests the mission's own reframed "
+                "question: not a parameter search, but whether a genuinely different exit TRIGGER TYPE -- one "
+                "that reads the reversal thesis's own defining metric directly, rather than an ATR-based price "
+                "distance borrowed from TrendMomentumBaseline's trend-continuation logic -- changes the outcome. "
+                "A verified architecture audit (reading backtesting/execution.py, risk/engine.py, backtesting/"
+                "exit_experiments.py directly, not inferring from filenames) confirmed this project's only exit "
+                "mechanisms are price-stop/price-target (always checked first) and a time-cap fallback, all "
+                "designed for trend-continuation and reused unchanged by every reversal candidate so far; a "
+                "registry search confirmed signal-decay, mean-reversion-completion, regime-invalidation, and "
+                "opposite-signal exits were all genuinely untested (H_EXIT_001-004 all scoped to the baseline "
+                "trend signal). Mean-reversion-completion was selected over regime-invalidation as the more "
+                "fundamental question -- a property of the core oversold thesis itself, not a secondary "
+                "conditioning layer."
+            ),
+            expected_effect="No prior assumption stronger than the working hypothesis on record from H_MEANREV_004's own entry -- that removing the STOP-domination mechanism might rescue the signal.",
+            dataset_restrictions="Same original 32-symbol NSE universe as H_MEANREV_003/004 -- explicitly NOT the 208-symbol expansion (H_XSECT_006 already showed universe expansion can reverse an apparent edge; a separate, later question).",
+            experiment_design=(
+                "New ExitReason.MEAN_REVERSION_COMPLETE (backtesting/trade.py), matching the exact precedent "
+                "H_EXIT_002/H_EXIT_003 already established (each adding its own reason code for an isolated, "
+                "self-contained runner). New MeanReversionSignalStrategy.stop_atr_multiplier override (mirrors "
+                "quant_research.cross_sectional_strategy.CrossSectionalLaggardStrategy's own identical "
+                "parameter) sets a deliberately wide (20x ATR -- H_XSECT_004's own established 'no_stop' value, "
+                "reused verbatim, not a new number), practically unreachable stop/target, satisfying "
+                "RiskEngine's structural requirement for a valid stop without letting it dominate exits -- the "
+                "same technique H_XSECT_005 already used. New run_universe_mean_reversion_completion_exit_"
+                "experiment: a FULLY INDEPENDENT, self-contained bar-processing loop (the same isolation "
+                "posture backtesting/exit_experiments.py's own module docstring establishes for H_EXIT_001-004 "
+                "-- never injecting into or modifying backtesting/engine.py's run_backtest() or backtesting/"
+                "execution.py's shared check_exit()/OpenPosition/close_trade). Exit priority, extracted as the "
+                "pure, directly-unit-tested decide_completion_exit(): (1) check_exit() -- the wide stop/target, "
+                "still honestly recorded if it somehow fires; (2) zscore_close_20 >= 0.0; (3) "
+                "backtesting.exit_experiments.DEFAULT_MAX_HOLDING_BARS (=20, reused verbatim). Same entry "
+                "candidates as H_MEANREV_004 (REGIME_GATED_CANDIDATES, TRENDING_UP-gated), same CostModel."
+                "india_nse_intraday_2026(), same promotion_gate verdict. 11 new tests -- including one real bug "
+                "found and fixed before the real run: bar.get() on a genuinely missing column returns None, not "
+                "NaN, which the original NaN-only equality check missed (None == None is True in Python)."
+            ),
+            success_criteria="At least one candidate reaches PROMOTED (all three splits confident POSITIVE_PERFORMANCE) via evaluate_promotion.",
+            failure_criteria="Neither candidate reaches a positive verdict in all three splits.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REAL BACKTEST RESULT (32/32 symbols built, 10y, cost-aware, both frozen candidates, no "
+                "parameter search): Candidate A (-2.0std) development n=129 win_rate=3.9% mean=-6.11% "
+                "(CI=[-7.09%,-5.14%], NEGATIVE_PERFORMANCE); validation n=49 win_rate=10.2% mean=-3.82% "
+                "(CI=[-4.93%,-2.72%], NEGATIVE_PERFORMANCE); out_of_sample n=54 win_rate=24.1% mean=-3.52% "
+                "(CI=[-4.81%,-2.22%], NEGATIVE_PERFORMANCE). Candidate B (-1.5std) development n=157 "
+                "win_rate=7.6% mean=-5.63% (CI=[-6.51%,-4.75%]); validation n=79 win_rate=7.6% mean=-4.33% "
+                "(CI=[-5.33%,-3.34%]); out_of_sample n=72 win_rate=16.7% mean=-3.68% (CI=[-4.68%,-2.67%]) -- ALL "
+                "NEGATIVE_PERFORMANCE. evaluate_promotion overall verdict: NEGATIVE for BOTH candidates -- every "
+                "one of six splits is individually CI-decisive negative, a STRONGER rejection than H_MEANREV_"
+                "004's own STATISTICALLY_MEANINGLESS (CI-straddles-zero) result. "
+                "MECHANISM -- a genuine, previously-unconsidered structural flaw, not merely 'no stop is bad' "
+                "repeated: exit-reason counts show MEAN_REVERSION_COMPLETE is the MAJORITY exit reason in every "
+                "split (e.g. Candidate A development: 99 of 129 trades, 77%) -- most trades DO eventually see "
+                "zscore_close_20 recover to >=0.0. Yet win rates are catastrophically low (3.9%-24.1%). "
+                "Explanation: the moving average itself is not a fixed target -- zscore_close_20 measures "
+                "deviation from the TRAILING 20-bar mean, and during a genuine, ongoing decline that mean is "
+                "itself falling alongside price. 'Price has returned to its own trailing mean' is satisfied "
+                "long before 'price has returned to (or above) the entry price' in exactly the cases where the "
+                "entry caught a real, sustained decline rather than a temporary dip -- the exit fires, but on a "
+                "trade that is still underwater, sometimes deeply. This is a DIFFERENT and arguably more "
+                "fundamental problem than H_XSECT_002/H_MEANREV_004's own STOP-domination story: not that a "
+                "mismatched stop cuts winners short, but that the exit CONDITION ITSELF does not imply "
+                "profitability for the entry it was paired with. The minority hitting the 20-bar EXPIRED cap "
+                "instead (23-27% of trades) compound this: with no real stop, a position that never reverts at "
+                "all rides the full decline until forced closed. "
+                "CONCLUSION: this directly falsifies the implicit working hypothesis carried over from "
+                "H_MEANREV_004 that the STOP was the primary obstacle -- removing it entirely produced a WORSE "
+                "result, not better. The real obstacle is more fundamental: a meaningful fraction of 'oversold' "
+                "entries are not temporary dips at all, and no exit rule defined purely in terms of price "
+                "recovering to a MOVING reference point can distinguish genuine reversion from 'the reference "
+                "point declined to meet a still-falling price' after the fact. REJECTED, clean and decisive, "
+                "without ambiguity. Per the pre-registration's own frozen discipline, no retuning of the 0.0 "
+                "threshold or the 20-bar cap follows. Regime-invalidation exit (exit when TRENDING_UP ends) "
+                "remains the next explicitly-named candidate if this line is pursued further, but is NOT "
+                "assumed more promising by default -- any future exit-design hypothesis on this signal should "
+                "specifically check whether its own exit condition can fire on a still-net-unprofitable trade, "
+                "the key lesson this entry surfaces. Full writeup in docs/research/"
+                "H_EXIT_005_MEAN_REVERSION_COMPLETION_PREREGISTRATION.md."
+            ),
+        ),
     )

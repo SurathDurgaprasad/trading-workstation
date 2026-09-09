@@ -12,8 +12,11 @@ from quant_research.mean_reversion_signal import (
     REGIME_GATED_CANDIDATES,
     MeanReversionSignalStrategy,
     add_mean_reversion_columns,
+    decide_completion_exit,
 )
-from strategy.signal import ReasonCode
+from backtesting.execution import OpenPosition
+from backtesting.trade import ExitReason
+from strategy.signal import ReasonCode, Side, Signal
 
 
 def _ohlcv(n, seed_close=100.0, dip_at=None):
@@ -302,3 +305,140 @@ def test_run_universe_regime_gated_mean_reversion_experiment_raises_if_benchmark
 
     with pytest.raises(ValueError, match="benchmark"):
         run_universe_regime_gated_mean_reversion_experiment(["AAA"], initial_capital=100_000.0)
+
+
+# --- H_EXIT_005: mean-reversion-completion exit ---------------------------------
+
+
+def _open_position(stop_price=1.0, target_price=100_000.0):
+    """A deliberately wide stop/target (matching H_EXIT_005's own
+    frozen design) -- structurally valid for RiskEngine, but not meant
+    to be the thing that actually decides an exit in these tests."""
+    signal = Signal(
+        symbol="TEST", generated_at=pd.Timestamp("2024-01-01"), side=Side.LONG,
+        reference_price=100.0, stop_price=stop_price, target_price=target_price,
+        risk_reward=2.0, strategy_name="test", reason_codes=[ReasonCode.MEAN_REVERSION_OVERSOLD],
+    )
+    return OpenPosition(signal=signal, entry_time=pd.Timestamp("2024-01-02"), entry_price=100.0, quantity=10, stop_price=stop_price, target_price=target_price)
+
+
+def _bar(close, zscore=None, high=None, low=None):
+    high = high if high is not None else close + 1.0
+    low = low if low is not None else close - 1.0
+    row = {"close": close, "high": high, "low": low}
+    if zscore is not None:
+        row["zscore_close_20"] = zscore
+    return pd.Series(row)
+
+
+def test_decide_completion_exit_fires_on_reversion_complete():
+    position = _open_position()
+    bar = _bar(close=100.0, zscore=0.0)
+    outcome = decide_completion_exit(position, bar, bars_held=3, max_holding_bars=20)
+    assert outcome == (100.0, ExitReason.MEAN_REVERSION_COMPLETE)
+
+
+def test_decide_completion_exit_fires_on_zscore_above_zero_too():
+    position = _open_position()
+    bar = _bar(close=105.0, zscore=0.42)
+    outcome = decide_completion_exit(position, bar, bars_held=3, max_holding_bars=20)
+    assert outcome == (105.0, ExitReason.MEAN_REVERSION_COMPLETE)
+
+
+def test_decide_completion_exit_does_not_fire_while_still_oversold():
+    position = _open_position()
+    bar = _bar(close=95.0, zscore=-1.2)
+    outcome = decide_completion_exit(position, bar, bars_held=3, max_holding_bars=20)
+    assert outcome is None
+
+
+def test_decide_completion_exit_never_fires_on_missing_zscore():
+    """A row with no zscore_close_20 at all (e.g. still in warm-up) must
+    never satisfy the completion condition -- NaN/missing must never be
+    silently treated as 'reverted.'"""
+    position = _open_position()
+    bar = _bar(close=95.0, zscore=None)
+    outcome = decide_completion_exit(position, bar, bars_held=3, max_holding_bars=20)
+    assert outcome is None
+
+
+def test_decide_completion_exit_falls_back_to_time_cap():
+    position = _open_position()
+    bar = _bar(close=95.0, zscore=-1.2)  # still oversold, no completion
+    outcome = decide_completion_exit(position, bar, bars_held=20, max_holding_bars=20)
+    assert outcome == (95.0, ExitReason.EXPIRED)
+
+
+def test_decide_completion_exit_does_not_expire_one_bar_early():
+    position = _open_position()
+    bar = _bar(close=95.0, zscore=-1.2)
+    outcome = decide_completion_exit(position, bar, bars_held=19, max_holding_bars=20)
+    assert outcome is None
+
+
+def test_decide_completion_exit_price_stop_still_takes_priority():
+    """The deliberately wide stop is practically unreachable in real
+    data, but if the caller passes a genuinely reachable one, check_exit
+    must still take priority over the new completion condition -- never
+    silently absorbed into MEAN_REVERSION_COMPLETE."""
+    position = _open_position(stop_price=94.0)
+    bar = _bar(close=95.0, zscore=0.5, low=93.0)  # low breaches the stop AND zscore says "reverted"
+    outcome = decide_completion_exit(position, bar, bars_held=3, max_holding_bars=20)
+    assert outcome == (94.0, ExitReason.STOP)
+
+
+def test_decide_completion_exit_price_target_still_takes_priority():
+    position = _open_position(target_price=106.0)
+    bar = _bar(close=95.0, zscore=0.5, high=107.0)  # high breaches the target AND zscore says "reverted"
+    outcome = decide_completion_exit(position, bar, bars_held=3, max_holding_bars=20)
+    assert outcome == (106.0, ExitReason.TARGET)
+
+
+def test_run_universe_mean_reversion_completion_exit_experiment_pools_across_symbols_and_candidates(_fake_mean_reversion_universe_provider):
+    _fake_mean_reversion_universe_provider({"AAA", "BBB", "^NSEI"})
+
+    from quant_research.mean_reversion_signal import (
+        UniverseMeanReversionCompletionExitExperimentResult,
+        run_universe_mean_reversion_completion_exit_experiment,
+    )
+
+    result = run_universe_mean_reversion_completion_exit_experiment(["AAA", "BBB"], initial_capital=100_000.0)
+
+    assert isinstance(result, UniverseMeanReversionCompletionExitExperimentResult)
+    assert result.failed_symbols == {}
+    assert set(result.development_trades) == set(REGIME_GATED_CANDIDATES)
+    assert set(result.validation_trades) == set(REGIME_GATED_CANDIDATES)
+    assert set(result.out_of_sample_trades) == set(REGIME_GATED_CANDIDATES)
+
+
+def test_run_universe_mean_reversion_completion_exit_experiment_isolates_a_failing_symbol(_fake_mean_reversion_universe_provider):
+    _fake_mean_reversion_universe_provider({"AAA", "^NSEI"})
+
+    from quant_research.mean_reversion_signal import run_universe_mean_reversion_completion_exit_experiment
+
+    result = run_universe_mean_reversion_completion_exit_experiment(["AAA", "BADSYMBOL"], initial_capital=100_000.0)
+
+    assert "BADSYMBOL" in result.failed_symbols
+    assert "AAA" not in result.failed_symbols
+
+
+def test_run_universe_mean_reversion_completion_exit_experiment_exit_reasons_are_never_stop_or_target(_fake_mean_reversion_universe_provider):
+    """With the deliberately wide stop/target this hypothesis freezes,
+    no real trade should ever exit via STOP or TARGET in practice --
+    only MEAN_REVERSION_COMPLETE or EXPIRED (or END_OF_DATA at the very
+    end of a slice). A STOP/TARGET exit appearing here would mean the
+    wide-multiplier override isn't actually being applied."""
+    _fake_mean_reversion_universe_provider({"AAA", "^NSEI"})
+
+    from quant_research.mean_reversion_signal import run_universe_mean_reversion_completion_exit_experiment
+
+    result = run_universe_mean_reversion_completion_exit_experiment(["AAA"], initial_capital=100_000.0)
+
+    all_trades = [
+        t
+        for bucket in (result.development_trades, result.validation_trades, result.out_of_sample_trades)
+        for trades in bucket.values()
+        for t in trades
+    ]
+    reasons = {t.exit_reason for t in all_trades}
+    assert reasons <= {ExitReason.MEAN_REVERSION_COMPLETE, ExitReason.EXPIRED, ExitReason.END_OF_DATA}

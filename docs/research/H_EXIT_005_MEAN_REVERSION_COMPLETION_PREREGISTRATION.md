@@ -177,9 +177,74 @@ separately-motivated hypothesis (e.g. regime-invalidation exit,
 explicitly named in §4 as the next candidate) — not a retry of this
 one with adjusted numbers.
 
-## 11. Reproducibility record (filled in at execution time)
+## 11. Reproducibility record
 
-To be completed after the experiment runs: exact trade counts per
-split per candidate, exit-reason breakdown (compared against
-`H_XSECT_002`/`H_MEANREV_004`'s own STOP-dominated breakdowns), and the
-promotion-gate verdict.
+- Universe: `ORIGINAL_32_NSE_UNIVERSE`, all 32 built successfully (`failed_symbols: {}`).
+- Benchmark: `^NSEI`, `period="10y"`.
+- Cost model: `CostModel.india_nse_intraday_2026()`.
+- New code: `backtesting/trade.py`'s `ExitReason.MEAN_REVERSION_COMPLETE`; `quant_research/mean_reversion_signal.py`'s `MeanReversionSignalStrategy.__init__`'s new `stop_atr_multiplier` override, `decide_completion_exit` (pure, extracted), `DEFAULT_WIDE_STOP_ATR_MULTIPLIER=20.0`, `UniverseMeanReversionCompletionExitExperimentResult`, `run_universe_mean_reversion_completion_exit_experiment` — an isolated, self-contained bar-processing loop (never modifying `backtesting/execution.py`'s shared `check_exit`/`OpenPosition`/`close_trade`, the exact isolation posture `backtesting/exit_experiments.py`'s own module docstring establishes for `H_EXIT_001`-`004`). 11 new tests found and fixed one real bug before the real run: `bar.get()` on a genuinely missing column returns `None`, not NaN — the original NaN-only check (`zscore == zscore`) missed this, since `None == None` is `True` in Python. Fixed with an explicit `pd.notna()` check.
+
+## 12. Results — NEGATIVE (a clean, decisive, mechanistically-understood rejection)
+
+Full evidence: `H_EXIT_005` in `strategy/hypothesis_registry.py`.
+
+| Candidate | Split | n | Win rate | Mean return | 95% CI |
+|---|---|---|---|---|---|
+| A (−2.0σ) | development | 129 | 3.9% | **-6.11%** | [-7.09%,-5.14%] |
+| A | validation | 49 | 10.2% | **-3.82%** | [-4.93%,-2.72%] |
+| A | out-of-sample | 54 | 24.1% | **-3.52%** | [-4.81%,-2.22%] |
+| B (−1.5σ) | development | 157 | 7.6% | **-5.63%** | [-6.51%,-4.75%] |
+| B | validation | 79 | 7.6% | **-4.33%** | [-5.33%,-3.34%] |
+| B | out-of-sample | 72 | 16.7% | **-3.68%** | [-4.68%,-2.67%] |
+
+`evaluate_promotion` overall verdict: **`NEGATIVE`** for both
+candidates — every single one of six splits is individually
+CI-decisive negative (not merely non-decisive, unlike `H_MEANREV_004`'s
+own `STATISTICALLY_MEANINGLESS` result). This is a **stronger**
+negative than the stop/target design it replaced.
+
+**Mechanism — a genuine, previously-unconsidered structural flaw in
+"exit at reversion completion," not merely "no stop is bad" repeated**:
+exit-reason counts show `MEAN_REVERSION_COMPLETE` is the *majority*
+exit reason in every split (e.g. Candidate A development: 99 of 129
+trades, 77%) — most trades DO eventually see `zscore_close_20` recover
+to ≥0.0. Yet win rates are catastrophically low (3.9%-24.1%). The
+explanation: **the moving average itself is not a fixed target**.
+`zscore_close_20` measures deviation from the trailing 20-bar mean, and
+during a genuine, ongoing decline that mean is *itself falling*
+alongside price. "Price has returned to its own trailing mean" is
+therefore satisfied long before "price has returned to (or above) the
+entry price" in exactly the cases where the entry caught a real,
+sustained decline rather than a temporary dip — the exit fires, but on
+a trade that is still underwater, sometimes deeply. This is a different
+and arguably more fundamental problem than `H_XSECT_002`/`H_MEANREV_004`'s
+own STOP-domination story: it is not that a mismatched stop cuts
+winners short, but that the chosen exit *condition itself* does not
+imply profitability for the entry it was paired with. The minority of
+trades that hit the 20-bar `EXPIRED` cap instead (23-27% of trades)
+compound this: with no real stop, a position that never reverts at all
+rides the full decline until forced closed, producing the large losses
+visible in the low win rates.
+
+**Comparison with parent hypotheses**: `H_XSECT_002`/`H_MEANREV_004`
+were held back by STOP exits cutting positions short before a real
+reversion could complete. This entry removed that constraint entirely
+and got a *worse* result, not a better one — directly falsifying the
+implicit assumption (carried over from this project's own working
+hypothesis after `H_MEANREV_004`) that the stop was the primary
+obstacle. The real obstacle is more fundamental: a meaningful fraction
+of "oversold" entries are not temporary dips at all, and no exit rule
+defined purely in terms of price recovering to a *moving* reference
+point can distinguish "reverted" from "the reference point declined to
+meet a still-falling price" after the fact.
+
+**Verdict: REJECTED (`NEGATIVE`)** — clean, decisive, without
+ambiguity. Per §10's own frozen discipline, no further retuning of the
+`0.0` threshold or the 20-bar cap follows from this result. Per §4, the
+next candidate this analysis explicitly names — regime-invalidation
+exit (exit when `TRENDING_UP` ends) — remains open but is **not**
+assumed more promising by default; if pursued, it would need its own
+fresh pre-registration, informed by this entry's own key lesson: any
+exit condition tested on a reversal signal should be checked for
+whether it can fire on a trade that is still net-unprofitable, not just
+for whether it eventually fires at all.

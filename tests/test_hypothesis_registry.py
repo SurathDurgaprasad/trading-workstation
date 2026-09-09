@@ -198,13 +198,17 @@ def test_h_entry_004_is_rejected_with_the_real_dev_val_oos_evidence():
 
 
 def test_all_exit_hypotheses_have_now_been_implemented_and_tested():
-    """H_EXIT_001 through H_EXIT_004 have all been implemented and run
-    against the real 41-symbol universe this session (see the dedicated
-    tests below) -- none remain OPEN."""
+    """H_EXIT_001 through H_EXIT_004 (the original TrendMomentumBaseline
+    exit-mechanism sweep) and H_EXIT_005 (mean-reversion-completion, the
+    first exit hypothesis scoped to a reversal signal instead of the
+    baseline) have all been implemented and run against real data --
+    none remain OPEN. The count is expected to keep growing as new exit
+    hypotheses are honestly registered; this assertion's own purpose is
+    the OPEN-status guarantee below, not a fixed total."""
     registry = build_hypothesis_registry()
     exit_hypotheses = [h for h in registry if h.hypothesis_id.startswith("H_EXIT_")]
 
-    assert len(exit_hypotheses) == 4
+    assert len(exit_hypotheses) == 5
     assert all(h.status != HypothesisStatus.OPEN for h in exit_hypotheses)
 
 

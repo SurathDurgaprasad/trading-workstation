@@ -350,37 +350,71 @@ standing observation rather than re-litigating per-signal. Full
 writeup in `docs/research/
 H_MEANREV_004_EXECUTABLE_REGIME_GATED_PREREGISTRATION.md`.
 
+**New mission ("CONTINUE BUILDING THE REAL PROFIT-SEEKING INDIAN NSE
+TRADING BRAIN"): is there a structurally different exit architecture —
+not a stop-width retune — that rescues the signal? No — `H_EXIT_005`,
+REJECTED, and more decisively than the stop-based design it replaced.**
+An architecture audit (reading `backtesting/execution.py`,
+`risk/engine.py`, `backtesting/exit_experiments.py` directly, not
+inferring from filenames) confirmed the project's only exit mechanisms
+are price-stop/price-target and a time-cap fallback, all built for
+trend-continuation and reused unchanged by every reversal candidate so
+far. A registry search confirmed mean-reversion-completion,
+regime-invalidation, signal-decay, and opposite-signal exits were all
+genuinely untested. Selected mean-reversion-completion (exit when
+`zscore_close_20` recovers to ≥0.0 — price back at its own trailing
+mean, the literal completion of the entry's own thesis — or a 20-bar
+safety cap) as the more fundamental question, pre-registered before any
+code ran. **Result: `evaluate_promotion` returns NEGATIVE for both
+candidates — every one of six splits is individually CI-decisive
+negative** (win rates as low as 3.9%, mean returns -3.5% to -6.1% per
+trade) — a *stronger* rejection than `H_MEANREV_004`'s own
+`STATISTICALLY_MEANINGLESS` result. The mechanism is genuinely new, not
+a repeat of the STOP-domination story: `MEAN_REVERSION_COMPLETE` is the
+*majority* exit reason (77% of trades in one split) — most trades DO
+see the zscore recover — yet win rates stay catastrophically low,
+because **the moving average itself declines during a genuine
+downtrend**, so "price returned to its own trailing mean" is satisfied
+long before "price returned to (or above) entry" whenever the entry
+caught a real, sustained decline rather than a temporary dip. This
+directly falsifies the working hypothesis (carried over from
+`H_MEANREV_004`) that the stop itself was the primary obstacle —
+removing it made things worse, not better. Full writeup in
+`docs/research/H_EXIT_005_MEAN_REVERSION_COMPLETION_PREREGISTRATION.md`.
+
 Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(43 hypotheses tested to date).
+(44 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
 None FORMALLY carry that status in the registry yet (this project's own
 `HypothesisStatus` enum doesn't have a PROMISING tier), and **there is
-currently no standing "closest candidate"** — the two leading raw
-findings this project has produced (`H_XSECT_001`'s cross-sectional
-laggard effect and `H_MEANREV_003`'s regime-conditioned mean reversion)
-have BOTH now independently hit the same wall when converted into a
-real trade: `H_XSECT_002` and `H_MEANREV_004` each failed for the same
-mechanistic reason (STOP exits dominating 55-65%+ of trades, this
-project's frozen ATR stop — calibrated for trend-*continuation* — very
-plausibly clipping a reversal-type entry before it can complete).
-**This is now the single most important standing finding about this
-project's own architecture**: two structurally unrelated signals,
-tested months apart with completely independent methodology, failed
-their executable conversion via the identical mechanism. `H_MEANREV_003`
-remains, by a real margin, the cleanest RAW finding in this registry
-(CI-decisive positive in all three splits, both candidates, every
-horizon, no sign reversal, broad, cost-margin-surviving, non-decaying —
-see CURRENT ACTIVE EDGE STATUS above) — but "cleanest raw measurement"
-and "closest to a tradeable strategy" are no longer the same claim in
-this project's own history. See CURRENT ACTIVE EDGE STATUS above for
-the full story on `H_XSECT_001`/`002`/`005`/`006` and `H_MEANREV_003`/
-`004`.
+currently no standing "closest candidate"** — the underlying question
+has moved from "which signal is closest to tradeable" to "does this
+project's own exit-mechanics research have a viable direction left at
+all," and the honest current answer is: not yet a validated one.
+`H_XSECT_002`/`H_MEANREV_004` failed via STOP-domination (a trend-
+continuation-calibrated ATR stop clipping a reversal signal); `H_EXIT_
+005` then tested a genuinely different, thesis-based exit (mean-
+reversion-completion) and failed **more decisively**, revealing a
+deeper mechanistic problem — a moving-average-based exit condition can
+be satisfied by the *average declining to meet the price*, not just by
+the price genuinely recovering, so it does not imply profitability the
+way it appears to. `H_MEANREV_003` remains, by a real margin, the
+cleanest RAW finding in this registry (CI-decisive positive in all
+three splits, both candidates, every horizon, no sign reversal, broad,
+cost-margin-surviving, non-decaying — see CURRENT ACTIVE EDGE STATUS
+above) — but three consecutive executable-conversion attempts
+(`H_XSECT_002`, `H_MEANREV_004`, `H_EXIT_005`) have now failed for two
+genuinely different reasons, and "cleanest raw measurement" is
+increasingly distant from "closest to a tradeable strategy" in this
+project's own history. See CURRENT ACTIVE EDGE STATUS above for the
+full story on `H_XSECT_001`/`002`/`005`/`006`, `H_MEANREV_003`/`004`,
+and `H_EXIT_005`.
 
 ## INCONCLUSIVE HYPOTHESES (18)
 
@@ -412,7 +446,7 @@ executable conversion failed as H_MEANREV_004 — see PROMISING
 HYPOTHESES and REJECTED HYPOTHESES above)**. Full evidence for each in
 `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (24)
+## REJECTED HYPOTHESES (25)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
@@ -440,14 +474,19 @@ criteria — see above), H_VOL_001 (volatility contraction — does a LOW
 volatility regime beat the baseline forward return? Reverses direction
 in validation versus development/out-of-sample, and the effect where
 favorable is small and decaying — a real, pure-measurement test reusing
-entirely existing infrastructure, no new module needed), and
-**H_MEANREV_004 (the real, cost-aware, risk-sized backtest of
-H_MEANREV_003's own TRENDING_UP-gated finding — every split for both
-candidates shows a CI straddling zero, driven by the SAME STOP-exit
-mechanism H_XSECT_002 already found for an unrelated signal; per the
-pre-registration's own frozen discipline, no stop retuning follows —
-see PROMISING HYPOTHESES above)**. Full evidence for each in
-`strategy/hypothesis_registry.py`.
+entirely existing infrastructure, no new module needed), H_MEANREV_004
+(the real, cost-aware, risk-sized backtest of H_MEANREV_003's own
+TRENDING_UP-gated finding — every split for both candidates shows a CI
+straddling zero, driven by the SAME STOP-exit mechanism H_XSECT_002
+already found for an unrelated signal; per the pre-registration's own
+frozen discipline, no stop retuning follows — see PROMISING HYPOTHESES
+above), and **H_EXIT_005 (mean-reversion-completion exit — a
+structurally different, thesis-based exit design, not a stop retune —
+failed MORE decisively than H_MEANREV_004: every one of six splits is
+CI-decisive negative, because a moving-average-based exit condition
+can be satisfied by the average declining to meet the price rather
+than genuine recovery; see PROMISING HYPOTHESES above)**. Full evidence
+for each in `strategy/hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
 "entry timing underperforms random" — confirmatory, not an edge.)
@@ -613,64 +652,78 @@ rebuilt, this segment.
     `STOP_ATR_MULTIPLIER`/`TARGET_RISK_REWARD`, built for
     trend-*continuation*) may be structurally unsuited to every
     reversal-type signal this project discovers, not just one.**
-    `H_XSECT_002` and `H_MEANREV_004` — two structurally unrelated
-    signals — both failed their executable conversion via the same
-    STOP-exit-domination mechanism. This is now the single most
-    important standing architectural question for this research
-    program: is there a genuinely different, honestly pre-registered
-    exit design (not a retuning of the same stop) that could let a real
-    reversal signal survive execution at all? `H_XSECT_004` already
-    showed a naive wider/absent stop makes things worse, not better —
-    the answer, if one exists, is not a simple parameter change.
+    Partially answered, and the answer is more sobering than hoped:
+    `H_EXIT_005` tried a genuinely different, thesis-based exit design
+    (not a stop retune) and it failed *more* decisively than the
+    stop-based one it replaced. Removing the stop is not the fix — see
+    item 11 below for why.
+11. **A moving-average-based exit condition does not imply
+    profitability, even when it fires as intended.** `H_EXIT_005`'s
+    own key lesson, worth carrying into any future exit-design
+    hypothesis on a reversal signal: `zscore_close_20 >= 0.0` was the
+    *majority* exit reason (most trades DID see the zscore recover) yet
+    win rates were catastrophically low (3.9%-24.1%), because the
+    trailing mean used as the reversion target is itself declining
+    during a genuine downtrend — "price returned to its own mean" can
+    be satisfied by the mean falling to meet a still-falling price, not
+    by genuine recovery. Any future exit condition tested on this
+    signal family should be checked for whether it can fire on a
+    trade that is still net-unprofitable, not just for whether it
+    eventually fires at all.
 
 ## NEXT HIGHEST-VALUE RESEARCH QUESTION
 
-**Current answer**: does `H_MEANREV_003`'s raw finding survive becoming
-a real, cost-aware trade? **No — `H_MEANREV_004`, REJECTED, via the
-same STOP-exit mechanism `H_XSECT_002` already found for an unrelated
-signal.** Both leading research threads this project has produced
-(`H_XSECT_001`→`H_XSECT_002`, `H_MEANREV_003`→`H_MEANREV_004`) have now
-independently failed the identical conversion step. See CURRENT ACTIVE
-EDGE STATUS and BIGGEST RISKS item 10 above for the full story — this
-is now a standing architectural question, not a per-signal one.
+**Current answer**: is there a structurally different exit architecture
+that rescues the reversal-signal thread? **Tried — `H_EXIT_005`,
+REJECTED, more decisively than the stop-based design it replaced.** A
+verified architecture audit and registry search selected mean-
+reversion-completion (exit at `zscore_close_20 >= 0.0`) as the most
+fundamental untested exit concept; it produced CI-decisive negative
+results in all six splits, revealing a genuinely new mechanistic
+problem (a moving-average-based exit can be satisfied without genuine
+recovery — see BIGGEST RISKS item 11 above). This closes off "just
+change the exit mechanism" as a simple fix — three consecutive
+executable-conversion attempts (`H_XSECT_002`, `H_MEANREV_004`,
+`H_EXIT_005`) have now failed for two distinct, non-overlapping
+reasons.
 
-**The single highest-EV question this project now has** is item 10
-above: is there a genuinely different, honestly pre-registered exit
-design that would let ANY reversal-type signal survive execution in
-this project's own backtesting engine, or is the frozen ATR-stop/
-fixed-R:R-target mechanic structurally incompatible with reversal
-signals as a category (as opposed to the trend-continuation signals
-`strategy.baseline` was actually designed for)? This is explicitly
-**not** a stop-width retuning exercise — `H_XSECT_004` already showed
-that direction (wider/absent stop) makes things worse, not better, for
-one signal. A genuinely different design (e.g., an exit rule with no
-hard stop-loss at all within a short, fixed holding period but a
-different risk-control mechanism, or a stop sized from the SIGNAL's own
-economics rather than borrowed from `TrendMomentumBaseline`) would need
-its own careful, honestly pre-registered hypothesis — not assumed to
-work, and not chased reflexively after two rejections in a row.
+**What remains, if this thread is pursued further (not assumed
+worthwhile by default)**: regime-invalidation exit (exit when
+`TRENDING_UP` ends), explicitly named in `H_EXIT_005`'s own pre-
+registration as the next candidate — but per that entry's own key
+lesson, any new exit hypothesis on this signal family should first be
+checked for whether its own condition can fire on a still-net-
+unprofitable trade, not just for whether it fires at all. This would
+need its own fresh pre-registration, not a reflexive follow-up.
+
+**Three consecutive rejections is a real signal, not just bad luck.**
+Per this project's own discipline against chasing a dying lead: the
+single highest-EV action now is probably *not* a fourth exit-design
+attempt on the same signal family. The mission's own research-family
+audit (multi-horizon momentum, extreme-move research, market
+microstructure) and this project's own accumulating evidence base (`data/predictions.db`,
+`data/direction_forecasts.db`, still effectively unresolved) are the
+more promising places to look next.
 
 **Two closed-out threads, both at genuine natural stopping points**:
-the cross-sectional (`H_XSECT`) thread (two REJECTED in a row, one
-closed variant, one underpowered-but-real result) and now the
-regime-conditioned mean-reversion thread as well (`H_MEANREV_003`
-INCONCLUSIVE raw finding, `H_MEANREV_004` REJECTED executable
-conversion). Universe-generalization for `H_MEANREV_003` (per the
-`H_XSECT_006` precedent) is now lower priority than it was, since the
-executable conversion already failed independently of universe size —
-still a legitimate, cheap check if pursued, but not the most valuable
-next question.
+the cross-sectional (`H_XSECT`) thread (two REJECTED, one closed
+variant, one underpowered-but-real result) and the regime-conditioned
+mean-reversion thread (`H_MEANREV_003` raw finding still INCONCLUSIVE
+and real, `H_MEANREV_004`/`H_EXIT_005` both REJECTED on execution).
+Universe-generalization for `H_MEANREV_003` (per the `H_XSECT_006`
+precedent) remains a legitimate, cheap, not-yet-run check, but is lower
+priority than a genuinely new research direction given execution has
+now failed twice for two different reasons.
 
-**Already tried this session, do not retest**: volatility contraction
-(`H_VOL_001`, REJECTED), the market-trend/volatility-regime marginal+
-interaction sweep (`H_MEANREV_003`), and the executable conversion
-itself (`H_MEANREV_004`). Untested candidates from the mission's own
-lower-priority family list remain, though the exit-design question
-above is now higher priority than any of them: extreme-move research,
-multi-horizon single-stock momentum (distinct from the already-tested
-cross-sectional and relative-strength formulations, both REJECTED), and
-market microstructure (likely blocked by the same ~60-day intraday-
-history ceiling that constrained `H_OPENRANGE_001`).
+**Already tried, do not retest**: volatility contraction (`H_VOL_001`,
+REJECTED), the market-trend/volatility-regime sweep (`H_MEANREV_003`),
+two independent executable-conversion designs (`H_MEANREV_004`,
+`H_EXIT_005`). Untested candidates from the mission's own lower-
+priority family list remain: extreme-move research, multi-horizon
+single-stock momentum (distinct from the already-tested cross-sectional
+and relative-strength formulations, both REJECTED), and market
+microstructure (likely blocked by the same ~60-day intraday-history
+ceiling that constrained `H_OPENRANGE_001`).
 
 Separately, and lower priority: let the 15 real directional forecasts
 recorded 2026-09-08 (and the 10-11 existing BUY predictions) resolve,

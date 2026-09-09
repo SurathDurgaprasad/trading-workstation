@@ -31,6 +31,14 @@ class ExitReason(str, Enum):
     # at all; the stop ratchets up as new highs are made). Never assigned
     # by check_exit() or the standard backtester/paper engine.
     TRAILING_STOP = "TRAILING_STOP"
+    # H_EXIT_005 (quant_research/mean_reversion_signal.py) -- ONLY ever
+    # assigned by that module's own isolated mean-reversion-completion
+    # exit logic (zscore_close_20 recovering to >= 0.0, i.e. price
+    # returning to its own trailing mean -- the reversal thesis itself
+    # completing, not a price-distance-based stop/target borrowed from a
+    # different strategy). Never assigned by check_exit() or the standard
+    # backtester/paper engine.
+    MEAN_REVERSION_COMPLETE = "MEAN_REVERSION_COMPLETE"
 
 
 class Trade(BaseModel):
