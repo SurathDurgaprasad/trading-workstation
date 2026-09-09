@@ -11,32 +11,59 @@ distills.
 
 Paper-trading only, structurally incapable of a real order (no
 order-placement code path exists anywhere in this project). **The live
-scheduler was found STOPPED at the start of this session** (last real
-run was yesterday's `post_market` slot at 15:30 IST 2026-09-08; no
-process was running this morning, confirmed via `Get-CimInstance
-Win32_Process` — a clean stop with no crash/error in its own log, most
-likely a machine restart or closed terminal overnight, not a software
-defect). Restarted with the exact same established command line
-(`schedule loop --watchlist-file market_data/watchlists/starter_nse.yaml
---paper-execute --initial-capital 100000 --paper-db data/paper_trading.db
---state-db data/live_state.db --live-source dhan --resilient
---staleness-seconds 120`) right at today's market open; confirmed
-healthy — its `pre_market` slot completed cleanly (15 candidates
-scanned, 1 BUY, 1 prediction recorded) within minutes of restart. Full
-pipeline (scan → decision → critic → risk → paper) real and tested; a
-`MarketRegimeReport` snapshot is persisted per shadow-run and every
-`Decision` carries a `scan_id` back to it; a `daily-report` command
-produces a real, ranked, evidence-labeled NSE view (now with a
-cache-staleness pre-flight check); UP/DOWN/NO_EDGE directional
-forecasts have their own outcome-tracking loop, independent of the
-BUY-only trade-prediction journal.
+scheduler stopped TWICE this same session** — once overnight (found
+stopped at session start, restarted at market open) and once again
+mid-session (confirmed alive at ~10:07 IST, gone by ~10:48 IST — no
+error anywhere in its own log both times, just a clean stop right after
+a normal, successful tick). Restarted both times with the identical
+established command line; confirmed healthy each time via
+`Get-CimInstance Win32_Process` (never trust the tailed log file's own
+apparent freshness alone — it looked perfectly normal both times right
+up to the silent stop) and `scheduler_runs.db`. **This recurring pattern
+(clean, errorless, mid-session stops) is now itself worth flagging as
+an operational risk** — see Known Data Limitations / Biggest Risks
+below; the root cause (machine sleep/terminal closure vs. something
+else) has not been identified and is outside what this session can
+diagnose from inside the process itself. Full pipeline (scan → decision
+→ critic → risk → paper) real and tested; a `MarketRegimeReport`
+snapshot is persisted per shadow-run and every `Decision` carries a
+`scan_id` back to it; a `daily-report` command produces a real, ranked,
+evidence-labeled NSE view (now with a cache-staleness pre-flight
+check); UP/DOWN/NO_EDGE directional forecasts have their own
+outcome-tracking loop, independent of the BUY-only trade-prediction
+journal.
 
 ## CURRENT ACTIVE EDGE STATUS
 
 **No validated, tradeable edge exists.** This is the honest, current
-answer, not a gap to be embarrassed about.
+answer, not a gap to be embarrassed about — but the gap has narrowed
+significantly today.
 
-Overnight gap-fade was this project's most promising raw finding
+**New today, and by a wide margin the strongest, most rigorously-
+validated finding in this project's history**: `H_XSECT_001`, a genuine
+CROSS-SECTIONAL momentum ranking (rank all 32 universe stocks by
+trailing 60-day return, buy the bottom quintile "laggards," hold 20
+days) — a capability this project never had before today
+(`quant_research/cross_sectional.py`, new). Decisive and POSITIVE in
+ALL THREE splits, never reversing (development +1.53%, validation
++2.38%, out-of-sample +0.49%, all CI-decisive). Survived every
+adversarial check that has ever killed a promising candidate in this
+project: clears realistic costs with a 5x margin (still net positive
+at a 1.00% round-trip cost); broad across 29 of 32 symbols; no sector
+concentration (largest sector bucket only 17.8%); remarkably stable
+across three decade-spanning eras including COVID (no decay, unlike
+gap-fade or the divergence family); strong in BOTH liquidity halves
+(unlike gap-fade); and — the check specifically designed to catch an
+inflated-looking rolling-window result — still decisive under a
+genuinely non-overlapping, independent re-sampling. Full validation in
+`docs/research/CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md`. **Still
+INCONCLUSIVE, not PROMOTED, by explicit choice**: this project's own
+promotion discipline requires a real backtest through the existing
+cost-aware/risk-sized engine and a shadow-mode observation period
+before anything stronger — not yet done, deliberately, per the
+mission's own "do not immediately modify live trading" instruction.
+
+Overnight gap-fade was this project's second-most promising raw finding
 (H_GAP_001/002) and was put through a deep, deliberately adversarial
 validation this segment (H_GAP_003) — cost sensitivity, pre-specified
 magnitude buckets, market-regime/VIX-regime/sector splits, a liquidity
@@ -98,20 +125,28 @@ Nothing is promoted. Nothing should be traded.
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(34 hypotheses tested to date).
+(35 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
-None formally meet the bar (decisive across all three splits AND a
-cost-clearing, executable edge). H_CALENDAR_001 (Tuesday effect) comes
-closer than anything else this project has found on the STATISTICAL
-side (decisive, non-reversing, Bonferroni-surviving, broad-based, no
-decay) but fails the ECONOMIC side (doesn't clear costs, no execution
-vehicle exists) — a different, and arguably more informative, way of
-falling short than the market/sector-divergence family's own OOS-power
-gap.
+None FORMALLY carry that status in the registry yet (this project's own
+`HypothesisStatus` enum doesn't have a PROMISING tier — see the note in
+`H_XSECT_001`'s own entry), but **H_XSECT_001 (cross-sectional
+mean-reversion) is now, by a clear margin, the closest this project has
+ever come**: decisive across all three splits (not just robust on the
+pooled sample, unlike Tuesday), survives costs with the widest margin
+of any finding here, and passed every adversarial check applied. It is
+recorded as INCONCLUSIVE only because the mission's own required
+workflow (validation report → PROMISING → shadow mode) hasn't completed
+the shadow-mode step yet — see `docs/research/
+CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md`. H_CALENDAR_001 (Tuesday
+effect) remains the strongest PURELY STATISTICAL replication (broad,
+Bonferroni-surviving, no decay) but fails economically (doesn't clear
+costs, no execution vehicle) — a different way of falling short than
+H_XSECT_001's own remaining gap (evidence exists, shadow-mode
+observation does not yet).
 
-## INCONCLUSIVE HYPOTHESES (14)
+## INCONCLUSIVE HYPOTHESES (15)
 
 H_ENTRY_003, H_ENTRY_005, H_EXIT_002, H_MEANREV_002, H_CONTEXT_MARKET_002,
 H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_CONTEXT_MARKET_004,
@@ -124,10 +159,12 @@ decline/advance asymmetry), H_OPENRANGE_001 (real intraday opening-
 range research, genuinely tested with real 15-minute Yahoo data, but
 the ~60-day intraday history limit made every split fundamentally
 underpowered; a mild fade direction echoed gap-fade's own finding but
-never reached decisive significance), and H_CALENDAR_001 (the Tuesday
-effect — this project's most statistically robust finding to date, real
-but not (yet) tradeable — see above). Full evidence for each in
-`strategy/hypothesis_registry.py`.
+never reached decisive significance), H_CALENDAR_001 (the Tuesday
+effect — this project's most statistically robust PURE finding, real
+but not tradeable — see above), and **H_XSECT_001 (cross-sectional
+mean-reversion — this project's strongest finding overall, awaiting
+shadow-mode validation — see PROMISING HYPOTHESES above)**. Full
+evidence for each in `strategy/hypothesis_registry.py`.
 
 ## REJECTED HYPOTHESES (19)
 
@@ -170,20 +207,18 @@ hypothesis_registry.py`.
 Both sample sizes are far too small for any statistical conclusion.
 This is the actual current bottleneck — not a missing capability.
 
-**The live scheduler was found stopped at the start of today's
-session** (2026-09-09) — last real activity was yesterday's
-`post_market` slot; nothing had run overnight or this morning despite
-market open approaching. Confirmed via `Get-CimInstance Win32_Process`
-(authoritative, not just the tailed log) that no scheduler process was
-running at all — a clean stop (no error in its own log), most likely an
-overnight machine restart or closed terminal, not a bug. Restarted with
-the identical established command line right at market open; confirmed
-healthy within minutes (a real `pre_market` tick completed, 1 new
-prediction recorded). This is disclosed here because it is exactly the
-kind of "assume nothing, verify with the authoritative source" finding
-this project's own research discipline keeps demonstrating the value
-of — the tailed log file alone would NOT have revealed this (its last
-line was a normal, non-alarming `[SKIPPED]`).
+**The live scheduler stopped TWICE today** (2026-09-09): once overnight
+(found stopped at session start, restarted at market open, a real
+`pre_market` tick completed, 1 new prediction recorded) and once again
+mid-session (confirmed alive ~10:07 IST, gone ~10:48 IST, right after a
+normal `intraday` tick completed cleanly at 10:31 IST — no error either
+time). Both times confirmed via `Get-CimInstance Win32_Process`
+(authoritative — the tailed log's own last line looked perfectly
+healthy both times and would NOT have revealed the stop on its own).
+Both restarted with the identical established command line; both
+confirmed healthy afterward. This is exactly the kind of "assume
+nothing, verify with the authoritative source" finding this project's
+own research discipline keeps demonstrating the value of.
 
 **Real data-integrity finding this segment, now fixed**: `daily-report`
 had no cache-freshness check at all — `CachedMarketDataProvider` never
@@ -262,14 +297,37 @@ rebuilt, this segment.
    genuine complication (sign instability pre-2022) in the SAME run.
    Both must be carried forward together in any future summary of this
    line of research.
+5. **The temptation to rush H_XSECT_001 straight to paper execution.**
+   It is this project's strongest finding by every measure applied —
+   which is exactly why the mission's own explicit workflow (real
+   cost-aware backtest → shadow mode → only then consider execution)
+   matters most here, not least. A measurement finding, however
+   well-validated, is not yet a strategy.
+6. **Recurring, unexplained live-scheduler stops.** Twice in one
+   session, with no error either time. The cause has not been
+   identified from inside this session (no OS-level kill log visible to
+   this process) — worth the user's own attention if it keeps
+   recurring, since undisturbed live observation (risk #1 above) is
+   only possible if the scheduler actually stays running.
 
 ## NEXT HIGHEST-VALUE RESEARCH QUESTION
 
-Given the evidence-starvation finding above, the single highest-EV
-action is **not another new hypothesis** — it is time: let the 15 real
-directional forecasts recorded 2026-09-08 (and the 10-11 existing BUY
-predictions) resolve, then re-run `evaluate-forecasts`/`evaluate`/
-`learn` for the first real calibration read this project has ever had.
+The single highest-EV action is now **not another new hypothesis** — it
+is completing H_XSECT_001's own validation pipeline per the mission's
+explicit required order: (1) build the minimal `Strategy`-protocol
+wrapper for "bottom-quintile 60-day trailing return, 20-day hold" and
+run it through the EXISTING cost-aware, risk-sized backtesting/
+promotion-gate machinery (not yet done — this report is the raw
+price-behavior validation stage only); (2) if that clears the promotion
+gate, shadow-mode observation before any execution consideration. See
+`docs/research/CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md` §10 for the
+full ordered next-steps list, including testing the sector-relative and
+NIFTY-relative score variants as independent replications.
+
+Separately, and lower priority: let the 15 real directional forecasts
+recorded 2026-09-08 (and the 10-11 existing BUY predictions) resolve,
+then re-run `evaluate-forecasts`/`evaluate`/`learn` for the first real
+calibration read this project has ever had.
 
 **Already answered, same session**: does the Tuesday effect hold on
 NIFTY 50 itself (`^NSEI`), not just the 32-stock universe? No
