@@ -75,24 +75,40 @@ research pass ago:
   Both facts (the instability AND the improved power) must be read
   together, not selectively.
 
+**New today, and arguably the most statistically robust single finding
+this project has ever produced**: H_CALENDAR_001 found NSE Tuesday
+returns are positive and CI-decisive in ALL THREE splits (never
+reversing), even after a conservative Bonferroni correction for testing
+all 5 weekdays, broad-based across 31 of 32 symbols, and positive in 9
+of 11 individual years with no decay trend — genuinely the strongest
+replication in this project's history by every measure that has
+disqualified other candidates. **Still not a tradeable edge**: the
+effect size (~0.08-0.12% per week) does not clear a realistic weekly
+round-trip cost (~0.21%), and this project has no index/ETF execution
+capability to trade it efficiently even if it did (32 individual-stock
+round trips would be far more expensive than one index-level trade).
+Real evidence of a genuine market phenomenon; not yet evidence of an
+exploitable one.
+
 Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(32 hypotheses tested to date).
+(33 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
-None meet the bar (decisive across all three splits with adequate OOS
-power). The market/sector-divergence family survived the same
-adversarial deep-validation pass that killed gap-fade — but the 10-year
-re-run (H_CONTEXT_MARKET_005) then found the market-level condition's
-own sign is unstable across the full available history, which is a
-step BACKWARD from "promising," not forward, even though the compound
-condition's OOS sample is now properly powered for the first time.
+None formally meet the bar (decisive across all three splits AND a
+cost-clearing, executable edge). H_CALENDAR_001 (Tuesday effect) comes
+closer than anything else this project has found on the STATISTICAL
+side (decisive, non-reversing, Bonferroni-surviving, broad-based, no
+decay) but fails the ECONOMIC side (doesn't clear costs, no execution
+vehicle exists) — a different, and arguably more informative, way of
+falling short than the market/sector-divergence family's own OOS-power
+gap.
 
-## INCONCLUSIVE HYPOTHESES (13)
+## INCONCLUSIVE HYPOTHESES (14)
 
 H_ENTRY_003, H_ENTRY_005, H_EXIT_002, H_MEANREV_002, H_CONTEXT_MARKET_002,
 H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_CONTEXT_MARKET_004,
@@ -101,13 +117,14 @@ pre-2022 alongside improved OOS power for the compound condition — see
 above), H_GAP_001, H_GAP_002 (the original gap-fade discovery record —
 kept as history; see H_GAP_003 for why the underlying idea did not
 ultimately survive), H_TRANSMISSION_001 (Nasdaq → NIFTY IT, honest
-decline/advance asymmetry), and two new entries from today's session —
-H_OPENRANGE_001 (real intraday opening-range research, genuinely tested
-with real 15-minute Yahoo data, but the ~60-day intraday history limit
-made every split fundamentally underpowered; a mild fade direction
-echoed gap-fade's own finding but never reached decisive significance)
-and see REJECTED below for H_SECTOR_ROTATION_001. Full evidence for
-each in `strategy/hypothesis_registry.py`.
+decline/advance asymmetry), H_OPENRANGE_001 (real intraday opening-
+range research, genuinely tested with real 15-minute Yahoo data, but
+the ~60-day intraday history limit made every split fundamentally
+underpowered; a mild fade direction echoed gap-fade's own finding but
+never reached decisive significance), and H_CALENDAR_001 (the Tuesday
+effect — this project's most statistically robust finding to date, real
+but not (yet) tradeable — see above). Full evidence for each in
+`strategy/hypothesis_registry.py`.
 
 ## REJECTED HYPOTHESES (18)
 
@@ -249,6 +266,16 @@ action is **not another new hypothesis** — it is time: let the 15 real
 directional forecasts recorded 2026-09-08 (and the 10-11 existing BUY
 predictions) resolve, then re-run `evaluate-forecasts`/`evaluate`/
 `learn` for the first real calibration read this project has ever had.
+
+Closely following that: **does the Tuesday effect (H_CALENDAR_001) hold
+on NIFTY 50 itself (`^NSEI`), not just the 32-stock universe?** This
+project's existing infrastructure already fetches `^NSEI` for every
+other regime computation — testing whether the SAME index-level series
+shows the same Tuesday pattern is a nearly-free follow-up (no new data
+source needed) and would directly inform whether a single-instrument
+proxy could ever make this economically tradeable, since the cost
+problem (§ above) is specifically about needing 32 stock-level round
+trips instead of one index-level one.
 
 If a genuinely new research question is wanted before then: **the
 10-year NSE cache is now available for every symbol in this universe —

@@ -1592,4 +1592,78 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "time accumulate before revisiting this specific question."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_CALENDAR_001",
+            description="Day-of-week effects on NSE 1-day forward (close-to-close) returns, tested across all 5 weekdays, unconditioned on any stock-level signal.",
+            rationale=(
+                "TRADING BRAIN mission, Family H (calendar and market structure) -- explicit instruction: 'Be "
+                "extremely suspicious of calendar effects. Require strong replication.' A pure market-calendar "
+                "question, deliberately NOT gated on baseline_buy_condition (day-of-week is a claim about the "
+                "market itself, not about when a technical signal fires) -- the full unconditioned 32-symbol "
+                "universe is the correct population to test this against."
+            ),
+            expected_effect="No prior expectation about which day, if any, should show an effect -- all 5 weekdays tested equally, none cherry-picked.",
+            dataset_restrictions="Full 32-symbol NSE universe, 10 years daily (2016-2026), 1-day forward return only.",
+            experiment_design=(
+                "Reuses quant_research/market_behavior.py's measure_condition unchanged, condition_fn keyed on "
+                "the bar's own weekday (Monday=0..Friday=4), dev/val/oos discipline via the same 10-year split "
+                "as H_CONTEXT_MARKET_005. Explicit multiple-testing acknowledgement built into the experiment "
+                "design itself, not added after seeing results: 5 buckets tested means a single bucket's 95% CI "
+                "excluding zero is insufficient on its own -- a Bonferroni-adjusted ~99% CI (alpha/5=0.01) is "
+                "the real bar for treating any one weekday as a genuine finding, computed and checked before "
+                "trusting the headline result below."
+            ),
+            success_criteria="A weekday shows a CI-decisive effect (even under Bonferroni correction) that never reverses sign across development, validation, AND out-of-sample.",
+            failure_criteria="No weekday clears the corrected bar, or a promising-looking bucket reverses sign in any split.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "CONTROL (all days, unconditioned): development n=47456 +0.070% (decisive); validation n=15712 "
+                "+0.089% (decisive); out-of-sample n=15960 +0.002% (not decisive, essentially flat) -- matches "
+                "the same era-shape (positive dev/val, flat/negative oos) H_CONTEXT_MARKET_005 already found "
+                "for the general 10-year unconditioned baseline. "
+                "MONDAY: development +0.189% (decisive); validation +0.052% (not decisive); out-of-sample "
+                "-0.047% (not decisive) -- sign direction weakens then flips, REJECTED on its own. "
+                "TUESDAY: development n=9472 +0.089% (decisive [+0.053%,+0.125%]); validation n=3104 +0.078% "
+                "(decisive [+0.027%,+0.129%]); out-of-sample n=3232 +0.115% (decisive [+0.064%,+0.166%]) -- "
+                "POSITIVE AND CI-DECISIVE IN ALL THREE SPLITS, never reversing, and each split's mean SURVIVES "
+                "even a conservative Bonferroni-adjusted ~99% CI recomputation (approximate 99% intervals: dev "
+                "[+0.042%,+0.136%], val [+0.011%,+0.145%], oos [+0.048%,+0.182%] -- all still exclude zero). "
+                "WEDNESDAY: weak, mostly not decisive across all three splits (+0.043%/+0.029%/+0.023%). "
+                "THURSDAY: development +0.070% (decisive), validation +0.118% (decisive), out-of-sample -0.076% "
+                "(CI-DECISIVE NEGATIVE) -- a genuine sign reversal, REJECTED on its own. "
+                "FRIDAY: development -0.047% (decisive negative), validation +0.164% (decisive positive), "
+                "out-of-sample -0.004% (not decisive) -- reverses sign twice, REJECTED on its own. "
+                "TUESDAY DEEP-DIVE (the one surviving bucket, given the same treatment as gap-fade before being "
+                "trusted): per-symbol concentration (full period pooled, n=494 each) -- 31 of 32 symbols show a "
+                "POSITIVE mean Tuesday return (only NTPC.NS negative, -0.041%, small in magnitude) -- the "
+                "broadest-based finding in this project's entire research history, more so than gap-fade's own "
+                "27-of-32. Year-by-year concentration (2016-2026): POSITIVE point estimate in 9 of 11 years "
+                "(2017/2018/2020/2021/2022/2023/2024/2025/2026), with 2020 (+0.275%, CI-decisive) and 2025 "
+                "(+0.215%, CI-decisive) the strongest, and only 2016/2019 negative (both CI includes zero, not "
+                "decisively negative) -- no decay trend, remarkably stable across a full decade. Economically "
+                "plausible, though not independently verified against a specific academic source: Indian "
+                "markets' own Tuesday session is the first to react to the prior US Friday-into-Monday "
+                "information flow given the IST/EST time-zone offset, a documented mechanism for 'Monday effect "
+                "spillover with a lag' in some Asian-market literature generally, stated here as a plausible "
+                "prior only. "
+                "COST REALITY CHECK: Tuesday's own mean effect (+0.078% to +0.115% depending on split) is "
+                "SMALLER than a realistic weekly round-trip cost (~0.21%, backtesting.costs.CostModel."
+                "india_nse_intraday_2026(), applied here as one entry + one exit per week rather than "
+                "intraday) -- an ACTIVE 'long only on Tuesdays' strategy would not clear costs even though the "
+                "raw statistical signal is this project's strongest replication to date. "
+                "ARCHITECTURAL REALITY CHECK: even setting costs aside, trading this signal EFFICIENTLY would "
+                "want a single index/ETF-level instrument (one round trip per week), not 32 individual stock "
+                "round trips -- this project has no index/ETF trading capability anywhere in its execution "
+                "infrastructure, a real, disclosed gap distinct from (and in addition to) the cost problem. "
+                "INCONCLUSIVE, not PROMOTED and not REJECTED: this is the single most statistically robust "
+                "finding in this project's history by breadth (31/32 symbols) and by replication (decisive, "
+                "non-reversing, Bonferroni-surviving across all three splits and 9 of 11 individual years) -- "
+                "but it is real evidence of a MARKET PHENOMENON, not yet evidence of a TRADEABLE EDGE, since "
+                "the effect size does not clear realistic costs and no efficient execution vehicle exists in "
+                "this project today. Negative knowledge for the other 4 weekdays: none replicate without "
+                "reversing, so no further calendar-effect research on raw weekday alone is likely to be "
+                "productive without a fundamentally different angle (e.g., interaction with market regime, not "
+                "attempted this session)."
+            ),
+        ),
     )
