@@ -2569,4 +2569,77 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "H_EXIT_005_MEAN_REVERSION_COMPLETION_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_EXTREME_001",
+            description=(
+                "Does NSE show a real, forward-return asymmetry following an EXTREME 5-day cumulative price move "
+                "(trailing_return_5 in the tails of its own distribution) -- tested for BOTH extreme weakness "
+                "and extreme strength, to directly answer whether reversal behaves asymmetrically? Genuinely "
+                "distinct from H_MEANREV_001/003/004 (all condition on zscore_close_20, a standardized "
+                "deviation) -- this uses trailing_return_5, a raw-magnitude percentile metric, matching "
+                "H_MEANREV_002's own already-validated (on US data) approach, isolated to NSE for the first "
+                "time and extended to the strength side, which H_MEANREV_002 never tested. Pre-registered "
+                "BEFORE any experiment code ran: docs/research/"
+                "H_EXTREME_001_POST_SHOCK_ASYMMETRY_PREREGISTRATION.md, committed as its own commit prior to "
+                "any implementation."
+            ),
+            rationale=(
+                "User's own explicit next-direction guidance after H_EXIT_005's three-in-a-row rejection closed "
+                "the exit-architecture thread: return to hypothesis discovery, priority 1 being extreme-move/"
+                "post-shock behavior, explicitly distinct from generic RSI/zscore mean reversion. An audit "
+                "confirmed no existing hypothesis tests trailing_return_5 percentile extremes on NSE (only "
+                "H_GAP_001-003, a different overnight-gap mechanism, and H_MEANREV_002, US-only and weakness-"
+                "only, matched this terminology)."
+            ),
+            expected_effect="No prior assumption -- tests both extreme weakness and extreme strength independently, explicitly to surface any asymmetry rather than assuming one direction.",
+            dataset_restrictions="Full original 32-symbol NSE universe, 10 years daily -- this project's own established default, not the 208-symbol expansion.",
+            experiment_design=(
+                "Zero new production code -- pure reuse. trailing_return_5 = close.pct_change(5), already "
+                "computed via quant_research.cross_sectional.add_lookback_return_columns (the identical formula "
+                "H_MEANREV_002's own inline calculation uses). Thresholds FROZEN from NSE-pooled DEVELOPMENT-"
+                "period data only (n=47,296), computed once before any validation/out-of-sample bar was "
+                "examined: 5th percentile (weakness) = -6.14%, 95th percentile (strength) = +7.15% -- NOT the "
+                "US-specific -5.35% value H_MEANREV_002 froze, a fresh NSE-specific number. Measured via "
+                "quant_research.market_behavior.measure_condition (market_filter='NSE'), horizons = "
+                "FORWARD_HORIZONS (1,2,3,5,10,20), h=5 pre-declared as the primary horizon (matching the one "
+                "horizon that survived Bonferroni correction in H_MEANREV_002's own original US sweep), all six "
+                "reported without cherry-picking."
+            ),
+            success_criteria="A CI-decisive forward return, same sign across development, validation, AND out-of-sample -- no reversal in any split -- for either side independently.",
+            failure_criteria="Sign reversal between any two splits, no split reaching decisiveness, or an effect too small to plausibly clear realistic costs.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REAL MEASUREMENT (32/32 symbols, 10y, pure price-behavior, h5 = primary pre-declared horizon): "
+                "EXTREME_WEAKNESS -- development n=2365 mean=+0.31% (CI=[+0.03%,+0.60%], decisive); validation "
+                "n=341 mean=+1.23% (CI=[+0.75%,+1.70%], decisive); out_of_sample n=497 mean=-0.02% "
+                "(CI=[-0.36%,+0.32%], NOT decisive, near-zero point estimate). Strengthens at longer horizons "
+                "in dev/val (h20: development +1.99% decisive, validation +3.56% decisive) but out-of-sample "
+                "never reaches decisiveness at ANY of the six horizons tested (h1-h20), while never reversing "
+                "to a clearly negative value either -- the same 'dev/val decisive, oos underpowered-not-"
+                "reversed' shape this registry has repeatedly seen (e.g. H_CONTEXT_MARKET_002). "
+                "EXTREME_STRENGTH -- development n=2365 mean=+0.55% (CI=[+0.35%,+0.76%], decisive POSITIVE, "
+                "and decisive at EVERY horizon h1-h20); validation n=388 mean=+0.11% (CI=[-0.28%,+0.50%], not "
+                "decisive, except h20 +2.46% decisive); out_of_sample n=400 mean=-0.32% (CI=[-0.62%,-0.02%], "
+                "CI-DECISIVE NEGATIVE) -- a genuine SIGN REVERSAL from development's own decisive positive "
+                "result, also decisive negative at h3 (-0.25%), meeting this entry's own explicit failure "
+                "criterion. "
+                "THE ASYMMETRY ITSELF IS THE HEADLINE FINDING: extreme weakness shows NO reversal, just "
+                "insufficient out-of-sample statistical power; extreme strength shows an OUTRIGHT REVERSAL -- "
+                "real momentum/continuation in development, decisive fade in out-of-sample. This is the SAME "
+                "pattern this project's entire research history has independently converged on through "
+                "completely different methodologies and completely different metrics: H_XSECT_001 "
+                "(cross-sectional laggards beat leaders), H_ENTRY_002/H_ENTRY_004 (buying strength REJECTED), "
+                "H_RELSTRENGTH_001 (REJECTED), H_BREAKOUT_001 (REJECTED). A genuinely new metric family "
+                "(raw-magnitude percentile extremes, not zscore_close_20) reproduces the same asymmetry -- "
+                "valuable corroborating evidence this is a real NSE phenomenon, not an artifact of one "
+                "measurement approach. "
+                "VERDICT: REJECTED overall (this entry's own §7 failure condition -- a sign reversal -- is "
+                "triggered on the STRENGTH side), but disclosed precisely and not conflated: STRENGTH is "
+                "cleanly disqualified via a genuine reversal, no executable-strategy conversion warranted; "
+                "WEAKNESS is separately, more mildly, an open, underpowered-but-not-reversed question, not "
+                "REJECTED on its own terms, not pursued further in this same run (would need its own "
+                "justification -- e.g. a longer history -- for revisiting, not a retry on the same data). Full "
+                "writeup in docs/research/H_EXTREME_001_POST_SHOCK_ASYMMETRY_PREREGISTRATION.md."
+            ),
+        ),
     )

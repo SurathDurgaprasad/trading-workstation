@@ -131,9 +131,68 @@ check is performed here by default; both remain open, disclosed
 follow-ups if this entry's own raw measurement is promising enough to
 warrant them.
 
-## 10. Reproducibility record (filled in at execution time)
+## 10. Reproducibility record
 
-To be completed after the experiment runs: the exact frozen threshold
-values (5th/95th percentile, computed from real NSE development data),
-sample counts per split, and the full six-horizon result matrix for
-both sides.
+- Universe: `ORIGINAL_32_NSE_UNIVERSE`, all 32 built successfully. 10y daily.
+- `development_end=2022-09-08`, `validation_end=2024-09-07` (shared calendar boundaries).
+- Frozen thresholds, computed from n=47,296 pooled development-period `trailing_return_5` observations: `WEAKNESS_THRESHOLD` (5th percentile) = **-6.14%**; `STRENGTH_THRESHOLD` (95th percentile) = **+7.15%**.
+
+## 11. Results — a real asymmetry: weakness is inconclusive-but-not-reversed, strength cleanly reverses
+
+Full evidence: `H_EXTREME_001` in `strategy/hypothesis_registry.py`.
+
+**Primary horizon (h5, pre-declared):**
+
+| Side | Split | n | Mean | 95% CI |
+|---|---|---|---|---|
+| WEAKNESS | development | 2365 | +0.31% | [+0.03%,+0.60%] |
+| WEAKNESS | validation | 341 | +1.23% | [+0.75%,+1.70%] |
+| WEAKNESS | out-of-sample | 497 | -0.02% | [-0.36%,+0.32%] |
+| STRENGTH | development | 2365 | +0.55% | [+0.35%,+0.76%] |
+| STRENGTH | validation | 388 | +0.11% | [-0.28%,+0.50%] |
+| STRENGTH | out-of-sample | 400 | **-0.32%** | **[-0.62%,-0.02%]** |
+
+**EXTREME_WEAKNESS**: development and validation are both CI-decisive
+positive (strengthening at longer horizons — h20 development +1.99%,
+validation +3.56%, both decisive) — a genuine, mean-reversion-
+consistent bounce. Out-of-sample never reaches decisiveness at *any*
+horizon (h1 through h20), but its point estimates stay small and
+straddle zero rather than reversing to a clearly negative value. This
+is the same "development/validation decisive, out-of-sample
+underpowered-not-reversed" shape this registry has repeatedly seen
+(e.g. `H_CONTEXT_MARKET_002`) — genuinely informative, but not a clean
+promotion-relevant result either way.
+
+**EXTREME_STRENGTH**: development is CI-decisive positive at *every*
+horizon tested (h1 through h20) — a real, consistent short-term
+momentum/continuation effect following an extreme rally. Validation is
+mostly not decisive (except h20: +2.46%, decisive). Out-of-sample
+trends **negative** at every horizon and is CI-decisive at h3 (-0.25%)
+and h5 (-0.32%, the pre-declared primary horizon) — a genuine sign
+reversal from development's own decisive positive result, meeting this
+pre-registration's own explicit §7 failure criterion.
+
+**The asymmetry itself is the headline finding.** Extreme weakness
+shows no reversal, just insufficient out-of-sample power. Extreme
+strength shows an outright reversal — momentum in development, fade in
+out-of-sample. This is the *same* pattern this project's entire
+research history has independently converged on through completely
+different methodologies: `H_XSECT_001` (cross-sectional laggards beat
+leaders), `H_ENTRY_002`/`H_ENTRY_004` (buying strength REJECTED),
+`H_RELSTRENGTH_001` (REJECTED), `H_BREAKOUT_001` (REJECTED). A
+genuinely new metric family (raw-magnitude percentile extremes, not
+`zscore_close_20`) reproduces the same asymmetry, which is itself
+valuable corroborating evidence that this is a real NSE market
+phenomenon, not an artifact of any one measurement approach.
+
+**Verdict: REJECTED overall** (the pre-registration's own §7 failure
+condition — a sign reversal — is triggered on the STRENGTH side), but
+disclosed precisely: STRENGTH is cleanly disqualified via a genuine
+reversal; WEAKNESS is separately, more mildly, INCONCLUSIVE
+(underpowered, not reversed) — the two sides are not the same finding
+and should not be conflated. No executable-strategy conversion is
+warranted for STRENGTH (clean rejection). WEAKNESS remains a real,
+open, underpowered question — not pursued further in this same run;
+if revisited, it would need its own justification for why (e.g. a
+longer history, or a specific reason to expect more out-of-sample
+power) rather than being retried on the same data.

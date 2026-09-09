@@ -382,12 +382,42 @@ directly falsifies the working hypothesis (carried over from
 removing it made things worse, not better. Full writeup in
 `docs/research/H_EXIT_005_MEAN_REVERSION_COMPLETION_PREREGISTRATION.md`.
 
+**Per the user's own explicit next-direction guidance after three
+consecutive exit-design rejections: return to hypothesis discovery,
+priority 1 = extreme-move/post-shock behavior. Tested — `H_EXTREME_001`,
+REJECTED overall, but the asymmetry it surfaces is itself the real
+finding.** Does NSE show a forward-return asymmetry following an
+extreme 5-day cumulative move (`trailing_return_5`, a raw-magnitude
+percentile metric — genuinely distinct from `zscore_close_20`'s
+standardized-deviation family every `H_MEANREV_00x` entry used),
+tested for both weakness and strength, thresholds frozen from
+NSE-pooled development-period data only (5th/95th percentile: -6.14%/
++7.15%)? **Result: a real, disclosed asymmetry.** EXTREME_WEAKNESS
+(bottom 5%): development/validation both CI-decisive positive
+(strengthening at longer horizons), out-of-sample never reaches
+decisiveness at any of six horizons but never reverses either — real,
+just underpowered. EXTREME_STRENGTH (top 95%): development CI-decisive
+positive at *every* horizon (real momentum), but out-of-sample
+CI-decisive **negative** at the pre-declared primary horizon (h5:
+-0.32%) and at h3 — a genuine sign reversal, this entry's own explicit
+failure condition. **This is the same pattern this project's entire
+research history has independently converged on** through completely
+different methodologies (`H_XSECT_001`'s cross-sectional laggards,
+`H_ENTRY_002`/`004`'s rejected strength-buying, `H_RELSTRENGTH_001`,
+`H_BREAKOUT_001`) — a genuinely new metric family reproducing the same
+asymmetry is real corroborating evidence, not a coincidence. Rejected
+overall (the strength side's reversal triggers the frozen failure
+criterion), with the two sides' honestly different verdicts kept
+distinct — strength cleanly disqualified, weakness merely underpowered
+and open. Full writeup in `docs/research/
+H_EXTREME_001_POST_SHOCK_ASYMMETRY_PREREGISTRATION.md`.
+
 Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(44 hypotheses tested to date).
+(45 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -414,7 +444,17 @@ genuinely different reasons, and "cleanest raw measurement" is
 increasingly distant from "closest to a tradeable strategy" in this
 project's own history. See CURRENT ACTIVE EDGE STATUS above for the
 full story on `H_XSECT_001`/`002`/`005`/`006`, `H_MEANREV_003`/`004`,
-and `H_EXIT_005`.
+and `H_EXIT_005`. `H_EXTREME_001` (a genuinely new metric family —
+raw-magnitude `trailing_return_5` percentile extremes, not
+`zscore_close_20`) does not change this picture: STRENGTH cleanly
+reversed sign out-of-sample (REJECTED, not promising), and WEAKNESS
+was underpowered rather than reversed (INCONCLUSIVE, not promising
+either) — see CURRENT ACTIVE EDGE STATUS and REJECTED HYPOTHESES
+above. Per the user's own explicit next-direction guidance, the
+project is now moving to a genuinely different hypothesis family
+(multi-horizon momentum interaction — short-term weakness inside
+persistent medium/long-term strength) rather than a fourth
+exit-architecture or extreme-move variant.
 
 ## INCONCLUSIVE HYPOTHESES (18)
 
@@ -446,7 +486,7 @@ executable conversion failed as H_MEANREV_004 — see PROMISING
 HYPOTHESES and REJECTED HYPOTHESES above)**. Full evidence for each in
 `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (25)
+## REJECTED HYPOTHESES (26)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
@@ -485,8 +525,20 @@ structurally different, thesis-based exit design, not a stop retune —
 failed MORE decisively than H_MEANREV_004: every one of six splits is
 CI-decisive negative, because a moving-average-based exit condition
 can be satisfied by the average declining to meet the price rather
-than genuine recovery; see PROMISING HYPOTHESES above)**. Full evidence
-for each in `strategy/hypothesis_registry.py`.
+than genuine recovery; see PROMISING HYPOTHESES above)**, and
+**H_EXTREME_001 (post-shock move asymmetry — a genuinely new metric
+family, `trailing_return_5` percentile extremes rather than
+`zscore_close_20` — measured both EXTREME_WEAKNESS and
+EXTREME_STRENGTH on NSE; overall REJECTED because STRENGTH shows a
+clean sign reversal, development CI-decisive positive at every horizon
+but out-of-sample CI-decisive NEGATIVE at h3/h5, the same
+buying-strength-fails pattern this registry has independently found
+via H_XSECT_001/H_ENTRY_002/H_ENTRY_004/H_RELSTRENGTH_001/
+H_BREAKOUT_001; WEAKNESS is separately, more mildly, inconclusive —
+development/validation CI-decisive positive but out-of-sample
+underpowered rather than reversed, a real open question not pursued
+further in this run)**. Full evidence for each in
+`strategy/hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
 "entry timing underperforms random" — confirmatory, not an edge.)
@@ -673,62 +725,76 @@ rebuilt, this segment.
 
 ## NEXT HIGHEST-VALUE RESEARCH QUESTION
 
-**Current answer**: is there a structurally different exit architecture
-that rescues the reversal-signal thread? **Tried — `H_EXIT_005`,
-REJECTED, more decisively than the stop-based design it replaced.** A
-verified architecture audit and registry search selected mean-
-reversion-completion (exit at `zscore_close_20 >= 0.0`) as the most
-fundamental untested exit concept; it produced CI-decisive negative
-results in all six splits, revealing a genuinely new mechanistic
-problem (a moving-average-based exit can be satisfied without genuine
-recovery — see BIGGEST RISKS item 11 above). This closes off "just
-change the exit mechanism" as a simple fix — three consecutive
-executable-conversion attempts (`H_XSECT_002`, `H_MEANREV_004`,
-`H_EXIT_005`) have now failed for two distinct, non-overlapping
-reasons.
+**Per the user's own explicit next-direction guidance** (priority
+order: extreme-move/post-shock behavior, then multi-horizon momentum
+interaction, then passive evidence accumulation, then microstructure
+only if data supports it — and explicitly: do not start another
+`H_EXIT_*` hypothesis without genuinely new evidence), the
+exit-architecture thread (three consecutive rejections — `H_XSECT_002`,
+`H_MEANREV_004`, `H_EXIT_005`) has been set aside, not resumed.
 
-**What remains, if this thread is pursued further (not assumed
-worthwhile by default)**: regime-invalidation exit (exit when
-`TRENDING_UP` ends), explicitly named in `H_EXIT_005`'s own pre-
-registration as the next candidate — but per that entry's own key
-lesson, any new exit hypothesis on this signal family should first be
-checked for whether its own condition can fire on a still-net-
-unprofitable trade, not just for whether it fires at all. This would
-need its own fresh pre-registration, not a reflexive follow-up.
+**Priority #1, extreme-move/post-shock behavior — DONE, `H_EXTREME_001`,
+REJECTED with a real, disclosed asymmetry.** Measured both
+`EXTREME_WEAKNESS` and `EXTREME_STRENGTH` (`trailing_return_5`
+percentile extremes, a genuinely new metric family distinct from
+`zscore_close_20`) on the standard 32-symbol NSE universe. STRENGTH
+reversed sign cleanly out-of-sample (development CI-decisive positive
+at every horizon, out-of-sample CI-decisive negative at h3/h5) —
+reproducing this project's own long-standing "buying strength fails"
+finding (`H_XSECT_001`, `H_ENTRY_002`/`004`, `H_RELSTRENGTH_001`,
+`H_BREAKOUT_001`) via an independent methodology, which strengthens
+confidence it is a real NSE phenomenon rather than a `zscore_close_20`
+artifact. WEAKNESS was separately, more mildly, inconclusive
+(development/validation CI-decisive positive, out-of-sample
+underpowered but not reversed) — a real open question, not pursued
+further in this run. See CURRENT ACTIVE EDGE STATUS and REJECTED
+HYPOTHESES above for the full breakdown.
 
-**Three consecutive rejections is a real signal, not just bad luck.**
-Per this project's own discipline against chasing a dying lead: the
-single highest-EV action now is probably *not* a fourth exit-design
-attempt on the same signal family. The mission's own research-family
-audit (multi-horizon momentum, extreme-move research, market
-microstructure) and this project's own accumulating evidence base (`data/predictions.db`,
-`data/direction_forecasts.db`, still effectively unresolved) are the
-more promising places to look next.
+**Priority #2, multi-horizon momentum interaction — now the top
+open item.** Per the user's own framing: short-term weakness combined
+with medium/long-term strength — conceptually distinct from pure mean
+reversion (buying temporary weakness *inside* persistent structural
+strength, not weakness alone). Not yet audited against the registry or
+pre-registered; the next step is a bounded audit (grep the registry for
+existing multi-horizon/momentum-interaction terminology, confirm no
+prior hypothesis has tested a *combined* short-term-weakness +
+medium/long-term-strength condition — `H_MEANREV_003`'s own
+`TRENDING_UP` regime gate is the closest precedent but gates on a
+binary regime flag, not a continuous longer-horizon momentum measure,
+so this would be a genuinely different formulation), then a frozen
+pre-registration before any measurement runs.
 
-**Two closed-out threads, both at genuine natural stopping points**:
-the cross-sectional (`H_XSECT`) thread (two REJECTED, one closed
-variant, one underpowered-but-real result) and the regime-conditioned
-mean-reversion thread (`H_MEANREV_003` raw finding still INCONCLUSIVE
-and real, `H_MEANREV_004`/`H_EXIT_005` both REJECTED on execution).
-Universe-generalization for `H_MEANREV_003` (per the `H_XSECT_006`
-precedent) remains a legitimate, cheap, not-yet-run check, but is lower
-priority than a genuinely new research direction given execution has
-now failed twice for two different reasons.
+**Priority #3, accumulating live forecast evidence — passive, ongoing,
+no new research degrees of freedom.** Let the real directional
+forecasts recorded to date resolve, then re-run
+`evaluate-forecasts`/`evaluate`/`learn` for the first real calibration
+read this project has ever had. Requires no new hypothesis or
+pre-registration — just elapsed time.
+
+**Priority #4, microstructure — explicitly gated, likely blocked.**
+Only pursue if existing data depth is sufficient; the session's own
+prior finding (`H_OPENRANGE_001`, INSUFFICIENT_DATA) showed only ~60
+trading days of intraday history, making every split fundamentally
+underpowered. Do not revisit without either more elapsed calendar time
+or a longer-history intraday data source.
 
 **Already tried, do not retest**: volatility contraction (`H_VOL_001`,
 REJECTED), the market-trend/volatility-regime sweep (`H_MEANREV_003`),
-two independent executable-conversion designs (`H_MEANREV_004`,
-`H_EXIT_005`). Untested candidates from the mission's own lower-
-priority family list remain: extreme-move research, multi-horizon
-single-stock momentum (distinct from the already-tested cross-sectional
-and relative-strength formulations, both REJECTED), and market
-microstructure (likely blocked by the same ~60-day intraday-history
-ceiling that constrained `H_OPENRANGE_001`).
+two independent exit-architecture executable-conversion designs
+(`H_MEANREV_004`, `H_EXIT_005`), and now extreme-move/post-shock
+asymmetry (`H_EXTREME_001`, REJECTED — see above). Universe-
+generalization for `H_MEANREV_003` (per the `H_XSECT_006` precedent)
+remains a legitimate, cheap, not-yet-run check, but is lower priority
+than a genuinely new hypothesis family.
 
-Separately, and lower priority: let the 15 real directional forecasts
-recorded 2026-09-08 (and the 10-11 existing BUY predictions) resolve,
-then re-run `evaluate-forecasts`/`evaluate`/`learn` for the first real
-calibration read this project has ever had.
+**If the exit-architecture thread is ever resumed (not currently
+planned)**: regime-invalidation exit (exit when `TRENDING_UP` ends),
+named in `H_EXIT_005`'s own pre-registration as the next candidate —
+but per the user's explicit instruction, this must not be started
+without genuinely new evidence, and any future attempt must first be
+checked for whether its own condition can fire on a still-net-
+unprofitable trade (see BIGGEST RISKS item 11 above), not just for
+whether it fires at all.
 
 **Prior segments' answered questions, kept brief so this section stays
 focused on what's actually next:**
