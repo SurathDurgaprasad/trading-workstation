@@ -606,14 +606,52 @@ STOP-domination instances (`H_XSECT_002`, `H_MEANREV_004`,
 `H_EXIT_005`). No parameter was retuned after seeing this result. Full
 writeup in `docs/research/H_MEANREV_009_EXECUTABLE_DESIGN_PREREGISTRATION.md`.
 
+**Execution/sizing/cost structure test — `H_MEANREV_010`, INCONCLUSIVE,
+with a real and significant confirming result, but NOT a validated
+strategy.** Tests whether `H_MEANREV_009`'s own failure was caused
+SPECIFICALLY by its wide-stop + fixed-fractional-sizing + fixed-
+brokerage interaction, without changing the signal or the h10 horizon,
+using two frozen candidates built from existing infrastructure only
+(no new sizing algorithm invented). **Candidate 2** (fixed-notional
+sizing, full capital per position, real NSE costs): validation
+**+1.51%** (CI=[+0.94%,+2.08%], CI-decisive) and out-of-sample
+**+0.98%** (CI=[+0.52%,+1.44%], CI-decisive) — cost collapsed from
+`H_MEANREV_009`'s own 7-9% of notional to ~0.1%, exactly as the causal
+diagnosis predicted; development remains non-decisive (+0.08%,
+CI=[-0.27%,+0.44%]), consistent with the already-established 2020
+contamination pattern (top-5 trades = 128% of development's own total
+net PnL, while validation/OOS are broad-based at 13-16%, 189-205 of
+206 symbols contributing). **A serious, disclosed concern**: this
+candidate puts 100% of capital into a single position each time
+(mean 390-1,208 shares), producing an extreme single-trade tail
+(development worst −65%, best +80%) — a genuinely unrealistic,
+volatility-blind sizing scheme, not a recommendation. **Candidate 3**
+(baseline tiny sizing unchanged, ONLY the fixed brokerage zeroed as a
+diagnostic control — not a real-world claim): validation **+1.90%**
+and out-of-sample **+1.30%**, both CI-decisive, confirming realistic
+PERCENTAGE costs alone are survivable even at tiny position sizes —
+it was specifically the FIXED per-fill component that was decisive.
+**Both candidates' promotion-gate verdict is `INCONCLUSIVE`** — neither
+is `PROMOTED`; `H_MEANREV_009`'s own historical verdict is unchanged,
+cited not rewritten. The causal question is answered — `H_MEANREV_009`
+failed because of the specific sizing/cost interaction, not because
+the signal is dead — but no realistic, promotable executable design
+has yet been found. The next open bottleneck is realistic multi-
+position portfolio construction (diversifying capital across several
+concurrent positions, not concentrating it in one), which the
+single-symbol-at-a-time backtest architecture used throughout this
+project cannot model — a substantial future step, not started. Full
+writeup in `docs/research/H_MEANREV_010_EXECUTION_STRUCTURE_PREREGISTRATION.md`.
+
 Nothing is promoted. Nothing should be traded. This remains
 **entirely paper-only research** — no signal in this whole thread has
-cleared this project's own promotion bar.
+cleared this project's own promotion bar, and no live/broker execution
+capability exists or was touched.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(52 hypotheses tested to date).
+(53 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -663,7 +701,7 @@ promoted, and its own adversarial-checks phase was correctly never
 triggered since the success gate was not met. See CURRENT ACTIVE EDGE
 STATUS and INCONCLUSIVE HYPOTHESES below for the full breakdown.
 
-## INCONCLUSIVE HYPOTHESES (21)
+## INCONCLUSIVE HYPOTHESES (22)
 
 H_ENTRY_003, H_ENTRY_005, H_EXIT_002, H_MEANREV_002, H_CONTEXT_MARKET_002,
 H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_CONTEXT_MARKET_004,
@@ -725,7 +763,16 @@ relative-weakness bucket's real advantage is crisis-regime robustness,
 not a superior risk-adjusted ratio in normal conditions; temporal risk
 evolution is non-monotonic across horizons, not a simple
 longer-is-better/worse story — see CURRENT ACTIVE EDGE STATUS
-above)**. Full evidence for each in `strategy/hypothesis_registry.py`.
+above)**, and **H_MEANREV_010 (execution/sizing/cost structure test —
+confirms H_MEANREV_009's failure was caused by its specific sizing/
+cost interaction, not a dead signal; both tested candidates move
+validation and out-of-sample to CI-decisive positive, broad-based
+results, but development remains non-decisive in both and neither
+reaches PROMOTED; Candidate 2's own positive result depends on an
+explicitly unrealistic full-capital-per-position sizing assumption
+with a serious extreme-tail-risk side effect; Candidate 3 is a
+diagnostic control only — see CURRENT ACTIVE EDGE STATUS above)**.
+Full evidence for each in `strategy/hypothesis_registry.py`.
 
 ## REJECTED HYPOTHESES (30)
 

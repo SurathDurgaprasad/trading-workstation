@@ -3253,4 +3253,84 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "writeup in docs/research/H_MEANREV_009_EXECUTABLE_DESIGN_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_MEANREV_010",
+            description=(
+                "Does H_MEANREV_009's own demonstrated gross edge survive a DIFFERENT execution/sizing/cost "
+                "structure -- without changing the frozen entry or the frozen h10 exit, and without a "
+                "parameter search? Tests whether H_MEANREV_009's failure was caused SPECIFICALLY by the "
+                "wide-stop + fixed-fractional-sizing + fixed-per-fill-brokerage interaction its own diagnosis "
+                "identified, or whether the signal fails under any realistic execution structure. "
+                "Pre-registered BEFORE any experiment code ran: docs/research/"
+                "H_MEANREV_010_EXECUTION_STRUCTURE_PREREGISTRATION.md, committed as its own commit prior to "
+                "any experiment code."
+            ),
+            rationale=(
+                "User-mandated causal follow-up to H_MEANREV_009's own disclosed diagnosis. Every design "
+                "choice reuses existing infrastructure, confirmed by direct audit: quant_research.cross_"
+                "sectional_portfolio.compute_member_return (H_XSECT_005's own already-tested pure function) "
+                "already implements fixed-notional, stop-distance-independent sizing with matching cost/bar-"
+                "timing conventions -- no new sizing algorithm invented. CostModel.brokerage_per_fill is "
+                "already a configurable field -- the zero-fixed-fee diagnostic needed zero new runner code."
+            ),
+            expected_effect="No prior assumption on which candidate would work -- a causal test, not a directional prediction.",
+            dataset_restrictions="COMBINED universe (206/208 symbols), identical to H_MEANREV_009. 10 years daily.",
+            experiment_design=(
+                "One new function (compute_fixed_notional_trade, modeled on but NOT modifying compute_member_"
+                "return) and one new runner (run_universe_fixed_notional_time_exit_experiment) in quant_"
+                "research/mean_reversion_execution_structure.py (10 new tests), reusing the frozen "
+                "_oversold_2std_relative_weak predicate unchanged. Candidate 3 needed zero new production code "
+                "-- H_MEANREV_009's own unmodified runner called with a different CostModel instance. "
+                "Candidate 1 (H_MEANREV_009 baseline) cited from its own already-committed record, not rerun."
+            ),
+            success_criteria="strategy.promotion_gate.evaluate_promotion PROMOTED for a candidate -- all three splits confident POSITIVE_PERFORMANCE.",
+            failure_criteria="evaluate_promotion NEGATIVE or REJECTED for all candidates (the causal hypothesis would be disproved -- the signal itself fails regardless of execution structure).",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "REAL EXECUTABLE BACKTESTS (206/206 symbols built; frozen entry/exit/universe/splits, "
+                "unchanged from H_MEANREV_009; h10 primary): "
+                "CANDIDATE 2 (fixed-notional sizing, capital_per_slot=100000, real india_nse_intraday_2026() "
+                "costs) -- development n=2897 net_mean=+0.08% (CI=[-0.27%,+0.44%], STATISTICALLY_MEANINGLESS); "
+                "validation n=688 net_mean=+1.51% (CI=[+0.94%,+2.08%], POSITIVE_PERFORMANCE, CI-decisive); "
+                "out_of_sample n=840 net_mean=+0.98% (CI=[+0.52%,+1.44%], POSITIVE_PERFORMANCE, CI-decisive). "
+                "Gross means (+0.18%/+1.61%/+1.08%) consistent with H_MEANREV_006/007/008/009's own raw "
+                "measurement. Mean cost as % of notional ~0.098% (vs H_MEANREV_009's own 7.2%-9.4% -- a "
+                "~75-95x reduction), confirming the causal mechanism precisely. Concentration check: top-5-"
+                "trades' share of total net PnL -- development 128.4% (broad underlying losses more than "
+                "offset by a handful of extreme winners, consistent with development's own non-decisiveness), "
+                "validation 13.1%, out_of_sample 16.4% (both broad-based, NOT trade-dominated; 189-205 of 206 "
+                "symbols contributing in every split). SERIOUS DISCLOSED CONCERN: extreme single-trade tail "
+                "risk from 100%-capital-per-position sizing with no volatility adjustment -- development "
+                "worst single trade -65.03%, best +80.35%; mean quantity 390-1208 shares/trade, raising real "
+                "execution/liquidity questions the existing flat-bps slippage model may not fully capture at "
+                "this size. Promotion verdict: INCONCLUSIVE. "
+                "CANDIDATE 3 (H_MEANREV_009's own baseline sizing unchanged, zero-fixed-fee diagnostic control "
+                "-- brokerage_per_fill=0, real percentage fees/taxes/slippage retained) -- development n=2063 "
+                "net_mean=+0.16% (CI=[-0.25%,+0.57%], STATISTICALLY_MEANINGLESS); validation n=398 "
+                "net_mean=+1.90% (CI=[+1.20%,+2.61%], POSITIVE_PERFORMANCE, CI-decisive); out_of_sample n=393 "
+                "net_mean=+1.30% (CI=[+0.68%,+1.92%], POSITIVE_PERFORMANCE, CI-decisive). Sizing identical to "
+                "H_MEANREV_009's own (mean notional ~600-740, unchanged) -- demonstrates realistic PERCENTAGE "
+                "costs are survivable even at H_MEANREV_009's own tiny position sizes; it was specifically the "
+                "FIXED brokerage component that was decisive. Concentration: development 75.9%, validation "
+                "18.6%, out_of_sample 20.4% (broad-based in val/oos); 98-183 distinct symbols. Explicitly a "
+                "diagnostic control, not a real-world cost claim. Promotion verdict: INCONCLUSIVE. "
+                "CENTRAL CAUSAL FINDING, CONFIRMED (not partially confirmed, not disproved): both candidates, "
+                "addressing the interaction from two independent directions, moved the result from "
+                "H_MEANREV_009's own decisive NEGATIVE (all three splits CI-decisive negative) to INCONCLUSIVE "
+                "(validation AND out-of-sample CI-decisive POSITIVE, broad-based; only development non-"
+                "decisive, consistent with this signal family's already-established 2020-driven instability). "
+                "H_MEANREV_009's own historical verdict is NOT rewritten -- cited, not modified. "
+                "WHAT REMAINS OPEN (not established): neither candidate reaches PROMOTED (development non-"
+                "decisive in both); Candidate 2's own positive result depends on an explicitly unrealistic "
+                "full-capital-concentration assumption; Candidate 3 is a diagnostic control only. NEITHER "
+                "CANDIDATE IS A VALIDATED, TRADEABLE STRATEGY. "
+                "NEXT BOTTLENECK IDENTIFIED (not pursued here): no longer the signal or raw percentage costs -- "
+                "the open question is realistic position sizing/portfolio construction (diversifying capital "
+                "across several concurrent positions rather than Candidate 2's own 100%-into-one-position "
+                "concentration) to achieve adequate per-trade notional without unrealistic concentration -- "
+                "requires genuine multi-symbol portfolio-level infrastructure this single-symbol-at-a-time "
+                "backtest architecture cannot model, a substantial, separately-scoped future step. Full "
+                "writeup in docs/research/H_MEANREV_010_EXECUTION_STRUCTURE_PREREGISTRATION.md."
+            ),
+        ),
     )
