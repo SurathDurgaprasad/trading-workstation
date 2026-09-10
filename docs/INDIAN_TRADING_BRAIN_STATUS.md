@@ -412,12 +412,42 @@ distinct — strength cleanly disqualified, weakness merely underpowered
 and open. Full writeup in `docs/research/
 H_EXTREME_001_POST_SHOCK_ASYMMETRY_PREREGISTRATION.md`.
 
+**Priority 2, multi-horizon momentum interaction — tested —
+`H_MOMENTUM_001`, INCONCLUSIVE, with a real incremental-information
+signal that is not yet statistically decisive.** Does a single stock's
+own short-term weakness (`trailing_return_5`, bottom 20th percentile)
+combined with that SAME stock's own medium/long-term structural
+strength (`trailing_return_60`, top 80th percentile) predict a better
+forward return than either condition alone — the critical test being
+whether long-horizon strength adds *incremental* predictive
+information, not merely whether the combined average is positive?
+Thresholds frozen from NSE-pooled development-period data only. At h5
+(primary horizon): COMBINED is CI-decisive positive in development
+(+1.01%, n=963) and validation (+0.68%, n=276); out-of-sample is
+directionally positive (+0.49%, n=114) and **passes the frozen
+incremental-information test** (beats both `SHORT_WEAKNESS_ALONE`'s
++0.07% and `STRUCTURAL_STRENGTH_ALONE`'s own out-of-sample point
+estimate), but its own CI (`[-0.13%,+1.11%]`) straddles zero — a small
+out-of-sample sample (n=114), not a reversed sign, is the binding
+constraint. A genuinely interesting secondary finding surfaced in the
+same run: `STRUCTURAL_STRENGTH_ALONE` (buying medium/long-term
+strength with no weakness condition) reverses to CI-decisive
+**negative** out-of-sample (-0.22%, CI=[-0.37%,-0.06%]) — the THIRD
+independent replication, via a THIRD distinct metric family, of this
+project's long-standing "buying strength alone fails" finding
+(`H_RELSTRENGTH_001`, `H_EXTREME_001`). Per the pre-registration's own
+frozen gate, adversarial checks were explicitly NOT run since the
+success gate (CI-decisiveness in all three splits) was not met — no
+promotion, no executable-strategy pre-registration follows from this
+result. Full writeup in `docs/research/
+H_MOMENTUM_001_MULTI_HORIZON_INTERACTION_PREREGISTRATION.md`.
+
 Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(45 hypotheses tested to date).
+(46 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -454,9 +484,16 @@ above. Per the user's own explicit next-direction guidance, the
 project is now moving to a genuinely different hypothesis family
 (multi-horizon momentum interaction — short-term weakness inside
 persistent medium/long-term strength) rather than a fourth
-exit-architecture or extreme-move variant.
+exit-architecture or extreme-move variant. Tested — `H_MOMENTUM_001`
+is now the closest thing to a live open thread: it passed the frozen
+incremental-information test out-of-sample and showed no sign
+reversal, but its own out-of-sample sample (n=114) was too small for
+CI-decisiveness — genuinely promising-shaped, but INCONCLUSIVE, not
+promoted, and its own adversarial-checks phase was correctly never
+triggered since the success gate was not met. See CURRENT ACTIVE EDGE
+STATUS and INCONCLUSIVE HYPOTHESES below for the full breakdown.
 
-## INCONCLUSIVE HYPOTHESES (18)
+## INCONCLUSIVE HYPOTHESES (19)
 
 H_ENTRY_003, H_ENTRY_005, H_EXIT_002, H_MEANREV_002, H_CONTEXT_MARKET_002,
 H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_CONTEXT_MARKET_004,
@@ -483,8 +520,16 @@ out-of-sample split — see above), and **H_MEANREV_003 (regime-
 conditioned mean reversion — the cleanest RAW finding in this registry,
 CI-decisive positive across all splits/candidates/horizons, but its own
 executable conversion failed as H_MEANREV_004 — see PROMISING
-HYPOTHESES and REJECTED HYPOTHESES above)**. Full evidence for each in
-`strategy/hypothesis_registry.py`.
+HYPOTHESES and REJECTED HYPOTHESES above)**, and **H_MOMENTUM_001
+(multi-horizon momentum interaction — short-term `trailing_return_5`
+weakness AND per-stock `trailing_return_60` structural strength;
+passed the frozen incremental-information test out-of-sample, no sign
+reversal, but the out-of-sample sample (n=114) was too small for
+CI-decisiveness; a real, disclosed secondary finding — buying
+structural strength ALONE reversed to CI-decisive negative
+out-of-sample, a third independent replication of this project's own
+"strength alone fails" pattern — see CURRENT ACTIVE EDGE STATUS
+above)**. Full evidence for each in `strategy/hypothesis_registry.py`.
 
 ## REJECTED HYPOTHESES (26)
 
@@ -750,23 +795,36 @@ underpowered but not reversed) — a real open question, not pursued
 further in this run. See CURRENT ACTIVE EDGE STATUS and REJECTED
 HYPOTHESES above for the full breakdown.
 
-**Priority #2, multi-horizon momentum interaction — now the top
-open item.** Per the user's own framing: short-term weakness combined
-with medium/long-term strength — conceptually distinct from pure mean
-reversion (buying temporary weakness *inside* persistent structural
-strength, not weakness alone). Not yet audited against the registry or
-pre-registered; the next step is a bounded audit (grep the registry for
-existing multi-horizon/momentum-interaction terminology, confirm no
-prior hypothesis has tested a *combined* short-term-weakness +
-medium/long-term-strength condition — `H_MEANREV_003`'s own
-`TRENDING_UP` regime gate is the closest precedent but gates on a
-binary regime flag, not a continuous longer-horizon momentum measure,
-so this would be a genuinely different formulation), then a frozen
-pre-registration before any measurement runs.
+**Priority #2, multi-horizon momentum interaction — DONE,
+`H_MOMENTUM_001`, INCONCLUSIVE with a real, not-yet-decisive
+incremental-information signal.** Per the user's own framing:
+short-term weakness (`trailing_return_5`, bottom 20th percentile)
+combined with that SAME stock's own medium/long-term structural
+strength (`trailing_return_60`, top 80th percentile) — conceptually
+distinct from pure mean reversion, and confirmed genuinely novel
+against the registry (`H_ENTRY_003` used a different RSI-shape metric
+family and was INSUFFICIENT_DATA at n=29; `H_MEANREV_003` gated on a
+market-wide `TRENDING_UP` regime flag, not per-stock long-horizon
+momentum). At h5 (primary horizon), COMBINED was CI-decisive positive
+in development (+1.01%) and validation (+0.68%), and its
+out-of-sample point estimate (+0.49%, n=114) **passed the frozen
+incremental-information test** — beating both `SHORT_WEAKNESS_ALONE`
+(+0.07%) and `STRUCTURAL_STRENGTH_ALONE` (-0.22%, itself CI-decisive
+negative out-of-sample — a third independent replication of "buying
+strength alone fails") — but COMBINED's own out-of-sample CI
+(`[-0.13%,+1.11%]`) straddled zero due to a small sample (n=114), not
+a reversed sign. Per the pre-registration's own frozen gate, no
+adversarial checks or executable-strategy pre-registration followed,
+since the all-three-splits-decisive success bar was not met. See
+CURRENT ACTIVE EDGE STATUS and INCONCLUSIVE HYPOTHESES above, and
+`docs/research/H_MOMENTUM_001_MULTI_HORIZON_INTERACTION_PREREGISTRATION.md`
+for the full breakdown. If ever revisited, it would need more elapsed
+calendar time to widen the out-of-sample window under the SAME frozen
+thresholds, not a retry with adjusted percentiles.
 
-**Priority #3, accumulating live forecast evidence — passive, ongoing,
-no new research degrees of freedom.** Let the real directional
-forecasts recorded to date resolve, then re-run
+**Priority #3, accumulating live forecast evidence — now the top open
+item, passive, ongoing, no new research degrees of freedom.** Let the
+real directional forecasts recorded to date resolve, then re-run
 `evaluate-forecasts`/`evaluate`/`learn` for the first real calibration
 read this project has ever had. Requires no new hypothesis or
 pre-registration — just elapsed time.
@@ -781,11 +839,15 @@ or a longer-history intraday data source.
 **Already tried, do not retest**: volatility contraction (`H_VOL_001`,
 REJECTED), the market-trend/volatility-regime sweep (`H_MEANREV_003`),
 two independent exit-architecture executable-conversion designs
-(`H_MEANREV_004`, `H_EXIT_005`), and now extreme-move/post-shock
-asymmetry (`H_EXTREME_001`, REJECTED — see above). Universe-
-generalization for `H_MEANREV_003` (per the `H_XSECT_006` precedent)
-remains a legitimate, cheap, not-yet-run check, but is lower priority
-than a genuinely new hypothesis family.
+(`H_MEANREV_004`, `H_EXIT_005`), extreme-move/post-shock asymmetry
+(`H_EXTREME_001`, REJECTED), and now the short-weakness/long-strength
+interaction at 20th/80th percentile thresholds specifically
+(`H_MOMENTUM_001`, INCONCLUSIVE — see above; do not silently re-run
+with different percentiles chasing a decisive result, that would be
+the prohibited post-hoc threshold search). Universe-generalization for
+`H_MEANREV_003` (per the `H_XSECT_006` precedent) remains a
+legitimate, cheap, not-yet-run check, but is lower priority than a
+genuinely new hypothesis family.
 
 **If the exit-architecture thread is ever resumed (not currently
 planned)**: regime-invalidation exit (exit when `TRENDING_UP` ends),

@@ -2642,4 +2642,98 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "writeup in docs/research/H_EXTREME_001_POST_SHOCK_ASYMMETRY_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_MOMENTUM_001",
+            description=(
+                "Does a single stock's own SHORT-TERM weakness (trailing_return_5 in the lower tail of its own "
+                "distribution) combined with that SAME stock's own MEDIUM/LONG-TERM structural strength "
+                "(trailing_return_60 in the upper tail) predict a better forward return than either condition "
+                "alone -- does long-horizon strength add INCREMENTAL predictive information beyond short-term "
+                "weakness alone, not just 'is the combined average positive.' Pre-registered BEFORE any "
+                "experiment code ran: docs/research/"
+                "H_MOMENTUM_001_MULTI_HORIZON_INTERACTION_PREREGISTRATION.md, committed as its own commit "
+                "prior to any experiment code."
+            ),
+            rationale=(
+                "Per the user's own explicit next-direction guidance, priority #2 after H_EXTREME_001 (priority "
+                "#1, complete): 'multi-horizon momentum interaction -- short-term weakness combined with "
+                "medium/long-term strength... buy temporary weakness inside persistent structural strength,' "
+                "conceptually distinct from pure mean reversion. Registry audit confirmed genuine novelty: "
+                "H_ENTRY_003 (pullback in uptrend) used a different metric family (RSI-shape, executable "
+                "strategy, INSUFFICIENT_DATA n=29); H_MEANREV_003 conditioned short-term zscore_close_20 "
+                "weakness on a MARKET-WIDE TRENDING_UP regime flag, not per-stock long-horizon momentum; "
+                "H_RELSTRENGTH_001 (buying medium-term strength alone) was REJECTED, directly motivating a test "
+                "of the INTERACTION specifically, since strength alone is already known to fail; H_EXTREME_001 "
+                "tested trailing_return_5 tails alone with no 60-bar dimension at all."
+            ),
+            expected_effect=(
+                "No prior assumption on direction. The critical question is whether COMBINED's forward-return "
+                "point estimate exceeds BOTH SHORT_WEAKNESS_ALONE's and STRUCTURAL_STRENGTH_ALONE's own point "
+                "estimates out-of-sample (the incremental-information test), not merely whether COMBINED is "
+                "positive."
+            ),
+            dataset_restrictions="Full original 32-symbol NSE universe (ORIGINAL_32_NSE_UNIVERSE), 10 years daily.",
+            experiment_design=(
+                "Zero new production code -- pure reuse. trailing_return_5/trailing_return_60 via "
+                "quant_research.cross_sectional.add_lookback_return_columns (DEFAULT_LOOKBACKS already includes "
+                "both). Four conditions (UNCONDITIONAL, SHORT_WEAKNESS_ALONE, STRUCTURAL_STRENGTH_ALONE, "
+                "COMBINED) measured via quant_research.market_behavior.measure_condition, market_filter='NSE', "
+                "all six FORWARD_HORIZONS, all three splits. Thresholds frozen from NSE-pooled "
+                "development-period-only data: WEAKNESS_THRESHOLD = 20th percentile of trailing_return_5 "
+                "(deliberately milder than H_EXTREME_001's 5th percentile, to preserve sample size under the "
+                "AND interaction); STRENGTH_THRESHOLD = 80th percentile of trailing_return_60."
+            ),
+            success_criteria=(
+                "COMBINED CI-decisive positive at h5 (primary horizon) in ALL THREE splits, no sign reversal, "
+                "AND COMBINED's out-of-sample point estimate exceeds both SHORT_WEAKNESS_ALONE's and "
+                "STRUCTURAL_STRENGTH_ALONE's own out-of-sample point estimates (the incremental-information "
+                "test), AND >=30 pooled observations per split for COMBINED."
+            ),
+            failure_criteria=(
+                "A sign reversal in COMBINED between any two splits, OR COMBINED's out-of-sample point estimate "
+                "is not better than BOTH alone-conditions' own out-of-sample point estimates (no incremental "
+                "information), OR the effect is too small to plausibly clear realistic costs."
+            ),
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "REAL MEASUREMENT (32/32 symbols, 10y, pure price-behavior, h5 = primary pre-declared horizon; "
+                "frozen thresholds from n=47,296 pooled development trailing_return_5 -- WEAKNESS_THRESHOLD "
+                "20th pct = -2.5630% -- and n=45,536 pooled development trailing_return_60 -- STRENGTH_"
+                "THRESHOLD 80th pct = +15.1840%): "
+                "COMBINED -- development n=963 mean=+1.0109% (CI=[+0.706%,+1.316%], decisive); validation "
+                "n=276 mean=+0.6777% (CI=[+0.225%,+1.130%], decisive); out_of_sample n=114 mean=+0.4895% "
+                "(CI=[-0.130%,+1.108%], NOT decisive -- straddles zero, small OOS sample the binding "
+                "constraint, no sign reversal, point estimate stays positive). "
+                "INCREMENTAL-INFORMATION TEST (frozen, out-of-sample, h5): PASSES -- COMBINED's OOS point "
+                "estimate (+0.4895%) exceeds both SHORT_WEAKNESS_ALONE's (+0.0668%, n=2990, CI=[-0.063%,"
+                "+0.197%], also not decisive) and STRUCTURAL_STRENGTH_ALONE's own OOS point estimate "
+                "(-0.2162%, n=1400, CI=[-0.373%,-0.059%], CI-DECISIVE NEGATIVE -- a genuine reversal from "
+                "development's own decisive positive +0.4776%). Requiring the short-term pullback alongside "
+                "structural strength turns a decisively-losing 'buy strength alone' result into a positive "
+                "(though not itself decisive) out-of-sample point estimate -- real evidence of incremental "
+                "information, even though COMBINED's own small out-of-sample sample (n=114) is not independently "
+                "CI-decisive. "
+                "SUCCESS GATE: does NOT pass -- all-three-splits CI-decisiveness fails specifically at "
+                "out-of-sample (underpowered, not reversed). Per the pre-registration's own frozen §11 gate, "
+                "the adversarial-checks phase (year-by-year stability, symbol concentration, cost deduction) "
+                "was explicitly NOT run, since its own prerequisite (passing the success gate) was not met -- "
+                "running it anyway would be exactly the 'keep testing until something looks promising enough' "
+                "pattern this project's discipline forbids. "
+                "SECONDARY FINDING, disclosed regardless of the primary verdict: STRUCTURAL_STRENGTH_ALONE's "
+                "own out-of-sample CI-decisive-negative reversal is the THIRD independent replication, via a "
+                "THIRD distinct metric family, of this project's long-standing finding that buying medium/"
+                "long-term strength alone fails out-of-sample on NSE (H_RELSTRENGTH_001's relative_strength_20, "
+                "H_EXTREME_001's trailing_return_5 95th-percentile tail, now trailing_return_60 80th-percentile "
+                "tail). SHORT_WEAKNESS_ALONE's own out-of-sample result is separately underpowered-not-reversed "
+                "(the same shape as H_EXTREME_001's own EXTREME_WEAKNESS side), not conflated with the "
+                "STRENGTH_ALONE result. "
+                "VERDICT: INCONCLUSIVE, matching the pre-registration's own frozen bucket exactly -- "
+                "directionally favorable, passes the incremental-information test, but the out-of-sample CI "
+                "straddles zero due to small sample size (n=114), not a reversed sign. Whether COMBINED would "
+                "clear the CI-decisive bar with more out-of-sample data (more elapsed calendar time under the "
+                "SAME frozen thresholds) is a genuine, real open question, not pursued further in this run -- "
+                "not a retry on the same data with adjusted percentiles. Full writeup in docs/research/"
+                "H_MOMENTUM_001_MULTI_HORIZON_INTERACTION_PREREGISTRATION.md."
+            ),
+        ),
     )

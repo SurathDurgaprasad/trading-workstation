@@ -278,3 +278,82 @@ or any live/paper-execution code path. No broker execution changes. No
 scheduler changes (see separate operational note in this segment's
 final report regarding a scheduler restart credential issue, unrelated
 to this hypothesis).
+
+## 14. Reproducibility record
+
+- Universe: `ORIGINAL_32_NSE_UNIVERSE`, all 32 built successfully. 10y daily.
+- `development_end=2022-09-08`, `validation_end=2024-09-07` (shared calendar boundaries).
+- Frozen thresholds, computed from pooled NSE development-period data: `WEAKNESS_THRESHOLD` (20th percentile of n=47,296 `trailing_return_5` observations) = **-2.5630%**; `STRENGTH_THRESHOLD` (80th percentile of n=45,536 `trailing_return_60` observations) = **+15.1840%**.
+
+## 15. Results — INCONCLUSIVE: real incremental information at h5 OOS, but underpowered to a decisive verdict
+
+Full evidence: `H_MOMENTUM_001` in `strategy/hypothesis_registry.py`.
+
+**Primary horizon (h5), all four conditions:**
+
+| Condition | Split | n | Mean | 95% CI |
+|---|---|---|---|---|
+| UNCONDITIONAL | development | 47456 | +0.36% | [+0.32%,+0.40%] |
+| UNCONDITIONAL | validation | 15712 | +0.45% | [+0.40%,+0.50%] |
+| UNCONDITIONAL | out-of-sample | 15832 | +0.00% | [-0.05%,+0.06%] |
+| SHORT_WEAKNESS_ALONE | development | 9460 | +0.33% | [+0.22%,+0.43%] |
+| SHORT_WEAKNESS_ALONE | validation | 2286 | +0.83% | [+0.69%,+0.98%] |
+| SHORT_WEAKNESS_ALONE | out-of-sample | 2990 | +0.07% | [-0.06%,+0.20%] |
+| STRUCTURAL_STRENGTH_ALONE | development | 9108 | +0.48% | [+0.39%,+0.56%] |
+| STRUCTURAL_STRENGTH_ALONE | validation | 2908 | +0.14% | [+0.01%,+0.27%] |
+| STRUCTURAL_STRENGTH_ALONE | out-of-sample | 1400 | **-0.22%** | **[-0.37%,-0.06%]** |
+| COMBINED | development | 963 | **+1.01%** | **[+0.71%,+1.32%]** |
+| COMBINED | validation | 276 | **+0.68%** | **[+0.23%,+1.13%]** |
+| COMBINED | out-of-sample | 114 | +0.49% | [-0.13%,+1.11%] |
+
+**§8's incremental-information test (frozen, out-of-sample, h5)**:
+COMBINED's out-of-sample point estimate (+0.4895%) exceeds BOTH
+SHORT_WEAKNESS_ALONE's (+0.0668%) and STRUCTURAL_STRENGTH_ALONE's
+(-0.2162%) own out-of-sample point estimates — the test **passes**.
+Long-horizon strength does appear to add real incremental information
+beyond short-term weakness alone: on this same sample, buying
+structural strength ALONE reverses to a decisive loss out-of-sample,
+while requiring the short-term-weakness pullback alongside it
+produces a positive (though not itself decisive) out-of-sample point
+estimate.
+
+**§9's success gate (frozen, CI-decisive positive in ALL THREE
+splits) does NOT pass**: development and validation are both
+CI-decisive positive, but out-of-sample's CI (`[-0.13%,+1.11%]`,
+n=114) straddles zero. No sign reversal occurred (all three means are
+positive), and the effect is not small relative to the ~0.21%
+round-trip cost estimate on its point estimate — but with only 114
+pooled out-of-sample observations the interval is too wide to call
+decisive either way.
+
+**Verdict: INCONCLUSIVE**, matching the pre-registration's own frozen
+bucket exactly ("directionally favorable and passing the incremental-
+information test, but out-of-sample CI straddles zero — underpowered,
+not reversed"). Per §11, the adversarial-checks phase (year-by-year
+stability, symbol concentration, cost deduction) is explicitly NOT run
+— its own frozen gate (passing §9's success criteria) was not met, and
+running it anyway would be exactly the kind of "keep testing until
+something looks promising enough" pattern this project's discipline
+forbids.
+
+**A genuinely useful secondary finding, disclosed regardless of the
+primary verdict**: `STRUCTURAL_STRENGTH_ALONE`'s own out-of-sample
+result is CI-decisive NEGATIVE — a clean reversal from development's
+CI-decisive positive result. This is now the THIRD independent
+replication, via a THIRD distinct metric family, of this project's
+long-standing finding that buying medium/long-term strength alone
+fails out-of-sample on NSE (`H_RELSTRENGTH_001`'s `relative_strength_20`
+vs. benchmark, `H_EXTREME_001`'s `trailing_return_5` 95th-percentile
+tail, and now this entry's `trailing_return_60` 80th-percentile tail).
+`SHORT_WEAKNESS_ALONE`'s own out-of-sample result, by contrast, is
+underpowered-not-reversed — the same shape seen repeatedly elsewhere
+in this registry for weakness-only conditions
+(`H_EXTREME_001`'s own `EXTREME_WEAKNESS` side).
+
+**What remains open**: whether COMBINED would clear the CI-decisive
+bar with more out-of-sample data (n=114 is the binding constraint, not
+a reversed sign) is a genuine, real question — not pursued further in
+this run. If revisited, it would need its own justification (e.g. more
+elapsed calendar time widening the out-of-sample window under the same
+frozen thresholds) rather than a retry on the same data with adjusted
+percentiles.
