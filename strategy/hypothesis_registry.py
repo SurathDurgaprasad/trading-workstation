@@ -3071,4 +3071,98 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "it. Full writeup in docs/research/H_MEANREV_007_CONFOUNDING_TEST_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_MEANREV_008",
+            description=(
+                "Risk characterization: is the larger mean forward return of the high-volatility bucket "
+                "(H_MEANREV_007's own Candidate C) genuinely compensation for disproportionately worse "
+                "downside/tail risk, and does the relative-weakness bucket (Candidate B) have a superior "
+                "return-to-tail-risk profile? A risk-distribution study on H_MEANREV_006/007's own frozen "
+                "buckets, NOT an executable strategy, entry/exit optimization, or parameter search. "
+                "Pre-registered BEFORE any experiment code ran: docs/research/"
+                "H_MEANREV_008_RISK_CHARACTERIZATION_PREREGISTRATION.md, committed as its own commit prior "
+                "to any experiment code."
+            ),
+            rationale=(
+                "H_MEANREV_007 established that C's larger mean vs B's smaller mean was mean-only evidence -- "
+                "it never examined the downside/tail distribution. A genuinely new analytical question on the "
+                "SAME already-frozen buckets, not covered by H_MEANREV_007's own scope (verified by direct "
+                "reading -- that entry only reports p5/p95 as a byproduct of summarize_forward_returns, never "
+                "frames a risk-vs-return question), hence its own new hypothesis ID rather than a same-entry "
+                "addendum."
+            ),
+            expected_effect="No prior assumption on which bucket has the superior risk-adjusted profile -- this is a characterization study, not a directional prediction.",
+            dataset_restrictions="COMBINED universe (206/208 symbols), identical to H_MEANREV_006/007. 10 years daily.",
+            experiment_design=(
+                "One new, small, independently-tested module (quant_research/risk_characterization.py, "
+                "summarize_forward_return_risk, 10 tests) computing standard distributional statistics "
+                "(p10/p25/p75/p90, min/max, downside_deviation, expected_shortfall_5pct gated at >=400 "
+                "observations, loss_given_loss, gain_given_win, a mean_to_downside_deviation descriptive "
+                "ratio) as a companion to the existing summarize_forward_returns, not a replacement. Reuses "
+                "H_MEANREV_006/007's own frozen buckets (A/B/C/D), thresholds (RELSTRENGTH_MEDIAN=-6.8845%, "
+                "ATR_PCT_33/67=2.6583%/3.6352%), universe, and splits verbatim. All six FORWARD_HORIZONS "
+                "reported (temporal risk-evolution question). WITH/WITHOUT-2020 robustness extended to the "
+                "full risk distribution (not just the mean, which H_MEANREV_007 already covered), plus a "
+                "tail-concentration-in-2020 check (what fraction of each bucket's own worst 5% of "
+                "development-period observations falls in calendar year 2020)."
+            ),
+            success_criteria="Descriptive/comparative by design, matching H_MEANREV_006's own precedent -- no single pass/fail bar. Each bucket's full risk distribution is reported and compared honestly; the finding is the SHAPE and the risk-adjusted relationship, not a binary verdict.",
+            failure_criteria="N/A -- see success_criteria; this entry's own registry status reflects the overall character of the findings.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "REAL MEASUREMENT (206/208 symbols, 10y, frozen zscore_close_20 < -2.0 entry and "
+                "H_MEANREV_006/007's own frozen thresholds, all unchanged; h10 primary for single-number "
+                "tables, all six horizons for the temporal question): "
+                "PRIMARY RISK-DISTRIBUTION REPORT (out-of-sample, h10) -- A mean=+0.59% downside_dev=4.12% "
+                "ES5%=-13.64% ratio=0.143; B mean=+1.35% downside_dev=4.24% ES5%=-13.83% ratio=0.318; C "
+                "mean=+2.10% downside_dev=5.10% ES5%=-16.26% ratio=0.413 (HIGHEST of the four); D mean=+2.08% "
+                "downside_dev=5.18% ES5%=-16.43% ratio=0.402. THE CENTRAL FINDING, cutting against the naive "
+                "expectation: C's mean is roughly 3.6x A's while its downside_deviation grows only ~24% and "
+                "ES5% only ~19% -- C's larger mean is NOT proportional compensation for proportionally larger "
+                "downside risk in out-of-sample data; C shows the BEST risk-adjusted ratio of the four "
+                "buckets there (and in validation: C=0.397 vs B=0.243), the OPPOSITE of what H_MEANREV_007's "
+                "mean-only framing might suggest. "
+                "BUT development (2020-contaminated) inverts this: C shows CI-decisive NEGATIVE mean (-0.50%) "
+                "AND the LARGEST downside_deviation (10.04%) and ES5% (-33.10%) of all four buckets "
+                "simultaneously -- worst of both dimensions at once. "
+                "TAIL CONCENTRATION IN 2020 (worst 5% of development-period observations, h10): A 70.7% (515/"
+                "728), B 58.2% (212/364, LOWEST), C 84.6% (247/292, HIGHEST), D 74.9% (137/183) -- against a "
+                "'fair' ~12.5% share (2020 is ~1 of 8 development years). A single systemic-crisis year "
+                "explains the overwhelming majority of every bucket's own worst outcomes, most extremely for "
+                "C. "
+                "WITH/WITHOUT-2020 FULL RISK DISTRIBUTION (development, h10): excluding 2020, downside risk "
+                "drops substantially for EVERY bucket (26-37% reduction in downside_deviation) -- confirming "
+                "2020 drives tail risk broadly -- but C's OWN downside risk remains the LARGEST of the four "
+                "buckets even WITHOUT 2020 (6.76% vs B's 6.02%, A's 5.34%) -- 2020 amplifies a REAL, "
+                "pre-existing baseline risk difference, it does not manufacture the volatility-risk "
+                "relationship from nothing. Remarkably, C's own mean_to_downside_deviation ratio WITHOUT 2020 "
+                "(0.219) is STILL the best of the four buckets, matching validation/out-of-sample -- in every "
+                "non-2020-dominated view of the data, C offers the best risk-adjusted profile, not the worst; "
+                "2020 specifically is where that relationship inverts catastrophically. "
+                "TEMPORAL RISK EVOLUTION (out-of-sample, ratio by horizon): non-monotonic for every bucket -- "
+                "generally IMPROVES from h1 through h3-h5 (e.g. B: 0.198->0.466, D: 0.252->0.619), then DIPS "
+                "at h10, then partially recovers by h20 -- not a simple 'longer holding is proportionally "
+                "better or worse' story. "
+                "CROSS-SECTIONAL SLICING: NOT run, per this entry's own frozen §7 gate -- the year-"
+                "concentration finding is already a complete, well-understood explanation (2020 is a "
+                "documented singular macro event), matching H_MEANREV_007's own established gating "
+                "precedent. "
+                "VERDICT: INCONCLUSIVE -- a risk-characterization/descriptive study by design (no single "
+                "frozen pass/fail bar, matching H_MEANREV_006's own precedent), and the honest finding is "
+                "genuinely REGIME-CONTINGENT: in normal (non-2020) conditions C offers the best risk-adjusted "
+                "ratio of the four buckets; in a systemic-crisis regime (2020) that relationship inverts "
+                "sharply. B's real advantage is specifically crisis-regime robustness (lowest tail-in-2020 "
+                "concentration, mildest mean/risk degradation), not a superior risk-adjusted ratio in normal "
+                "conditions. EMPIRICAL CONSTRAINTS documented for any FUTURE executable design (not "
+                "implemented here): (a) a volatility-conditioned entry needs an explicit systemic/crisis-"
+                "regime risk mechanism, since its tail risk concentrates almost entirely in such episodes; "
+                "(b) a relative-weakness-conditioned entry is more crisis-resistant but not superior in "
+                "normal conditions -- a complementary, not strictly better, risk profile; (c) the "
+                "non-monotonic risk-adjusted curve (h3-h5 best, h10 a dip) should inform any future exit-"
+                "horizon choice rather than assuming longer is always better; (d) position sizing must plan "
+                "for the full observed tail (ES5% roughly -13% to -33% depending on bucket/period), not just "
+                "typical-case downside. Full writeup in docs/research/"
+                "H_MEANREV_008_RISK_CHARACTERIZATION_PREREGISTRATION.md."
+            ),
+        ),
     )

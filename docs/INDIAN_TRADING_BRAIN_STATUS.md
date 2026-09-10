@@ -545,12 +545,41 @@ smaller-magnitude-but-robust relative-weakness component, not one
 unified mechanism. Full writeup in `docs/research/
 H_MEANREV_007_CONFOUNDING_TEST_PREREGISTRATION.md`.
 
+**Risk characterization — `H_MEANREV_008`, INCONCLUSIVE, a genuinely
+regime-contingent finding that refines the earlier "volatility=
+fragile" framing.** Is the high-volatility bucket's larger mean
+(`H_MEANREV_007`'s Candidate C) compensation for disproportionately
+worse downside/tail risk, or is it comparatively "free"? Using
+`H_MEANREV_006`/`007`'s own frozen buckets and thresholds, plus new
+distributional statistics (p10/p25/p75/p90, downside deviation,
+expected shortfall, conditional gain/loss): in out-of-sample data,
+C's mean is ~3.6x the unconditioned bucket's, while its downside risk
+grows only ~20-25% — C shows the BEST return-to-downside-risk ratio of
+the four buckets in both validation and out-of-sample, the opposite of
+what a mean-only reading suggests. But development (2020-contaminated)
+inverts this sharply: C shows both the worst mean AND the largest
+downside risk simultaneously. A tail-concentration check quantifies
+this precisely: 84.6% of C's own worst-5%-of-outcomes fall in calendar
+year 2020 alone (vs. relative-weakness's 58.2%, the lowest of the
+four) — against a "fair" ~12.5% share. Even excluding 2020, C's
+baseline downside risk remains the largest of the four buckets, so
+2020 amplifies a real pre-existing difference rather than
+manufacturing it — but excluding 2020, C's own risk-adjusted ratio is
+*still* the best of the four. The relative-weakness bucket's real
+advantage is specifically crisis-regime robustness, not a superior
+risk-adjusted profile in normal conditions. Temporal risk evolution is
+non-monotonic (improves h1→h3-5, dips at h10, partially recovers by
+h20) — not a simple "longer holding is better/worse" story. No
+executable design follows — explicit empirical constraints for any
+FUTURE exit/risk design are documented, not implemented. Full writeup
+in `docs/research/H_MEANREV_008_RISK_CHARACTERIZATION_PREREGISTRATION.md`.
+
 Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(50 hypotheses tested to date).
+(51 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -600,7 +629,7 @@ promoted, and its own adversarial-checks phase was correctly never
 triggered since the success gate was not met. See CURRENT ACTIVE EDGE
 STATUS and INCONCLUSIVE HYPOTHESES below for the full breakdown.
 
-## INCONCLUSIVE HYPOTHESES (20)
+## INCONCLUSIVE HYPOTHESES (21)
 
 H_ENTRY_003, H_ENTRY_005, H_EXIT_002, H_MEANREV_002, H_CONTEXT_MARKET_002,
 H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_CONTEXT_MARKET_004,
@@ -650,8 +679,19 @@ specifically by 2020's COVID crash — every other development-period
 year broadly matches validation/out-of-sample's own positive shape,
 and the finding sharpens Q4's own result (2020 was a textbook
 MARKET_DRIVEN crash, the less-reliable bucket Q4 already identified) —
-see CURRENT ACTIVE EDGE STATUS above)**. Full evidence for each in
-`strategy/hypothesis_registry.py`.
+see CURRENT ACTIVE EDGE STATUS above)**, and **H_MEANREV_008 (risk
+characterization — is the high-volatility bucket's larger mean
+compensation for worse tail risk? A genuinely regime-contingent
+finding: in normal (non-2020) conditions the high-volatility bucket
+shows the BEST return-to-downside-risk ratio of the four buckets
+tested, not the worst; in the 2020 crisis regime that inverts sharply
+(84.6% of its own worst-5%-of-outcomes fall in that single year, vs.
+58.2% for the relative-weakness bucket, the lowest of the four); the
+relative-weakness bucket's real advantage is crisis-regime robustness,
+not a superior risk-adjusted ratio in normal conditions; temporal risk
+evolution is non-monotonic across horizons, not a simple
+longer-is-better/worse story — see CURRENT ACTIVE EDGE STATUS
+above)**. Full evidence for each in `strategy/hypothesis_registry.py`.
 
 ## REJECTED HYPOTHESES (29)
 
@@ -1144,24 +1184,43 @@ magnitude, relative weakness dominates robustness/stability through
 This is a genuine mechanistic result (per the mission's own guidance:
 "if it establishes a strong mechanism, do NOT immediately optimize an
 executable strategy — instead update the research map and identify
-the next missing scientific layer"). The natural next scientific layer
-— NOT yet pursued, a candidate for the next segment, not pre-committed
-— is **RISK CHARACTERISTICS**: this whole mean-reversion-family
-research thread has so far reported mean/median/win-rate/CI, but never
-the DOWNSIDE tail (p5, worst-case magnitude) of each identified bucket
-specifically. Given `H_MEANREV_007` just showed the high-volatility
-bucket carries the largest mean magnitude AND the largest fragility
-(a full sign reversal in a crisis year), a natural, well-motivated
-question is whether its downside tail is proportionally worse too —
-directly relevant before any future exit/risk design, and answerable
-with the SAME already-frozen buckets and thresholds (no new parameter
-search). Not started this segment — a substantial unit of work was
-already completed.
+the next missing scientific layer").
 
-No further mean-reversion-family mechanism question beyond that is
-currently flagged as both genuinely new and cheap; the other next
-candidates remain the "next candidate families not yet tested" list
-above (turn-of-month calendar effects, volume-price divergence), each
+**Also done — `H_MEANREV_008`, risk characterization, INCONCLUSIVE
+with a genuinely regime-contingent finding that materially refines the
+`H_MEANREV_007` picture — see CURRENT ACTIVE EDGE STATUS and
+INCONCLUSIVE HYPOTHESES above.** In normal (non-2020) conditions the
+high-volatility bucket offers the BEST return-to-downside-risk ratio
+of the four buckets, not the worst — its apparent fragility is
+overwhelmingly a single-crisis-year (2020) phenomenon (84.6% of its
+own worst-5%-of-outcomes), not a general property. The
+relative-weakness bucket's real edge is specifically crisis-regime
+robustness, not a superior risk-adjusted ratio otherwise. Temporal
+risk evolution is non-monotonic (best around h3-h5, a dip at h10),
+informative for, but not itself, an exit design.
+
+**This mean-reversion mechanism thread (`H_MEANREV_005`→`006`→`007`→
+`008`) has now reached its own natural research boundary.** The
+sequence MECHANISM → RESPONSE DISTRIBUTION → RISK DISTRIBUTION is
+complete for the buckets tested. The next step in that sequence —
+EXIT DESIGN / POSITION-RISK DESIGN — is a fundamentally different kind
+of work (building an executable component, not measuring one), is
+explicitly out of scope for a pure-measurement hypothesis entry, and
+would need the empirical constraints `H_MEANREV_008` documented
+(crisis-regime risk gating, non-monotonic horizon shape, full-tail
+position sizing) to be genuinely respected rather than optimized
+around after the fact — a materially different, higher-stakes kind of
+task than anything in this thread so far, and one this project's own
+history (`H_XSECT_002`, `H_MEANREV_004`, `H_EXIT_005`) shows is easy
+to get wrong. Continuing this specific thread further without a
+concrete executable-design mandate would only be "try another
+threshold" work, which the mission's own discipline explicitly says to
+stop at, not manufacture.
+
+No further mean-reversion-family mechanism question is currently
+flagged as both genuinely new and cheap; the other next candidates
+remain the "next candidate families not yet tested" list above
+(turn-of-month calendar effects, volume-price divergence), each
 requiring its own fresh registry/data-depth audit before
 pre-registration.
 
