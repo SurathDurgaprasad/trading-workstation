@@ -222,7 +222,68 @@ pre-registered design to become tradeable, since NIFTY itself is not
 directly tradeable in this project's current execution infrastructure,
 the same disclosed gap `H_CALENDAR_001`/`002` already found).
 
-## 11. Data integrity and scope
+## 12. Reproducibility record
+
+- Universe: `ORIGINAL_32_NSE_UNIVERSE`, all 32 built successfully. `^NSEI`, 2466 bars, 2016-09-08 to 2026-09-08.
+- `development_end=2022-09-08`, `validation_end=2024-09-07` (shared calendar boundaries).
+- Breadth series: n=2474 calendar dates, 2425 non-NaN (49 dates during early universe warmup with every symbol still `UNKNOWN`, correctly excluded, never fabricated).
+- Frozen thresholds, from n=1434 pooled development-period daily `breadth_pct` observations: `WEAKNESS_THRESHOLD` (20th percentile) = **0.2500**; `STRENGTH_THRESHOLD` (80th percentile) = **0.6562**.
+
+## 13. Results — REJECTED: the "narrow rally is fragile" thesis does not hold; a sign-order reversal, with out-of-sample trending the opposite way
+
+Full evidence: `H_BREADTH_001` in `strategy/hypothesis_registry.py`.
+
+**Primary horizon (h10), NARROW_BREADTH vs BROAD_BREADTH vs UNCONDITIONAL:**
+
+| Condition | Split | n | Mean | 95% CI |
+|---|---|---|---|---|
+| UNCONDITIONAL | development | 1479 | +0.55% | [+0.36%,+0.73%] |
+| UNCONDITIONAL | validation | 491 | +0.74% | [+0.55%,+0.93%] |
+| UNCONDITIONAL | out-of-sample | 486 | -0.08% | [-0.31%,+0.15%] |
+| NARROW_BREADTH | development | 306 | +0.36% | [-0.23%,+0.95%] |
+| NARROW_BREADTH | validation | 95 | +1.03% | [+0.58%,+1.47%] |
+| NARROW_BREADTH | out-of-sample | 150 | **+0.48%** | [+0.04%,+0.93%] |
+| BROAD_BREADTH | development | 312 | +0.91% | [+0.62%,+1.20%] |
+| BROAD_BREADTH | validation | 148 | +0.95% | [+0.70%,+1.20%] |
+| BROAD_BREADTH | out-of-sample | 30 | **-0.21%** | [-1.02%,+0.60%] |
+
+**§8's frozen success criterion** (NARROW < BROAD in ALL THREE splits,
+no sign-order reversal) **fails**: development shows the predicted
+direction (NARROW +0.36% < BROAD +0.91%), but validation reverses
+(NARROW +1.03% > BROAD +0.95%) and out-of-sample reverses more
+sharply, with NARROW_BREADTH's own point estimate (+0.48%) *positive*
+while BROAD_BREADTH's own point estimate (-0.21%) is *negative* — the
+exact opposite of the "narrow rally is fragile" thesis on the
+out-of-sample data. This is a clean, disclosed sign-order reversal
+meeting §8's own explicit failure condition.
+
+**Verdict: REJECTED.** The economic thesis (broad participation is
+more durable than narrow participation) is not supported by this
+measurement; if anything the out-of-sample data leans the opposite
+direction, though BROAD_BREADTH's own out-of-sample sample is thin
+(n=30, near this entry's own 30-observation floor) and its CI
+(`[-1.02%,+0.60%]`) is not itself CI-decisive — so this should be read
+as "the predicted direction failed to replicate," not as confident
+evidence for the reverse thesis.
+
+**Incremental-information check (§9), run for full disclosure despite
+the gate not being met**: restricting to dates where NIFTY's own
+`trend_regime == TRENDING_UP`, `NARROW_BREADTH` never co-occurs at all
+(n=0 in every split) — mechanically, when fewer than 20% of the
+universe is individually trending up, the index itself is essentially
+never independently classified TRENDING_UP either. This is itself a
+useful methodological finding: the "index looks fine while breadth
+quietly deteriorates" divergence scenario this hypothesis's thesis
+depends on is empirically rare-to-nonexistent at the 20th-percentile
+threshold on this data — NARROW_BREADTH and NIFTY's own uptrend
+classification are close to mutually exclusive, not independent
+dimensions, undermining the premise the incremental-information test
+was designed to probe. This does not change the REJECTED verdict
+(already decided by §8 alone) but is disclosed as a genuine limitation
+of this specific threshold choice, not evidence either way about a
+looser breadth definition.
+
+## 14. Data integrity and scope
 
 Reuses `build_universe_datasets`/`build_symbol_dataset` against the
 existing 10-year NSE cache (already verified fresh/deep for all 32

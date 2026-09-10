@@ -2736,4 +2736,87 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "H_MOMENTUM_001_MULTI_HORIZON_INTERACTION_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_BREADTH_001",
+            description=(
+                "Does NSE market BREADTH -- the fraction of the 32-symbol universe individually classified "
+                "TRENDING_UP on a given date, a cross-sectional PARTICIPATION measure -- predict NIFTY's "
+                "(^NSEI) own forward returns, and does it add incremental information beyond NIFTY's own "
+                "index-level trend regime (already tested as a context filter in H_CONTEXT_MARKET_001-005, "
+                "but as index price trend, never as universe-wide participation)? Pre-registered BEFORE any "
+                "experiment code ran: docs/research/H_BREADTH_001_MARKET_BREADTH_PREREGISTRATION.md, committed "
+                "as its own commit prior to any experiment code."
+            ),
+            rationale=(
+                "Per the mission's own explicit instruction to return to the registry, avoid renaming/"
+                "re-parameterizing already-weak families (buying strength alone, naive cross-sectional "
+                "laggards, sector rotation, calendar effects, executable mean-reversion variants, global-to-"
+                "India transmission, volatility contraction, stop-based exit variants), and prioritize "
+                "Indian-market-specific mechanisms not yet tested. The classic technical-analysis 'narrow "
+                "rally is fragile' divergence thesis -- an index can be propped up by a few large names while "
+                "broader participation deteriorates -- had never been tested in this registry: every prior "
+                "H_CONTEXT_MARKET_00x/H_MEANREV_003 entry conditions a STOCK-level signal on the INDEX's own "
+                "price trend, never on cross-sectional PARTICIPATION breadth, a mechanistically distinct "
+                "dimension that can diverge from the index's own trend."
+            ),
+            expected_effect=(
+                "NARROW_BREADTH days (bottom-quintile universe participation) should show a LOWER mean forward "
+                "NIFTY return than BROAD_BREADTH days (top-quintile participation), consistently across all "
+                "three splits, with the effect not fully explained by NIFTY's own already-tested trend regime."
+            ),
+            dataset_restrictions="Full original 32-symbol NSE universe for breadth computation; ^NSEI as the sole forward-return target. 10 years daily.",
+            experiment_design=(
+                "New, small module quant_research/market_breadth.py::compute_universe_breadth_series -- a pure "
+                "cross-sectional aggregation over each SymbolDataset's own already-causal trend_regime column "
+                "(backtesting.regime.classify_trend_at, already computed by build_symbol_dataset for every "
+                "hypothesis in this registry that touches trend regime) -- zero new per-symbol indicator "
+                "invented, 6 targeted unit tests (tests/test_market_breadth.py). Thresholds frozen from "
+                "NSE-pooled development-period-only daily breadth_pct: 20th/80th percentile (not 5th/95th, "
+                "since this is a single daily series, not pooled across 32 symbols -- a quintile split "
+                "preserves usable per-split sample size). Measured against ^NSEI's own forward returns via "
+                "summarize_forward_returns (reused unchanged), all six FORWARD_HORIZONS, primary horizon h10. "
+                "Control: NIFTY's own trend_regime via build_benchmark_regime_series (reused unchanged) as the "
+                "required 'simpler formulation' comparator."
+            ),
+            success_criteria=(
+                "NARROW_BREADTH's mean forward NIFTY return at h10 LOWER than BROAD_BREADTH's in ALL THREE "
+                "splits, no sign-order reversal, AND (if met) evidence that breadth adds information beyond "
+                "NIFTY's own trend regime specifically."
+            ),
+            failure_criteria="The NARROW < BROAD ordering reverses in any split, or the effect is not economically meaningful, or is too small to be of plausible practical relevance.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REAL MEASUREMENT (32/32 symbols + ^NSEI, 10y, pure price-behavior, h10 = primary pre-declared "
+                "horizon; frozen thresholds from n=1434 pooled development-period daily breadth_pct -- "
+                "WEAKNESS_THRESHOLD 20th pct = 0.2500, STRENGTH_THRESHOLD 80th pct = 0.6562): "
+                "NARROW_BREADTH -- development n=306 mean=+0.3618% (CI=[-0.227%,+0.951%]); validation n=95 "
+                "mean=+1.0259% (CI=[+0.578%,+1.474%]); out_of_sample n=150 mean=+0.4841% (CI=[+0.038%,"
+                "+0.930%]). BROAD_BREADTH -- development n=312 mean=+0.9127% (CI=[+0.623%,+1.202%]); "
+                "validation n=148 mean=+0.9479% (CI=[+0.701%,+1.195%]); out_of_sample n=30 mean=-0.2084% "
+                "(CI=[-1.016%,+0.600%]). "
+                "SUCCESS GATE: FAILS -- development shows the predicted direction (NARROW +0.36% < BROAD "
+                "+0.91%), but validation reverses (NARROW +1.03% > BROAD +0.95%) and out-of-sample reverses "
+                "more sharply, with NARROW positive (+0.48%) and BROAD negative (-0.21%) -- the OPPOSITE of "
+                "the 'narrow rally is fragile' thesis out-of-sample. A clean, disclosed sign-order reversal "
+                "meeting this entry's own explicit §8 failure condition. BROAD_BREADTH's own out-of-sample "
+                "sample is thin (n=30, near the 30-observation floor) and its own CI is not itself CI-decisive, "
+                "so this reads as 'the predicted direction failed to replicate,' not confident evidence for the "
+                "reverse thesis. "
+                "INCREMENTAL-INFORMATION CHECK (run for full disclosure despite the gate not being met): "
+                "restricting to NIFTY's own trend_regime == TRENDING_UP dates, NARROW_BREADTH never co-occurs "
+                "at all (n=0 in every split) -- when fewer than 20% of the universe is individually trending "
+                "up, the index itself is essentially never independently classified TRENDING_UP either. A "
+                "genuine methodological finding: the 'index looks fine while breadth quietly deteriorates' "
+                "divergence scenario this hypothesis depends on is empirically rare-to-nonexistent at the "
+                "20th-percentile threshold on this data -- NARROW_BREADTH and NIFTY's own uptrend "
+                "classification are close to mutually exclusive, not independent dimensions, undermining the "
+                "premise the incremental-information test was designed to probe. Does not change the verdict "
+                "(already decided by the sign reversal alone), disclosed as a genuine limitation of this "
+                "specific threshold choice. "
+                "VERDICT: REJECTED. The classic 'narrow rally is fragile' divergence thesis is not supported "
+                "on this data at these thresholds/horizons -- a real, disclosed negative finding, not a "
+                "fabricated null. Full writeup in docs/research/"
+                "H_BREADTH_001_MARKET_BREADTH_PREREGISTRATION.md."
+            ),
+        ),
     )

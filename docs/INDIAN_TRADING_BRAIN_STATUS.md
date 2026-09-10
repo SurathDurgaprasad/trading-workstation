@@ -442,12 +442,35 @@ promotion, no executable-strategy pre-registration follows from this
 result. Full writeup in `docs/research/
 H_MOMENTUM_001_MULTI_HORIZON_INTERACTION_PREREGISTRATION.md`.
 
+**A genuinely new mechanism — market breadth, not tested before —
+`H_BREADTH_001`, REJECTED via a clean sign-order reversal.** Does the
+FRACTION of the 32-symbol universe individually trending up (a
+cross-sectional PARTICIPATION measure, mechanistically distinct from
+NIFTY's own index-level trend already tested in
+`H_CONTEXT_MARKET_001`-`005`) predict NIFTY's own forward return — the
+classic "narrow rally is fragile" divergence thesis? Thresholds frozen
+from NSE-pooled development-period-only daily breadth (20th/80th
+percentile). At h10 (primary horizon): development showed the
+predicted direction (`NARROW_BREADTH` +0.36% < `BROAD_BREADTH`
++0.91%), but validation reversed (+1.03% vs +0.95%) and out-of-sample
+reversed more sharply — `NARROW_BREADTH` positive (+0.48%),
+`BROAD_BREADTH` negative (-0.21%) — the opposite of the thesis
+out-of-sample. A clean, disclosed sign-order reversal, this entry's
+own explicit failure condition. A genuine methodological finding
+surfaced alongside it: restricting to NIFTY's own `TRENDING_UP` dates,
+`NARROW_BREADTH` never co-occurs at all (n=0 in every split) — narrow
+participation and NIFTY's own uptrend classification are close to
+mutually exclusive on this data, not independent dimensions, meaning
+the "index looks fine while breadth deteriorates" scenario this
+hypothesis depends on essentially never occurs at this threshold. Full
+writeup in `docs/research/H_BREADTH_001_MARKET_BREADTH_PREREGISTRATION.md`.
+
 Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(46 hypotheses tested to date).
+(47 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -531,7 +554,7 @@ out-of-sample, a third independent replication of this project's own
 "strength alone fails" pattern — see CURRENT ACTIVE EDGE STATUS
 above)**. Full evidence for each in `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (26)
+## REJECTED HYPOTHESES (27)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
@@ -582,7 +605,19 @@ via H_XSECT_001/H_ENTRY_002/H_ENTRY_004/H_RELSTRENGTH_001/
 H_BREAKOUT_001; WEAKNESS is separately, more mildly, inconclusive —
 development/validation CI-decisive positive but out-of-sample
 underpowered rather than reversed, a real open question not pursued
-further in this run)**. Full evidence for each in
+further in this run)**, and **H_BREADTH_001 (market breadth —
+cross-sectional participation, a genuinely new mechanism distinct from
+NIFTY's own index-level trend already tested in
+H_CONTEXT_MARKET_001-005; the "narrow rally is fragile" divergence
+thesis tested against NIFTY's own forward returns, thresholds frozen
+from development-period-only daily breadth; development showed the
+predicted direction but validation and out-of-sample both reversed,
+out-of-sample most sharply — a clean sign-order reversal, this entry's
+own explicit failure condition; a genuine methodological finding
+surfaced alongside it — narrow breadth and NIFTY's own uptrend
+classification are close to mutually exclusive on this data, so the
+divergence scenario the thesis depends on essentially never occurs at
+this threshold)**. Full evidence for each in
 `strategy/hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
@@ -891,12 +926,26 @@ for the full breakdown. If ever revisited, it would need more elapsed
 calendar time to widen the out-of-sample window under the SAME frozen
 thresholds, not a retry with adjusted percentiles.
 
-**Priority #3, accumulating live forecast evidence — now the top open
-item, passive, ongoing, no new research degrees of freedom.** Let the
-real directional forecasts recorded to date resolve, then re-run
-`evaluate-forecasts`/`evaluate`/`learn` for the first real calibration
-read this project has ever had. Requires no new hypothesis or
-pre-registration — just elapsed time.
+**Priority #3, accumulating live forecast evidence — audited
+2026-09-10, infrastructure confirmed healthy, progress currently
+stalled on the scheduler.** Read `predictions/direction_forecast.py`'s
+resolution logic directly and ran `main.py evaluate-forecasts
+--resilient` for real (read-only, no credentials needed, no historical
+record modified). **No bug found.** 15 total forecasts, 4 resolved
+(unchanged — the same known stale-reference-price batch already
+excluded from calibration), 11 legitimately ACTIVE (too young — only
+one trading day has elapsed against a 5-bar horizon — and the
+underlying market-data cache for those 11 symbols hasn't advanced
+since 2026-09-08, itself downstream of the scheduler being down). A
+real operational guardrail was identified and deliberately NOT acted
+on: all 11 pending symbols are also part of the 32-symbol research
+universe with 10-year cached depth, and a naive refresh via
+`evaluate-forecasts`'s own default `--period=1y` would silently
+downgrade that depth — not worth the risk today regardless, since even
+a safe refresh would only advance one trading day, resolving nothing.
+This clears naturally once the scheduler is restored. No new
+hypothesis or pre-registration needed — just elapsed time (and the
+scheduler).
 
 **Priority #4, microstructure — explicitly gated, likely blocked.**
 Only pursue if existing data depth is sufficient; the session's own
@@ -905,18 +954,44 @@ trading days of intraday history, making every split fundamentally
 underpowered. Do not revisit without either more elapsed calendar time
 or a longer-history intraday data source.
 
+**New this segment, outside the user's own 4-item priority list but
+selected via a bounded registry audit per this segment's own mission
+instructions (avoid renaming/re-parameterizing already-weak families;
+prioritize genuinely untested Indian-market-specific mechanisms):
+`H_BREADTH_001` (market breadth), REJECTED via a clean sign-order
+reversal — see CURRENT ACTIVE EDGE STATUS and REJECTED HYPOTHESES
+above for the full breakdown, including the genuine methodological
+finding that narrow breadth and NIFTY's own uptrend classification are
+close to mutually exclusive on this data.**
+
 **Already tried, do not retest**: volatility contraction (`H_VOL_001`,
 REJECTED), the market-trend/volatility-regime sweep (`H_MEANREV_003`),
 two independent exit-architecture executable-conversion designs
 (`H_MEANREV_004`, `H_EXIT_005`), extreme-move/post-shock asymmetry
-(`H_EXTREME_001`, REJECTED), and now the short-weakness/long-strength
+(`H_EXTREME_001`, REJECTED), the short-weakness/long-strength
 interaction at 20th/80th percentile thresholds specifically
 (`H_MOMENTUM_001`, INCONCLUSIVE — see above; do not silently re-run
 with different percentiles chasing a decisive result, that would be
-the prohibited post-hoc threshold search). Universe-generalization for
-`H_MEANREV_003` (per the `H_XSECT_006` precedent) remains a
-legitimate, cheap, not-yet-run check, but is lower priority than a
-genuinely new hypothesis family.
+the prohibited post-hoc threshold search), and market breadth at the
+20th/80th percentile threshold and h10 horizon specifically
+(`H_BREADTH_001`, REJECTED — see above; do not silently re-run with
+looser/tighter breadth thresholds chasing a decisive result). Universe-
+generalization for `H_MEANREV_003` (per the `H_XSECT_006` precedent)
+remains a legitimate, cheap, not-yet-run check, but is lower priority
+than a genuinely new hypothesis family.
+
+**Next candidate families not yet tested, for the next segment's own
+bounded registry audit (not pre-committed, subject to that audit's own
+findings)**: turn-of-month/institutional-flow calendar effects
+(mechanistically distinct from the already-tested day-of-week Tuesday
+effect, though likely to face the same cost/no-index-execution-vehicle
+wall `H_CALENDAR_001`/`002` already hit); volume-price divergence (a
+stock rising on declining volume, distinct from the already-tested
+volume-CONFIRMATION formulation in `H_ENTRY_002`); a looser breadth
+threshold or a different target (e.g., forward UNIVERSE-pooled returns
+instead of `^NSEI` alone) if market breadth is ever revisited — not
+planned without new justification, per the no-parameter-mining
+discipline.
 
 **If the exit-architecture thread is ever resumed (not currently
 planned)**: regime-invalidation exit (exit when `TRENDING_UP` ends),
