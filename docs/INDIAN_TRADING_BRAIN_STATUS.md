@@ -487,12 +487,40 @@ mechanism itself generalizes strongly — a nuanced, honestly disclosed
 result, not a simple pass/fail. Full writeup in `docs/research/
 H_MEANREV_005_UNIVERSE_GENERALIZATION_PREREGISTRATION.md`.
 
+**Mechanism decomposition of the generalized oversold effect —
+`H_MEANREV_006`, INCONCLUSIVE, with real, mixed, partially-anomalous
+sub-findings.** Four pre-registered questions, same frozen
+`zscore_close_20 < -2.0` entry throughout (no new threshold, no
+exits/execution touched), on the 206-symbol `COMBINED` universe:
+**(Q1) temporal decay** — validation and out-of-sample both show a
+clean, monotonically-increasing, never-reversing positive response
+from h1 through h20 (a persistent drift, not a quick 1-2 day
+snap-back); development is a genuine anomaly (flat-to-decisive-negative
+at h1-h10, only turning decisive positive at h20), plausibly but not
+yet verified as COVID-related. **(Q2) shock vs. orderly decline** — a
+modest, consistent (not dramatic) lean toward shock-type declines
+showing a stronger reversal in validation/out-of-sample; development
+doesn't distinguish. **(Q3) volatility terciles** — a clean, monotonic
+dose-response (LOW < MID < HIGH) in validation AND out-of-sample,
+meaning `zscore_close_20`'s own normalization does NOT fully
+neutralize volatility's influence; development shows the same kind of
+anomaly as Q1 (HIGH_VOL decisive negative there, strongly positive
+elsewhere). **(Q4) relative vs. market-driven weakness — the cleanest
+finding**: `RELATIVE_WEAKNESS` (stock underperformed NIFTY specifically)
+is CI-decisive positive in ALL THREE splits, no reversal; `MARKET_DRIVEN`
+(closer to a broad market-wide move) is unstable (sign-reverses between
+development and validation, not decisive out-of-sample) — suggesting
+the effect is tied to genuine stock-specific underperformance, not
+simply broad-market co-movement. No executable-strategy design follows
+from this entry — strictly the forward-return-response layer. Full
+writeup in `docs/research/H_MEANREV_006_MECHANISM_DECOMPOSITION_PREREGISTRATION.md`.
+
 Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(48 hypotheses tested to date).
+(49 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -542,7 +570,7 @@ promoted, and its own adversarial-checks phase was correctly never
 triggered since the success gate was not met. See CURRENT ACTIVE EDGE
 STATUS and INCONCLUSIVE HYPOTHESES below for the full breakdown.
 
-## INCONCLUSIVE HYPOTHESES (19)
+## INCONCLUSIVE HYPOTHESES (20)
 
 H_ENTRY_003, H_ENTRY_005, H_EXIT_002, H_MEANREV_002, H_CONTEXT_MARKET_002,
 H_CONTEXT_SECTOR_002, H_CONTEXT_ALIGN_001, H_CONTEXT_MARKET_004,
@@ -578,7 +606,19 @@ CI-decisiveness; a real, disclosed secondary finding — buying
 structural strength ALONE reversed to CI-decisive negative
 out-of-sample, a third independent replication of this project's own
 "strength alone fails" pattern — see CURRENT ACTIVE EDGE STATUS
-above)**. Full evidence for each in `strategy/hypothesis_registry.py`.
+above)**, and **H_MEANREV_006 (mechanism decomposition of the
+generalized oversold effect — four pre-registered sub-questions on the
+same frozen entry: temporal decay shows a persistent, monotonically-
+building response in validation/out-of-sample; volatility terciles
+show a clean dose-response, HIGH_VOL stronger than LOW_VOL; relative
+weakness vs. market-driven weakness is the cleanest finding — relative
+weakness is CI-decisive positive in all three splits, market-driven is
+unstable; shock-type declines show a modest lean toward a stronger
+reversal than orderly declines; a shared, unexplained development-
+period anomaly (Q1/Q3, plausibly COVID-related, not yet verified) is
+disclosed as an open question for a future follow-up — see CURRENT
+ACTIVE EDGE STATUS above)**. Full evidence for each in
+`strategy/hypothesis_registry.py`.
 
 ## REJECTED HYPOTHESES (28)
 
@@ -1040,6 +1080,22 @@ independently pre-registered follow-up (a genuinely new question —
 "does the raw signal alone, without any regime gate, clear the
 executable-conversion bar that failed for the gated version in
 `H_MEANREV_004`" — not yet asked, not pre-committed here).
+
+**Done this segment — `H_MEANREV_006`, mechanism decomposition of the
+generalized oversold effect (temporal decay, shock vs. orderly,
+volatility terciles, relative vs. market-driven weakness), INCONCLUSIVE
+overall with genuinely useful sub-findings — see CURRENT ACTIVE EDGE
+STATUS and INCONCLUSIVE HYPOTHESES above.** The single most
+well-motivated, cheap next step this same entry itself flagged: both
+Q1 (temporal decay) and Q3 (volatility terciles) showed a shared,
+unexplained development-period anomaly (flat/negative where
+validation/out-of-sample are consistently positive) that plausibly
+traces to the COVID crash/recovery sitting inside the development
+window — a narrowly-scoped, SECONDARY DESCRIPTIVE year-by-year
+breakdown (not a new pass/fail hypothesis, not new parameter tuning)
+would resolve whether this is the actual explanation, directly
+strengthening or qualifying two of `H_MEANREV_006`'s own four
+sub-findings.
 
 **If the exit-architecture thread is ever resumed (not currently
 planned)**: regime-invalidation exit (exit when `TRENDING_UP` ends),

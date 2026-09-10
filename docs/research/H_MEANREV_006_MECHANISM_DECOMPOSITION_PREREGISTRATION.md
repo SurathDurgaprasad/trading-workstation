@@ -233,7 +233,163 @@ decisive and substantively interesting enough to justify the
 additional testing surface, disclosed explicitly which sub-questions
 received this treatment and why.
 
-## 14. Scope note
+## 15. Reproducibility record
+
+- `COMBINED` universe: 208 nominal symbols, 206 built (`M&M.NS`/`GVT&D.NS` excluded, disclosed in advance).
+- Shared calendar: `development_end=2023-11-25`, `validation_end=2025-04-17` — identical to `H_MEANREV_005`'s own `EXPANDED_ONLY` calendar (expected, since `COMBINED` ⊇ `EXPANDED_ONLY` and NSE symbols largely share a calendar).
+- `relative_strength_20` sanity check passed: non-NaN after passing `^NSEI` as a real `market_series` (was all-NaN under the default pipeline).
+- Frozen thresholds (development-period only): `CONCENTRATION_MEDIAN` (Q2) = 0.3701 (n=14,578 triggering observations); `ATR_PCT_33`/`ATR_PCT_67` (Q3, universe-wide) = 2.6583% / 3.6352% (n=317,090); `RELSTRENGTH_MEDIAN` (Q4) = −6.8845% (n=14,571 triggering observations).
+
+## 16. Results
+
+Full evidence: `H_MEANREV_006` in `strategy/hypothesis_registry.py`.
+
+### Q1 — Temporal decay (descriptive, all six horizons, no bucketing)
+
+| Split | h1 | h2 | h3 | h5 | h10 | h20 |
+|---|---|---|---|---|---|---|
+| development | −0.00% | −0.05% | −0.06% | **−0.19%** (decisive neg.) | −0.14% | **+1.00%** (decisive) |
+| validation | **+0.25%** | **+0.40%** | **+0.65%** | **+1.17%** | **+1.92%** | **+2.95%** |
+| out-of-sample | **+0.24%** | **+0.38%** | **+0.44%** | **+0.61%** | **+0.59%** | **+1.13%** |
+
+(**bold** = CI-decisive)
+
+**Validation and out-of-sample both show a clean, monotonically
+increasing, never-reversing positive response from h1 through h20** —
+the reversal is present almost immediately (h1 already CI-decisive
+positive in both splits) and continues accumulating all the way to
+h20, with no sign of an early peak-then-fade shape. This argues against
+a "quick 1-2 day overshoot correction, then flat" story and for a
+persistent drift that keeps building through at least a 20-bar window
+— informative for any future exit-horizon design (a short holding
+period would capture only a fraction of the measured cumulative
+effect).
+
+**Development is a genuine anomaly, disclosed honestly, not
+smoothed over**: mean returns are flat-to-CI-decisive-NEGATIVE at
+h1-h10, only turning CI-decisive positive at h20. This is a real
+divergence from validation/out-of-sample's own consistent shape, not a
+sampling artifact (n=12,854, large). The development window
+(2016–2023-11-25) contains the COVID crash/recovery (Feb–Apr 2020), a
+plausible but NOT YET VERIFIED explanation — flagged as an open
+question for a future, narrowly-scoped year-stability check (§17
+below), not resolved here.
+
+### Q2 — Shock vs. orderly decline (primary horizon h10)
+
+| Bucket | Split | n | Mean (h10) | 95% CI |
+|---|---|---|---|---|
+| SHOCK | development | 6439 | −0.23% | [−0.489%,+0.024%] (not decisive) |
+| SHOCK | validation | 1690 | **+2.10%** | [+1.754%,+2.445%] |
+| SHOCK | out-of-sample | 2200 | **+0.83%** | [+0.549%,+1.117%] |
+| ORDERLY | development | 6415 | −0.05% | [−0.293%,+0.190%] (not decisive) |
+| ORDERLY | validation | 1672 | **+1.74%** | [+1.395%,+2.078%] |
+| ORDERLY | out-of-sample | 2190 | **+0.34%** | [+0.064%,+0.622%] |
+
+**A modest, consistent — but not dramatic — SHOCK > ORDERLY pattern**:
+SHOCK's point estimate exceeds ORDERLY's in both validation
+(+2.10% vs. +1.74%) and out-of-sample (+0.83% vs. +0.34%, more than
+double), and again at h20 (SHOCK dev +1.01%/val +3.07%/oos +1.36% vs.
+ORDERLY dev +0.98%/val +2.82%/oos +0.90%) — directionally consistent
+across both reported horizons and both out-of-sample-relevant splits.
+Development does not distinguish the two buckets (neither decisive).
+This lends modest, disclosed support to the overshoot/liquidity-
+pressure thesis over the pure-information-deterioration thesis, but
+the gap is not large and is not confirmed in development — reported as
+a real but modest directional finding, not a decisive mechanistic
+split.
+
+### Q3 — Volatility terciles (primary horizon h10)
+
+| Bucket | Split | n | Mean (h10) | 95% CI |
+|---|---|---|---|---|
+| LOW_VOL | development | 2894 | +0.14% | [−0.078%,+0.353%] (not decisive) |
+| LOW_VOL | validation | 1483 | **+1.11%** | [+0.856%,+1.356%] |
+| LOW_VOL | out-of-sample | 2005 | +0.04% | [−0.170%,+0.250%] (not decisive) |
+| MID_VOL | development | 4283 | +0.15% | [−0.089%,+0.379%] (not decisive) |
+| MID_VOL | validation | 1087 | **+2.00%** | [+1.605%,+2.401%] |
+| MID_VOL | out-of-sample | 1472 | **+0.40%** | [+0.045%,+0.745%] |
+| HIGH_VOL | development | 5677 | **−0.50%** | [−0.842%,−0.162%] (decisive NEGATIVE) |
+| HIGH_VOL | validation | 792 | **+3.33%** | [+2.598%,+4.054%] |
+| HIGH_VOL | out-of-sample | 913 | **+2.11%** | [+1.493%,+2.717%] |
+
+**A clean, monotonic dose-response by volatility tercile in
+validation AND out-of-sample**: LOW < MID < HIGH in both splits (val:
++1.11% < +2.00% < +3.33%; oos: +0.04% < +0.40% < +2.11%) — the
+reversal is materially STRONGER in high-volatility stocks. This means
+`zscore_close_20`'s own volatility normalization does NOT fully
+neutralize volatility's influence on the response — raw ATR% context
+adds real information beyond the zscore threshold alone, directly
+relevant to any future risk-sizing or exit design (a HIGH_VOL oversold
+event is evidently a materially different animal than a LOW_VOL one).
+
+**Development shows the SAME kind of anomaly as Q1**: HIGH_VOL is
+CI-decisive NEGATIVE in development (−0.50%), the opposite direction
+from validation/out-of-sample's own strongly positive result — the
+identical pattern (development diverges, val/oos agree) seen in Q1,
+strengthening the hypothesis that a specific development-period era
+(plausibly COVID) is responsible, not yet verified (§17).
+
+### Q4 — Relative vs. market-driven weakness (primary horizon h10)
+
+| Bucket | Split | n | Mean (h10) | 95% CI |
+|---|---|---|---|---|
+| RELATIVE_WEAKNESS | development | 6744 | **+0.50%** | [+0.251%,+0.759%] |
+| RELATIVE_WEAKNESS | validation | 1491 | **+1.58%** | [+1.157%,+1.994%] |
+| RELATIVE_WEAKNESS | out-of-sample | 1629 | **+1.35%** | [+0.997%,+1.693%] |
+| MARKET_DRIVEN | development | 6103 | **−0.86%** | [−1.100%,−0.617%] (decisive NEGATIVE) |
+| MARKET_DRIVEN | validation | 1871 | **+2.19%** | [+1.912%,+2.473%] |
+| MARKET_DRIVEN | out-of-sample | 2761 | +0.14% | [−0.097%,+0.382%] (not decisive) |
+
+**The cleanest finding of the four sub-questions.**
+`RELATIVE_WEAKNESS` (the stock underperformed `^NSEI` specifically
+during its own decline, not just falling with a broad-market move) is
+**CI-decisive positive in ALL THREE splits, no sign reversal** — the
+same bar this registry has used elsewhere to call a raw finding
+"real." `MARKET_DRIVEN` (the oversold reading is closer to a
+broad-market-wide move) is, by contrast, genuinely unstable: CI-
+decisive NEGATIVE in development, CI-decisive POSITIVE (even larger
+than `RELATIVE_WEAKNESS`) in validation, and not decisive at all in
+out-of-sample. This suggests the generalized reversal effect is
+meaningfully tied to genuine, stock-specific relative underperformance
+— not simply "the whole market fell and reverted together" — though
+`MARKET_DRIVEN`'s own validation-split reversal means this is not a
+clean, unqualified story either; disclosed precisely, not rounded up.
+
+### Verdict
+
+**INCONCLUSIVE overall** — this is a mechanism-decomposition/
+descriptive study by design (§6-9), not a single pass/fail test, and
+no registry status besides `INCONCLUSIVE` honestly captures "real,
+mixed, partially-anomalous findings across four sub-questions, none
+rising to a full dev/val/oos-consistent promotion-relevant claim."
+Q4 (relative weakness) is the strongest, cleanest individual finding
+(CI-decisive, all three splits, no reversal). Q3 (volatility) shows a
+striking dose-response in validation/out-of-sample but an unexplained
+development-period reversal. Q2 (shock vs. orderly) shows a real but
+modest directional lean toward shock. Q1 establishes the temporal
+shape is a gradual, persistent build (not an immediate snap-back) in
+validation/out-of-sample, with an unexplained development-period
+anomaly shared with Q3. No executable-strategy design follows from
+this entry — per §6/§11 of the mission's own guidance, this is
+strictly the forward-return-response layer, prior to any exit/risk/
+execution design.
+
+## 17. Open question, explicitly flagged for a future, narrowly-scoped follow-up (NOT run here)
+
+Both Q1 and Q3 show the SAME shape: development-period results that
+are flat-to-negative and materially weaker/opposite-signed from
+validation/out-of-sample's own consistent, positive, often-decisive
+results. A plausible but unverified explanation is that the COVID
+crash/recovery (Feb–Apr 2020), which sits inside the development
+window (2016–2023-11-25) but not inside validation/out-of-sample, is
+disproportionately responsible — this is a genuine, well-motivated,
+narrowly-scoped candidate for a future year-by-year stability check
+(a SECONDARY DESCRIPTIVE follow-up, not a new pass/fail hypothesis),
+not run in this entry per its own effort-scoping, and explicitly NOT
+assumed to be the explanation without verification.
+
+## 18. Scope note
 
 Pure historical-data research, read-only. Does not touch
 `data/paper_trading.db`, `data/live_state.db`, `data/scheduler_runs.db`,

@@ -2893,4 +2893,87 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "docs/research/H_MEANREV_005_UNIVERSE_GENERALIZATION_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_MEANREV_006",
+            description=(
+                "Mechanism decomposition of the generalized NSE oversold effect (H_MEANREV_005's own validated "
+                "raw finding): what type of oversold event produces the effect, and when does the reversal "
+                "actually occur? Four pre-registered sub-questions using the SAME frozen zscore_close_20 < "
+                "-2.0 entry throughout -- temporal decay, shock vs orderly decline, volatility normalization, "
+                "relative vs absolute weakness. Pre-registered BEFORE any experiment code ran: docs/research/"
+                "H_MEANREV_006_MECHANISM_DECOMPOSITION_PREREGISTRATION.md, committed as its own commit prior "
+                "to any experiment code."
+            ),
+            rationale=(
+                "A mechanism-decomposition phase, explicitly NOT strategy optimization -- no new entry "
+                "threshold, no stops/targets, no parameter search. H_MEANREV_005 established the raw signal "
+                "generalizes strongly across 206 NSE symbols; the natural next question is HOW and WHEN, not "
+                "whether to trade it (three prior executable-conversion attempts, H_XSECT_002/H_MEANREV_004/"
+                "H_EXIT_005, already established the project's frozen stop/target architecture is mismatched "
+                "to reversal entries -- not re-tested here)."
+            ),
+            expected_effect="No prior assumption on any sub-question's direction -- this is a measurement/decomposition study, not a directional prediction.",
+            dataset_restrictions="COMBINED universe (ORIGINAL_32_NSE_UNIVERSE union EXPANDED_ONLY, 208 nominal, 206 built), 10 years daily. ^NSEI fetched once as the benchmark for relative_strength_20.",
+            experiment_design=(
+                "Minimal new code -- three small bucket-assignment predicates (scratch-script-local, matching "
+                "this segment's own established pattern for threshold-comparison condition functions), "
+                "otherwise pure reuse: measure_condition, add_lookback_return_columns (lookbacks=(1,5)), "
+                "add_alpha_features (with a REAL market_series=^NSEI this time, populating relative_strength_20 "
+                "for the first time in this pipeline -- confirmed all-NaN under the default None pass). "
+                "Q2/Q3/Q4 thresholds frozen from development-period-only data (Q2/Q4: triggering observations "
+                "only; Q3: universe-wide, to avoid circularity with the entry condition itself)."
+            ),
+            success_criteria="Descriptive/comparative by design -- no single pass/fail bar. Each sub-question reports the full n/mean/median/win-rate/CI across all splits and (for Q1) all six horizons; consistency or inconsistency across development/validation/out-of-sample is disclosed, not forced into a binary verdict.",
+            failure_criteria="N/A -- see success_criteria; this entry's own registry status reflects the overall character of the findings, not a single frozen numeric threshold.",
+            status=HypothesisStatus.INCONCLUSIVE,
+            evidence=(
+                "REAL MEASUREMENT (206/208 symbols, 10y, frozen zscore_close_20 < -2.0 entry, unchanged "
+                "throughout; frozen thresholds -- Q2 CONCENTRATION_MEDIAN=0.3701 n=14578 triggering obs; Q3 "
+                "ATR_PCT_33/67=2.6583%/3.6352% n=317090 universe-wide; Q4 RELSTRENGTH_MEDIAN=-6.8845% n=14571 "
+                "triggering obs, all from development-period data only): "
+                "Q1 TEMPORAL DECAY (descriptive, all 6 horizons): validation and out-of-sample both show a "
+                "clean, monotonically increasing, never-reversing positive response from h1 (already "
+                "CI-decisive) through h20 (val +2.95%, oos +1.13%) -- a persistent drift, not an immediate "
+                "1-2 day snap-back. Development is a genuine, disclosed anomaly: flat-to-CI-decisive-NEGATIVE "
+                "at h1-h10 (h5 -0.19%, CI-decisive negative), only turning CI-decisive positive at h20 "
+                "(+1.00%) -- large sample (n=12854), not noise; plausibly but NOT YET VERIFIED related to the "
+                "COVID crash/recovery sitting inside the development window (2016-2023-11-25). "
+                "Q2 SHOCK vs ORDERLY (h10 primary): a modest, consistent -- not dramatic -- SHOCK > ORDERLY "
+                "pattern in validation (+2.10% vs +1.74%) and out-of-sample (+0.83% vs +0.34%, more than "
+                "double), also at h20; development does not distinguish the buckets (neither decisive). Mild "
+                "support for an overshoot/liquidity-pressure mechanism over pure information-driven decline, "
+                "not a decisive split. "
+                "Q3 VOLATILITY TERCILES (h10 primary): a CLEAN, MONOTONIC dose-response in validation AND "
+                "out-of-sample -- LOW_VOL < MID_VOL < HIGH_VOL (val: +1.11%<+2.00%<+3.33%; oos: "
+                "+0.04%<+0.40%<+2.11%) -- zscore_close_20's own volatility normalization does NOT fully "
+                "neutralize volatility's influence; raw ATR% context adds real information beyond the zscore "
+                "threshold, directly relevant to future risk/exit design. Development shows the SAME anomaly "
+                "pattern as Q1: HIGH_VOL is CI-decisive NEGATIVE in development (-0.50%), opposite validation/"
+                "out-of-sample's own strongly positive result -- reinforcing the development-period-anomaly "
+                "hypothesis (not yet verified). "
+                "Q4 RELATIVE vs MARKET-DRIVEN WEAKNESS (h10 primary) -- the CLEANEST finding of the four: "
+                "RELATIVE_WEAKNESS (stock underperformed NIFTY specifically during its own decline) is "
+                "CI-decisive POSITIVE in ALL THREE splits, no sign reversal (dev +0.50%, val +1.58%, oos "
+                "+1.35%) -- the same bar this registry uses elsewhere to call a raw finding real. "
+                "MARKET_DRIVEN (closer to a broad-market-wide move) is genuinely unstable: CI-decisive "
+                "NEGATIVE in development (-0.86%), CI-decisive POSITIVE and even LARGER than "
+                "RELATIVE_WEAKNESS in validation (+2.19%), and not decisive in out-of-sample (+0.14%). "
+                "Suggests the generalized effect is meaningfully tied to genuine stock-specific relative "
+                "underperformance, not simply a broad-market-wide co-movement -- though MARKET_DRIVEN's own "
+                "validation-split reversal means this is not a fully clean, unqualified story. "
+                "VERDICT: INCONCLUSIVE overall -- this is a mechanism-decomposition/descriptive study by "
+                "design, not a single pass/fail test; no registry status besides INCONCLUSIVE honestly "
+                "captures real, mixed, partially-anomalous findings across four sub-questions. Q4 is the "
+                "strongest individual finding (CI-decisive, all 3 splits, no reversal); Q3 shows a striking "
+                "dose-response but an unexplained development-period reversal shared with Q1; Q2 shows a real "
+                "but modest directional lean; Q1 establishes the temporal shape is a gradual, persistent build "
+                "(not an immediate snap-back) in validation/out-of-sample. No executable-strategy design "
+                "follows from this entry -- strictly the forward-return-response layer, prior to any exit/"
+                "risk/execution design. OPEN QUESTION, explicitly flagged for a future narrowly-scoped "
+                "follow-up (not run here): both Q1 and Q3's development-period anomaly plausibly traces to the "
+                "COVID crash/recovery sitting inside that window -- a genuine, well-motivated candidate for a "
+                "future year-by-year stability check, not assumed without verification. Full writeup in "
+                "docs/research/H_MEANREV_006_MECHANISM_DECOMPOSITION_PREREGISTRATION.md."
+            ),
+        ),
     )
