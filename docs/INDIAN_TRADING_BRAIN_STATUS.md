@@ -465,12 +465,34 @@ the "index looks fine while breadth deteriorates" scenario this
 hypothesis depends on essentially never occurs at this threshold. Full
 writeup in `docs/research/H_BREADTH_001_MARKET_BREADTH_PREREGISTRATION.md`.
 
+**Universe-generalization check for `H_MEANREV_003` —
+`H_MEANREV_005`, REJECTED, but with an important secondary finding.**
+Does `H_MEANREV_003`'s own regime-gated result (`zscore_close_20`
+oversold, gated on NIFTY's own `TRENDING_UP`) replicate on 174
+genuinely independent NSE symbols (F&O-eligible, not in the original
+32)? At h20: development/validation were even MORE decisive than the
+original (both candidates), but out-of-sample lost CI-decisiveness for
+both candidates (A: +0.45%, CI=[-0.06%,+0.96%]; B: +0.16%,
+CI=[-0.15%,+0.47%]) despite large samples (n=1034/2747) — meeting this
+entry's own frozen "does not generalize" criterion (fails to clear
+CI-decisiveness in a split where the original was decisive), with no
+sign reversal. **Critical context**: the UNCONDITIONED control (no
+regime gate) on the same expanded universe was actually MORE decisive
+at out-of-sample than the gated version (A: +1.28% decisive; B: +1.26%
+decisive) — the opposite of what `H_MEANREV_003` found on the original
+universe, where gating visibly improved on the unconditioned baseline.
+This means: the specific "`TRENDING_UP` gating is the key ingredient"
+claim does not generalize, but the underlying raw mean-reversion
+mechanism itself generalizes strongly — a nuanced, honestly disclosed
+result, not a simple pass/fail. Full writeup in `docs/research/
+H_MEANREV_005_UNIVERSE_GENERALIZATION_PREREGISTRATION.md`.
+
 Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(47 hypotheses tested to date).
+(48 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -487,17 +509,21 @@ reversion-completion) and failed **more decisively**, revealing a
 deeper mechanistic problem — a moving-average-based exit condition can
 be satisfied by the *average declining to meet the price*, not just by
 the price genuinely recovering, so it does not imply profitability the
-way it appears to. `H_MEANREV_003` remains, by a real margin, the
-cleanest RAW finding in this registry (CI-decisive positive in all
-three splits, both candidates, every horizon, no sign reversal, broad,
-cost-margin-surviving, non-decaying — see CURRENT ACTIVE EDGE STATUS
-above) — but three consecutive executable-conversion attempts
-(`H_XSECT_002`, `H_MEANREV_004`, `H_EXIT_005`) have now failed for two
-genuinely different reasons, and "cleanest raw measurement" is
-increasingly distant from "closest to a tradeable strategy" in this
-project's own history. See CURRENT ACTIVE EDGE STATUS above for the
-full story on `H_XSECT_001`/`002`/`005`/`006`, `H_MEANREV_003`/`004`,
-and `H_EXIT_005`. `H_EXTREME_001` (a genuinely new metric family —
+way it appears to. `H_MEANREV_003` was, on the original 32-symbol
+universe alone, the cleanest RAW finding in this registry (CI-decisive
+positive in all three splits, both candidates, every horizon, no sign
+reversal, broad, cost-margin-surviving, non-decaying — see CURRENT
+ACTIVE EDGE STATUS above) — but three consecutive executable-
+conversion attempts (`H_XSECT_002`, `H_MEANREV_004`, `H_EXIT_005`) had
+already failed for two genuinely different reasons, and now
+`H_MEANREV_005`'s universe-generalization check has shown the specific
+regime-gating claim itself loses out-of-sample decisiveness on 174
+independent symbols — the underlying raw mean-reversion mechanism
+generalizes strongly, but "TRENDING_UP-gating is the key ingredient"
+does not. "Cleanest raw measurement on one specific universe" is now
+further still from "closest to a tradeable strategy" than before. See
+CURRENT ACTIVE EDGE STATUS above for the full story on `H_XSECT_001`/
+`002`/`005`/`006`, `H_MEANREV_003`/`004`/`005`, and `H_EXIT_005`. `H_EXTREME_001` (a genuinely new metric family —
 raw-magnitude `trailing_return_5` percentile extremes, not
 `zscore_close_20`) does not change this picture: STRENGTH cleanly
 reversed sign out-of-sample (REJECTED, not promising), and WEAKNESS
@@ -554,7 +580,7 @@ out-of-sample, a third independent replication of this project's own
 "strength alone fails" pattern — see CURRENT ACTIVE EDGE STATUS
 above)**. Full evidence for each in `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (27)
+## REJECTED HYPOTHESES (28)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
@@ -617,8 +643,19 @@ own explicit failure condition; a genuine methodological finding
 surfaced alongside it — narrow breadth and NIFTY's own uptrend
 classification are close to mutually exclusive on this data, so the
 divergence scenario the thesis depends on essentially never occurs at
-this threshold)**. Full evidence for each in
-`strategy/hypothesis_registry.py`.
+this threshold)**, and **H_MEANREV_005 (universe-generalization check
+for H_MEANREV_003 — does the regime-gated oversold signal replicate on
+174 independent F&O-eligible NSE symbols? Development/validation were
+even more decisive than the original, but out-of-sample lost
+CI-decisiveness for both candidates despite large samples (n=1034/
+2747) — REJECTED per this entry's own frozen "fails to clear
+CI-decisiveness in a split where the original was decisive" criterion;
+critically, the UNCONDITIONED control on the same expanded universe
+was MORE decisive at out-of-sample than the gated version, the
+opposite of the relationship found on the original universe — the raw
+mean-reversion mechanism generalizes strongly, but the specific
+"TRENDING_UP-gating is the key ingredient" claim does not)**. Full
+evidence for each in `strategy/hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
 "entry timing underperforms random" — confirmatory, not an edge.)
@@ -975,10 +1012,15 @@ with different percentiles chasing a decisive result, that would be
 the prohibited post-hoc threshold search), and market breadth at the
 20th/80th percentile threshold and h10 horizon specifically
 (`H_BREADTH_001`, REJECTED — see above; do not silently re-run with
-looser/tighter breadth thresholds chasing a decisive result). Universe-
-generalization for `H_MEANREV_003` (per the `H_XSECT_006` precedent)
-remains a legitimate, cheap, not-yet-run check, but is lower priority
-than a genuinely new hypothesis family.
+looser/tighter breadth thresholds chasing a decisive result), and now
+universe-generalization for `H_MEANREV_003`'s own regime-gated claim
+at the 176-symbol EXPANDED_ONLY threshold specifically (`H_MEANREV_005`,
+REJECTED — see above; do not silently re-run on a different/looser
+expanded universe chasing a decisive OOS result — the frozen universe
+is what it is). The underlying raw oversold-mean-reversion mechanism
+(unconditioned, no regime gate) DID generalize strongly to the new
+universe — that finding stands and is not itself rejected, only the
+specific regime-gating claim is.
 
 **Next candidate families not yet tested, for the next segment's own
 bounded registry audit (not pre-committed, subject to that audit's own
@@ -991,7 +1033,13 @@ volume-CONFIRMATION formulation in `H_ENTRY_002`); a looser breadth
 threshold or a different target (e.g., forward UNIVERSE-pooled returns
 instead of `^NSEI` alone) if market breadth is ever revisited — not
 planned without new justification, per the no-parameter-mining
-discipline.
+discipline; whether the raw, UNCONDITIONED oversold-mean-reversion
+effect that `H_MEANREV_005` just found generalizes strongly on the
+176-symbol expanded universe would itself justify its own,
+independently pre-registered follow-up (a genuinely new question —
+"does the raw signal alone, without any regime gate, clear the
+executable-conversion bar that failed for the gated version in
+`H_MEANREV_004`" — not yet asked, not pre-committed here).
 
 **If the exit-architecture thread is ever resumed (not currently
 planned)**: regime-invalidation exit (exit when `TRENDING_UP` ends),

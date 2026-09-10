@@ -243,7 +243,76 @@ measurement only, not a claim about executable survival — the
 `NSE_SECTOR_MAP` coverage permits (a real, disclosed partial-coverage
 gap, same caveat carried by every prior entry that touches it).
 
-## 10. Scope note
+## 11. Reproducibility record
+
+- `EXPANDED_ONLY` universe: 176 symbols computed, 174/176 successfully built (`M&M.NS`/`GVT&D.NS` excluded by the path-safety allowlist, disclosed in advance in §4 — not a new failure).
+- `EXPANDED_ONLY` shared calendar: `development_end=2023-11-25`, `validation_end=2025-04-17` — genuinely different dates from the original universe's own `2022-09-08`/`2024-09-07`, since these are newer-to-F&O symbols with their own real calendar composition, computed fresh via `shared_period_boundaries` as pre-registered, not assumed identical.
+- NIFTY's own `market_trend_regime` attached unchanged via `build_benchmark_regime_series`/`attach_external_regime`.
+
+## 12. Results — the specific regime-gated claim does NOT generalize at out-of-sample; the underlying raw mean-reversion effect generalizes strongly
+
+Full evidence: `H_MEANREV_005` in `strategy/hypothesis_registry.py`.
+
+**Primary horizon (h20), `EXPANDED_TRENDING_UP` vs. `H_MEANREV_003`'s own published `ORIGINAL` result:**
+
+| Candidate | Split | ORIGINAL (32-symbol) | EXPANDED_ONLY (176-symbol) |
+|---|---|---|---|
+| A (−2.0σ) | development | +1.75% (decisive) | **+2.36%** (decisive, CI=[+2.01%,+2.71%]) |
+| A | validation | +1.31% (decisive) | **+3.67%** (decisive, CI=[+3.10%,+4.24%]) |
+| A | out-of-sample | +1.47% (decisive) | **+0.45%** (NOT decisive, CI=[-0.06%,+0.96%]) |
+| B (−1.5σ) | development | +1.72% (decisive) | **+2.07%** (decisive, CI=[+1.85%,+2.29%]) |
+| B | validation | +1.73% (decisive) | **+2.99%** (decisive, CI=[+2.66%,+3.33%]) |
+| B | out-of-sample | +1.37% (decisive) | **+0.16%** (NOT decisive, CI=[-0.15%,+0.47%]) |
+
+**§7's frozen "generalizes" criterion FAILS**: development and
+validation are not just decisive but *more* decisive on the expanded
+universe than on the original — yet out-of-sample loses CI-decisiveness
+for BOTH candidates, with large samples (n=1034/2747, far above the
+30-observation floor, so this is not an underpowered read) and no
+reversed sign (both point estimates stay positive). Per §7's own
+explicit "does NOT generalize" bucket — "the effect fails to clear
+CI-decisiveness in a split where the original universe was decisive" —
+this is met precisely.
+
+**The unconditioned control (§6, item 3) reveals why this matters**:
+on `EXPANDED_ONLY`, the plain, ungated oversold signal (no `TRENDING_UP`
+regime filter at all) shows out-of-sample results at h20 that are
+CI-decisive and *stronger* than the regime-gated version — Candidate A
+unconditioned OOS +1.28% (CI=[+0.97%,+1.58%], n=3523) vs. gated OOS
++0.45% (not decisive, n=1034); Candidate B unconditioned OOS +1.26%
+(CI=[+1.08%,+1.44%], n=9868) vs. gated OOS +0.16% (not decisive,
+n=2747). **This is the opposite of the relationship `H_MEANREV_003`
+itself found on the original universe**, where the unconditioned
+control was the weaker, less-decisive baseline the regime gate visibly
+improved upon. On the expanded universe, gating on `TRENDING_UP`
+*reduces* both sample size and decisiveness at out-of-sample relative
+to not gating at all.
+
+**Verdict: DOES NOT GENERALIZE** (as specifically defined by this
+entry's own frozen §7 criteria — the regime-gated claim, not "mean
+reversion" broadly). This is a real, disclosed, useful negative
+finding, not a failure of process: it shows `H_MEANREV_003`'s own
+headline claim — that gating on NIFTY's own `TRENDING_UP` regime is
+what converts a raw oversold-entry signal into a decisive, all-splits
+result — is at least partly specific to the original 32-symbol
+universe's own composition, not a general property of Indian equities.
+
+**Important secondary finding, disclosed regardless of the primary
+verdict**: the underlying raw mean-reversion mechanism itself (oversold
+entries reverting, unconditioned) generalizes robustly and decisively
+to the new 174-symbol universe, at least as strongly as on the
+original 32 — reinforcing this project's broader, repeated finding
+that mean reversion is a genuine, broad NSE phenomenon (`H_XSECT_001`
+laggards, `H_MEANREV_003`'s own raw finding), even though the specific
+regime-conditioning mechanism this entry set out to test does not
+carry over the same way.
+
+Per §9's own frozen gate, the full adversarial-checks battery (year
+stability, symbol/sector concentration, cost-margin check) was NOT
+run for the regime-gated result, since its own prerequisite (meeting
+§7's "generalizes" criterion) was not satisfied.
+
+## 13. Scope note
 
 Pure historical-data research, read-only against the existing/newly-
 fetched market-data cache. Does not touch `data/paper_trading.db`,

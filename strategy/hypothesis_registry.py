@@ -2819,4 +2819,78 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "H_BREADTH_001_MARKET_BREADTH_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_MEANREV_005",
+            description=(
+                "Universe-generalization check for H_MEANREV_003: does the raw finding (zscore_close_20 "
+                "oversold entries gated on NIFTY's own market_trend_regime == TRENDING_UP) generalize beyond "
+                "the original 32-symbol research universe, or is it a universe-specific artifact? Pre-"
+                "registered BEFORE any experiment code ran: docs/research/"
+                "H_MEANREV_005_UNIVERSE_GENERALIZATION_PREREGISTRATION.md, committed as its own commit prior "
+                "to any experiment code."
+            ),
+            rationale=(
+                "Per this segment's own mission instruction: investigate the universe-generalization check "
+                "before inventing a new hypothesis. Read H_MEANREV_003's own pre-registration and registry "
+                "entry directly rather than trusting a prior summary: confirmed this exact signal has never "
+                "been measured on any universe besides the original 32, and that H_MEANREV_003 itself never "
+                "proposed this check (only the executable-strategy conversion, already done as H_MEANREV_004, "
+                "REJECTED) -- the check is well-motivated by analogy to H_XSECT_006's own demonstrated "
+                "selection-bias risk for a DIFFERENT signal in this exact codebase, not by anything "
+                "H_MEANREV_003 itself planned."
+            ),
+            expected_effect="No prior assumption on direction. The critical question is whether EXPANDED_TRENDING_UP replicates H_MEANREV_003's own all-three-splits CI-decisive result, or loses decisiveness/reverses on independently-selected symbols.",
+            dataset_restrictions="EXPANDED_ONLY: 176 F&O-eligible NSE symbols not in ORIGINAL_32_NSE_UNIVERSE, frozen from the cached Dhan public instrument master (no credentials involved), 174/176 built (M&M.NS/GVT&D.NS excluded by the path-safety allowlist, disclosed in advance).",
+            experiment_design=(
+                "Zero new production code -- pure reuse. quant_research.mean_reversion_signal."
+                "REGIME_GATED_CANDIDATES (A_oversold_2std_trending_up/B_oversold_1_5std_trending_up) and "
+                "CANDIDATES (unconditioned A/B) reused verbatim. NIFTY's own market_trend_regime attached via "
+                "build_benchmark_regime_series/attach_external_regime, unchanged. shared_period_boundaries "
+                "computed fresh on the new universe's own calendar (development_end=2023-11-25, "
+                "validation_end=2025-04-17 -- genuinely different dates from the original universe, not "
+                "assumed identical). Measured via measure_condition, market_filter='NSE', all six "
+                "FORWARD_HORIZONS, primary horizon h20 (matching H_MEANREV_003's own headline figures)."
+            ),
+            success_criteria="EXPANDED_TRENDING_UP CI-decisive positive at h20 in ALL THREE splits, both candidates, no sign reversal -- the same bar H_MEANREV_003 itself was held to, applied to independent symbols.",
+            failure_criteria="A sign reversal in any split, OR the effect fails to clear CI-decisiveness in a split where the original universe was decisive, OR the effect is materially smaller/weaker even where directionally consistent.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REAL MEASUREMENT (174/176 symbols, 10y, pure price-behavior, h20 = primary pre-declared "
+                "horizon, matching H_MEANREV_003's own headline figures): "
+                "EXPANDED_TRENDING_UP -- Candidate A: development n=4257 mean=+2.3591% (CI=[+2.009%,+2.709%], "
+                "decisive -- vs. original +1.75%); validation n=1223 mean=+3.6724% (CI=[+3.104%,+4.241%], "
+                "decisive -- vs. original +1.31%); out_of_sample n=1034 mean=+0.4501% (CI=[-0.062%,+0.962%], "
+                "NOT decisive -- vs. original's own decisive +1.47%). Candidate B: development n=10812 "
+                "mean=+2.0685% (CI=[+1.847%,+2.290%], decisive -- vs. original +1.72%); validation n=3059 "
+                "mean=+2.9923% (CI=[+2.658%,+3.327%], decisive -- vs. original +1.73%); out_of_sample n=2747 "
+                "mean=+0.1602% (CI=[-0.153%,+0.473%], NOT decisive -- vs. original's own decisive +1.37%). "
+                "SUCCESS GATE: FAILS -- development and validation are even MORE decisive than the original "
+                "universe's own figures, but out-of-sample loses CI-decisiveness for BOTH candidates despite "
+                "large samples (n=1034/2747, far above the 30-observation floor -- not an underpowered read), "
+                "with no sign reversal (both point estimates stay positive). Per this entry's own frozen "
+                "failure criterion ('fails to clear CI-decisiveness in a split where the original was "
+                "decisive'), this is met precisely. "
+                "CRITICAL CONTEXT from the unconditioned control (no regime gate, same EXPANDED_ONLY universe): "
+                "Candidate A unconditioned out_of_sample n=3523 mean=+1.2768% (CI=[+0.968%,+1.585%], decisive "
+                "and STRONGER than the gated version); Candidate B unconditioned out_of_sample n=9868 "
+                "mean=+1.2620% (CI=[+1.080%,+1.444%], decisive and STRONGER than the gated version). This is "
+                "the OPPOSITE relationship H_MEANREV_003 itself found on the original universe, where the "
+                "unconditioned control was the weaker baseline the TRENDING_UP gate visibly improved upon -- "
+                "on the expanded universe, the gate REDUCES both sample size and decisiveness at "
+                "out-of-sample relative to not gating at all. "
+                "VERDICT: REJECTED (does not generalize, per this entry's own frozen criteria) -- "
+                "H_MEANREV_003's own headline claim, that TRENDING_UP-gating is what converts a raw oversold "
+                "signal into a decisive all-splits result, is at least partly specific to the original "
+                "32-symbol universe's own composition, not a general property of Indian equities. IMPORTANT "
+                "SECONDARY FINDING, disclosed regardless of the primary verdict: the underlying RAW "
+                "mean-reversion mechanism itself (oversold entries reverting, unconditioned) generalizes "
+                "robustly and decisively to the new 174-symbol universe, reinforcing this project's broader, "
+                "repeated finding that mean reversion is a genuine, broad NSE phenomenon (H_XSECT_001, "
+                "H_MEANREV_003's own raw finding) -- even though the SPECIFIC regime-conditioning mechanism "
+                "this entry set out to test does not carry over the same way. Per this entry's own frozen §9 "
+                "gate, the full adversarial-checks battery was NOT run for the regime-gated result, since its "
+                "own prerequisite (meeting the 'generalizes' criterion) was not met. Full writeup in "
+                "docs/research/H_MEANREV_005_UNIVERSE_GENERALIZATION_PREREGISTRATION.md."
+            ),
+        ),
     )
