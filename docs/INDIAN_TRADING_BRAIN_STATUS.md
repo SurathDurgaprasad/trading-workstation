@@ -496,8 +496,13 @@ exits/execution touched), on the 206-symbol `COMBINED` universe:
 clean, monotonically-increasing, never-reversing positive response
 from h1 through h20 (a persistent drift, not a quick 1-2 day
 snap-back); development is a genuine anomaly (flat-to-decisive-negative
-at h1-h10, only turning decisive positive at h20), plausibly but not
-yet verified as COVID-related. **(Q2) shock vs. orderly decline** — a
+at h1-h10, only turning decisive positive at h20) — **confirmed by a
+year-stability follow-up to be driven specifically by 2020** (COVID
+crash/recovery): 2020 shows a CI-decisive negative mean at every
+horizon (h10 −5.30%), an order of magnitude different from every
+neighboring year (all CI-decisive positive or not decisive), while
+2016–2019/2021–2023 broadly match validation/out-of-sample's own
+positive shape. **(Q2) shock vs. orderly decline** — a
 modest, consistent (not dramatic) lean toward shock-type declines
 showing a stronger reversal in validation/out-of-sample; development
 doesn't distinguish. **(Q3) volatility terciles** — a clean, monotonic
@@ -614,10 +619,13 @@ show a clean dose-response, HIGH_VOL stronger than LOW_VOL; relative
 weakness vs. market-driven weakness is the cleanest finding — relative
 weakness is CI-decisive positive in all three splits, market-driven is
 unstable; shock-type declines show a modest lean toward a stronger
-reversal than orderly declines; a shared, unexplained development-
-period anomaly (Q1/Q3, plausibly COVID-related, not yet verified) is
-disclosed as an open question for a future follow-up — see CURRENT
-ACTIVE EDGE STATUS above)**. Full evidence for each in
+reversal than orderly declines; a shared development-period anomaly
+(Q1/Q3) was confirmed via a year-stability follow-up to be driven
+specifically by 2020's COVID crash — every other development-period
+year broadly matches validation/out-of-sample's own positive shape,
+and the finding sharpens Q4's own result (2020 was a textbook
+MARKET_DRIVEN crash, the less-reliable bucket Q4 already identified) —
+see CURRENT ACTIVE EDGE STATUS above)**. Full evidence for each in
 `strategy/hypothesis_registry.py`.
 
 ## REJECTED HYPOTHESES (28)
@@ -1084,18 +1092,17 @@ executable-conversion bar that failed for the gated version in
 **Done this segment — `H_MEANREV_006`, mechanism decomposition of the
 generalized oversold effect (temporal decay, shock vs. orderly,
 volatility terciles, relative vs. market-driven weakness), INCONCLUSIVE
-overall with genuinely useful sub-findings — see CURRENT ACTIVE EDGE
-STATUS and INCONCLUSIVE HYPOTHESES above.** The single most
-well-motivated, cheap next step this same entry itself flagged: both
-Q1 (temporal decay) and Q3 (volatility terciles) showed a shared,
-unexplained development-period anomaly (flat/negative where
-validation/out-of-sample are consistently positive) that plausibly
-traces to the COVID crash/recovery sitting inside the development
-window — a narrowly-scoped, SECONDARY DESCRIPTIVE year-by-year
-breakdown (not a new pass/fail hypothesis, not new parameter tuning)
-would resolve whether this is the actual explanation, directly
-strengthening or qualifying two of `H_MEANREV_006`'s own four
-sub-findings.
+overall with genuinely useful sub-findings, PLUS its own flagged
+year-stability addendum — see CURRENT ACTIVE EDGE STATUS and
+INCONCLUSIVE HYPOTHESES above.** The addendum confirmed the shared Q1/
+Q3 development-period anomaly is specifically a 2020 (COVID crash)
+effect, not a broad feature of the window — resolved, not left open.
+No further mean-reversion-family mechanism question is currently
+flagged as both genuinely new and cheap; the next candidates are the
+"next candidate families not yet tested" list above (turn-of-month
+calendar effects, volume-price divergence), each requiring its own
+fresh registry/data-depth audit before pre-registration, not a
+same-entry addendum.
 
 **If the exit-architecture thread is ever resumed (not currently
 planned)**: regime-invalidation exit (exit when `TRENDING_UP` ends),

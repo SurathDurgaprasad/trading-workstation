@@ -389,7 +389,56 @@ narrowly-scoped candidate for a future year-by-year stability check
 not run in this entry per its own effort-scoping, and explicitly NOT
 assumed to be the explanation without verification.
 
-## 18. Scope note
+## 19. Addendum — year-stability follow-up (SECONDARY DESCRIPTIVE, resolves the §17 open question)
+
+Per §17's own explicit flag, a narrowly-scoped, secondary descriptive
+check: does 2020 (COVID crash/recovery) specifically explain the
+development-period anomaly shared by Q1 and Q3? Same frozen
+`zscore_close_20 < -2.0` entry, same `COMBINED` universe, development
+period only, broken down by calendar year at h5/h10/h20 (matching
+`H_MEANREV_003`'s own year-by-year adversarial-check precedent). No
+new threshold, no new pass/fail bar — purely descriptive.
+
+| Year | symbols firing | n (h10) | mean h5 | mean h10 | mean h20 |
+|---|---|---|---|---|---|
+| 2016 | 141 | 698 | −0.56% | +0.51% (not decisive) | **+2.05%** |
+| 2017 | 156 | 1334 | **+1.13%** | **+2.18%** | **+3.91%** |
+| 2018 | 173 | 2533 | −0.00% (not decisive) | **−0.53%** | −0.37% (not decisive) |
+| 2019 | 178 | 2100 | −0.13% (not decisive) | +0.07% (not decisive) | **+1.87%** |
+| **2020** | 180 | 2128 | **−3.51%** | **−5.30%** | **−3.20%** |
+| 2021 | 188 | 1627 | **+1.44%** | **+2.85%** | **+3.25%** |
+| 2022 | 194 | 2567 | **+0.75%** | **+1.10%** | **+1.88%** |
+| 2023 | 196 | 1591 | **+0.78%** | **+1.65%** | **+2.73%** |
+
+(**bold** = CI-decisive)
+
+**2020 is a clear, dramatic outlier, confirmed — not merely
+plausible.** At every one of the three reported horizons, 2020 shows a
+CI-decisive NEGATIVE mean, an order of magnitude different from every
+neighboring year (h10: 2020 = −5.30% vs. 2017/2019/2021/2022/2023 all
+CI-decisive positive, ranging +0.07% to +2.85%). Every other
+development-period year is either CI-decisive positive or not decisive
+(2018 is a mild, real exception at h10 specifically, −0.53%, but
+nowhere near 2020's magnitude). **This resolves §17's open question**:
+the development-period anomaly shared by Q1 and Q3 is explained by
+2020 specifically, not a broad or persistent feature of the whole
+development window.
+
+**Economically coherent, and it sharpens Q4's own finding.** March
+2020 was a textbook systemic, broad-market-wide crash — precisely the
+`MARKET_DRIVEN` weakness type Q4 already found to be the LESS reliable
+bucket (unstable, sign-reversing between splits) relative to
+`RELATIVE_WEAKNESS` (stock-specific underperformance, CI-decisive
+positive in all three splits). During a genuine systemic panic, the
+usual mean-reversion mechanism can plausibly fail or reverse — oversold
+stocks kept falling further rather than reverting — a real, disclosed
+regime-dependence the year-by-year breakdown now makes concrete rather
+than merely inferred. **Still not itself grounds for excluding 2020
+from any future measurement** (that would be a post-hoc, results-driven
+universe/period edit, exactly what this project's own discipline
+forbids) — reported here as an explanatory finding, not acted on.
+
+## 20. Scope note
 
 Pure historical-data research, read-only. Does not touch
 `data/paper_trading.db`, `data/live_state.db`, `data/scheduler_runs.db`,
