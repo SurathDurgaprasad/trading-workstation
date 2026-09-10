@@ -522,3 +522,121 @@ def run_universe_mean_reversion_completion_exit_experiment(
                 pooled_trades[candidate_name].extend(trades)
 
     return result
+
+
+H_MEANREV_006_RELSTRENGTH_MEDIAN = -0.068845
+"""H_MEANREV_006's own frozen threshold (median of NSE-pooled
+development-period OVERSOLD-TRIGGERING relative_strength_20
+observations, n=14,571), reused verbatim by H_MEANREV_009 -- not
+re-derived, not a search input."""
+
+
+def _oversold_2std_relative_weak(row: pd.Series) -> bool:
+    """H_MEANREV_009: Candidate A's own frozen -2.0std threshold, gated
+    on H_MEANREV_006's own frozen relative-weakness partition (requires
+    a `relative_strength_20` column attached with a REAL market_series,
+    not the default None -- see quant_research.alpha_features.
+    add_alpha_features's own docstring; confirmed all-NaN otherwise in
+    H_MEANREV_006's own reproducibility record). Mirrors
+    _oversold_2std_trending_up's own exact style/precedent."""
+    if pd.isna(row.get("zscore_close_20")):
+        return False
+    rs = row.get("relative_strength_20")
+    if pd.isna(rs):
+        return False
+    return bool(row["zscore_close_20"] < -2.0 and rs < H_MEANREV_006_RELSTRENGTH_MEDIAN)
+
+
+RELATIVE_WEAKNESS_GATED_CANDIDATES = {
+    "A_oversold_2std_relative_weak": _oversold_2std_relative_weak,
+}
+"""H_MEANREV_009 -- kept as its own SEPARATE dict, never merged into
+CANDIDATES/REGIME_GATED_CANDIDATES, matching this module's own
+established convention. Only Candidate A is used (H_MEANREV_007/008's
+own established choice to keep this thread a single clean lens)."""
+
+
+@dataclass
+class UniverseRelativeWeaknessTimeExitExperimentResult:
+    """H_MEANREV_009: same pooling shape as every other universe-level
+    experiment runner in this module."""
+
+    development_trades: dict[str, list[Trade]] = field(default_factory=lambda: {name: [] for name in RELATIVE_WEAKNESS_GATED_CANDIDATES})
+    validation_trades: dict[str, list[Trade]] = field(default_factory=lambda: {name: [] for name in RELATIVE_WEAKNESS_GATED_CANDIDATES})
+    out_of_sample_trades: dict[str, list[Trade]] = field(default_factory=lambda: {name: [] for name in RELATIVE_WEAKNESS_GATED_CANDIDATES})
+    failed_symbols: dict[str, str] = field(default_factory=dict)
+
+
+def run_universe_relative_weakness_time_exit_experiment(
+    symbols: list[str],
+    *,
+    period: str = "10y",
+    interval: str = "1d",
+    initial_capital: float = 100_000.0,
+    cost_model=None,
+    benchmark_symbol: str = "^NSEI",
+    wide_stop_atr_multiplier: float = DEFAULT_WIDE_STOP_ATR_MULTIPLIER,
+    max_holding_bars: int = 10,
+) -> UniverseRelativeWeaknessTimeExitExperimentResult:
+    """H_MEANREV_009 (strategy/hypothesis_registry.py): the initial,
+    non-optimized executable version of H_MEANREV_006/007/008's own
+    relative-weakness bucket -- a deliberately wide (practically
+    unreachable) price stop/target via MeanReversionSignalStrategy's
+    own stop_atr_multiplier override (the SAME already-established
+    technique/value H_EXIT_005 already used) combined with
+    backtesting.exit_experiments.run_time_based_exit_backtest's own
+    unmodified force-close-at-N-bars mechanism (H_EXIT_004's own
+    infrastructure, reused directly -- no new bar-processing loop
+    needed here, unlike H_EXIT_005, since this entry adds no custom
+    early-exit condition of its own). max_holding_bars=10 reused from
+    H_MEANREV_006/007/008's own established primary horizon, not
+    chosen for this test's own results. relative_strength_20 requires
+    a REAL market_series (fetched once here, matching H_MEANREV_004's
+    own single-fetch-then-reuse pattern for its own external regime
+    series)."""
+    from backtesting.cache import CachedMarketDataProvider
+    from backtesting.costs import CostModel
+    from backtesting.exit_experiments import run_time_based_exit_backtest
+    from backtesting.splits import split_periods
+    from market.data_provider import MarketDataError, get_market_data_provider
+    from market.indicators import compute_indicator_series
+    from quant_research.alpha_features import add_alpha_features
+
+    cost_model = cost_model or CostModel.india_nse_intraday_2026()
+
+    provider = CachedMarketDataProvider(get_market_data_provider())
+    result = UniverseRelativeWeaknessTimeExitExperimentResult()
+
+    benchmark_ohlcv = provider.fetch_ohlcv(benchmark_symbol, period=period, interval=interval)
+    benchmark_series = compute_indicator_series(benchmark_ohlcv)
+
+    for symbol in symbols:
+        try:
+            ohlcv = provider.fetch_ohlcv(symbol, period=period, interval=interval)
+            indicator_series = add_alpha_features(compute_indicator_series(ohlcv), market_series=benchmark_series)
+        except (MarketDataError, ValueError) as exc:
+            result.failed_symbols[symbol] = str(exc)
+            continue
+
+        split = split_periods(indicator_series.index[0], indicator_series.index[-1])
+        periods = {
+            "development": (split.development_start, split.development_end, result.development_trades),
+            "validation": (split.validation_start, split.validation_end, result.validation_trades),
+            "out_of_sample": (split.out_of_sample_start, split.out_of_sample_end, result.out_of_sample_trades),
+        }
+
+        for candidate_name in RELATIVE_WEAKNESS_GATED_CANDIDATES:
+            strategy: Strategy = MeanReversionSignalStrategy(
+                candidate_name, candidates=RELATIVE_WEAKNESS_GATED_CANDIDATES, stop_atr_multiplier=wide_stop_atr_multiplier,
+            )
+            for period_label, (start, end, pooled_trades) in periods.items():
+                sliced = indicator_series.loc[(indicator_series.index >= start) & (indicator_series.index <= end)]
+                if sliced.empty:
+                    continue
+                run_result = run_time_based_exit_backtest(
+                    symbol=symbol, indicator_series=sliced, strategy=strategy, cost_model=cost_model,
+                    initial_capital=initial_capital, period_label=period_label, max_holding_bars=max_holding_bars,
+                )
+                pooled_trades[candidate_name].extend(run_result.trades)
+
+    return result

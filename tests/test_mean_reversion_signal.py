@@ -442,3 +442,87 @@ def test_run_universe_mean_reversion_completion_exit_experiment_exit_reasons_are
     ]
     reasons = {t.exit_reason for t in all_trades}
     assert reasons <= {ExitReason.MEAN_REVERSION_COMPLETE, ExitReason.EXPIRED, ExitReason.END_OF_DATA}
+
+
+# --- H_MEANREV_009: relative-weakness-gated candidate + executable design -------
+
+
+@pytest.mark.parametrize(
+    "zscore,relstrength,expected",
+    [
+        (-2.5, -0.10, True),  # oversold AND relatively weak
+        (-2.5, -0.01, False),  # oversold but NOT relatively weak (above the frozen median)
+        (-1.0, -0.10, False),  # relatively weak but not oversold enough
+        (-2.0, -0.10, False),  # boundary is strict <
+    ],
+)
+def test_relative_weak_candidate_requires_both_conditions(zscore, relstrength, expected):
+    from quant_research.mean_reversion_signal import RELATIVE_WEAKNESS_GATED_CANDIDATES
+
+    row = pd.Series({"zscore_close_20": zscore, "relative_strength_20": relstrength})
+    assert RELATIVE_WEAKNESS_GATED_CANDIDATES["A_oversold_2std_relative_weak"](row) is expected
+
+
+def test_relative_weak_candidate_fails_closed_on_missing_relative_strength_column():
+    from quant_research.mean_reversion_signal import RELATIVE_WEAKNESS_GATED_CANDIDATES
+
+    row = pd.Series({"zscore_close_20": -3.0})
+    assert RELATIVE_WEAKNESS_GATED_CANDIDATES["A_oversold_2std_relative_weak"](row) is False
+
+
+def test_relative_weak_candidate_fails_closed_on_missing_zscore():
+    from quant_research.mean_reversion_signal import RELATIVE_WEAKNESS_GATED_CANDIDATES
+
+    row = pd.Series({"zscore_close_20": float("nan"), "relative_strength_20": -0.10})
+    assert RELATIVE_WEAKNESS_GATED_CANDIDATES["A_oversold_2std_relative_weak"](row) is False
+
+
+def test_run_universe_relative_weakness_time_exit_experiment_pools_across_symbols_and_candidates(_fake_mean_reversion_universe_provider):
+    _fake_mean_reversion_universe_provider({"AAA", "BBB", "^NSEI"})
+
+    from quant_research.mean_reversion_signal import (
+        RELATIVE_WEAKNESS_GATED_CANDIDATES,
+        UniverseRelativeWeaknessTimeExitExperimentResult,
+        run_universe_relative_weakness_time_exit_experiment,
+    )
+
+    result = run_universe_relative_weakness_time_exit_experiment(["AAA", "BBB"], initial_capital=100_000.0)
+
+    assert isinstance(result, UniverseRelativeWeaknessTimeExitExperimentResult)
+    assert result.failed_symbols == {}
+    assert set(result.development_trades) == set(RELATIVE_WEAKNESS_GATED_CANDIDATES)
+    assert set(result.validation_trades) == set(RELATIVE_WEAKNESS_GATED_CANDIDATES)
+    assert set(result.out_of_sample_trades) == set(RELATIVE_WEAKNESS_GATED_CANDIDATES)
+    for candidate_name in RELATIVE_WEAKNESS_GATED_CANDIDATES:
+        assert isinstance(result.development_trades[candidate_name], list)
+
+
+def test_run_universe_relative_weakness_time_exit_experiment_isolates_a_failing_symbol(_fake_mean_reversion_universe_provider):
+    _fake_mean_reversion_universe_provider({"AAA", "^NSEI"})
+
+    from quant_research.mean_reversion_signal import run_universe_relative_weakness_time_exit_experiment
+
+    result = run_universe_relative_weakness_time_exit_experiment(["AAA", "BADSYMBOL"], initial_capital=100_000.0)
+
+    assert "BADSYMBOL" in result.failed_symbols
+    assert "AAA" not in result.failed_symbols
+
+
+def test_run_universe_relative_weakness_time_exit_experiment_exit_reasons_are_never_stop_or_target(_fake_mean_reversion_universe_provider):
+    """With the deliberately wide stop/target this hypothesis reuses
+    from H_EXIT_005, no real trade should ever exit via STOP or TARGET
+    in practice -- only EXPIRED (the time cap) or END_OF_DATA."""
+    _fake_mean_reversion_universe_provider({"AAA", "^NSEI"})
+
+    from quant_research.mean_reversion_signal import run_universe_relative_weakness_time_exit_experiment
+
+    result = run_universe_relative_weakness_time_exit_experiment(["AAA"], initial_capital=100_000.0)
+
+    all_trades = [
+        t
+        for bucket in (result.development_trades, result.validation_trades, result.out_of_sample_trades)
+        for trades in bucket.values()
+        for t in trades
+    ]
+    reasons = {t.exit_reason for t in all_trades}
+    assert reasons <= {ExitReason.EXPIRED, ExitReason.END_OF_DATA}

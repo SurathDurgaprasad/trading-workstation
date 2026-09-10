@@ -574,12 +574,46 @@ executable design follows — explicit empirical constraints for any
 FUTURE exit/risk design are documented, not implemented. Full writeup
 in `docs/research/H_MEANREV_008_RISK_CHARACTERIZATION_PREREGISTRATION.md`.
 
-Nothing is promoted. Nothing should be traded.
+**Initial executable design — `H_MEANREV_009`, REJECTED, but a
+genuinely informative result, not a dead end.** Per explicit user
+mandate: derive an executable version of the relative-weakness bucket
+using ONLY already-established empirical values (no parameter
+optimization) and test it honestly. Entry: `H_MEANREV_006`'s own
+frozen bucket. Exit: `H_EXIT_005`'s own already-used wide stop
+(20x ATR, to avoid the already-known STOP-domination failure) plus the
+already-established h10 time cap. Real trade simulation, real NSE
+costs, real `RiskEngine` position sizing, across 206 symbols (>1800
+trades, well-powered). **Promotion-gate verdict: `NEGATIVE`** — all
+three splits CI-decisive negative (dev −8.81%, val −5.29%, oos
+−5.81%). This magnitude was implausible on its face (a 9+ point swing
+from the raw measurement) and was investigated directly on real trades
+before being written up, per this project's own "verify before
+accepting a surprising result" discipline. **Diagnosis, confirmed
+precisely**: zero STOP/TARGET exits occurred (the wide stop worked
+exactly as designed) — but the SAME wide stop shrinks fixed-fractional
+position sizes to a mean of ~5-6 shares (36-39% of trades at exactly 1
+share), and the cost model's FIXED per-fill brokerage then consumes
+7-9% of that tiny notional per round trip — roughly 15x the entire
+gross edge. **Gross (pre-cost) returns were +0.56%/+1.97%/+1.42%,
+consistent with — even modestly stronger than — the raw
+H_MEANREV_006/007/008 measurement of the identical bucket**, confirming
+the entry/exit mechanism itself faithfully reproduces the already-
+measured effect; the net-negative verdict is a cost/position-sizing
+architecture mismatch, not a breakdown of the underlying signal. A
+genuinely NEW, fourth executable-conversion failure mode (FIXED-COST
+DOMINATION ON UNDERSIZED POSITIONS), distinct from the three prior
+STOP-domination instances (`H_XSECT_002`, `H_MEANREV_004`,
+`H_EXIT_005`). No parameter was retuned after seeing this result. Full
+writeup in `docs/research/H_MEANREV_009_EXECUTABLE_DESIGN_PREREGISTRATION.md`.
+
+Nothing is promoted. Nothing should be traded. This remains
+**entirely paper-only research** — no signal in this whole thread has
+cleared this project's own promotion bar.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(51 hypotheses tested to date).
+(52 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -693,7 +727,7 @@ evolution is non-monotonic across horizons, not a simple
 longer-is-better/worse story — see CURRENT ACTIVE EDGE STATUS
 above)**. Full evidence for each in `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (29)
+## REJECTED HYPOTHESES (30)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
@@ -779,8 +813,18 @@ development result completely reverses sign without 2020 while
 relative-weakness only dampens — suggesting the generalized effect is
 a mixture of a large-but-fragile volatility component and a
 smaller-but-robust relative-weakness component — see CURRENT ACTIVE
-EDGE STATUS above)**. Full evidence for each in
-`strategy/hypothesis_registry.py`.
+EDGE STATUS above)**, and **H_MEANREV_009 (initial executable design,
+relative-weakness bucket, no parameter optimization — PromotionVerdict.
+NEGATIVE, all three splits CI-decisive negative net of costs; but
+diagnosed precisely, not just reported: zero STOP/TARGET exits
+(the wide stop worked as designed), gross-of-cost returns consistent
+with the raw measurement, and the net-negative verdict fully explained
+by a fixed-per-fill brokerage cost consuming 7-9% of the tiny notional
+a wide-stop-shrunk position produces — roughly 15x the entire gross
+edge; a genuinely new, fourth executable-conversion failure mode
+(fixed-cost domination on undersized positions), distinct from the
+three prior STOP-domination instances — see CURRENT ACTIVE EDGE STATUS
+above)**. Full evidence for each in `strategy/hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
 "entry timing underperforms random" — confirmatory, not an edge.)

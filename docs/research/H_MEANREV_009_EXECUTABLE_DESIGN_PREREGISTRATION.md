@@ -188,7 +188,133 @@ Same `>=30` trades per split floor as every prior entry
 built into `evaluate_promotion` itself — a split below this
 automatically reads `INSUFFICIENT_DATA`, not a forced verdict).
 
-## 10. Scope note
+## 11. Reproducibility record
+
+`COMBINED` universe: 208 nominal, 206 built (`M&M.NS`/`GVT&D.NS`
+excluded, disclosed in advance). Candidate `A_oversold_2std_relative_weak`.
+Trade counts: development n=1118, validation n=382, out-of-sample
+n=370 — all well above the 30-trade floor. Exit-reason breakdown
+confirms the wide-stop design worked exactly as intended: development
+100% `EXPIRED`; validation 375 `EXPIRED` + 7 `END_OF_DATA`;
+out-of-sample 363 `EXPIRED` + 7 `END_OF_DATA` — **zero STOP or TARGET
+exits in over 1800 trades**, confirming the 20x-ATR stop/target never
+bound even once; the realized exit is governed entirely by the 10-bar
+time cap (or end-of-data), exactly as designed.
+
+## 12. Results — the entry/exit mechanism validates the raw signal; the specific cost/sizing combination destroys it
+
+Full evidence: `H_MEANREV_009` in `strategy/hypothesis_registry.py`.
+
+### Promotion-gate verdict (net of costs, as pre-registered)
+
+| Split | n | mean (net) | win rate | 95% CI |
+|---|---|---|---|---|
+| development | 1118 | −8.81% | 14.1% | [−9.41%,−8.21%] |
+| validation | 382 | −5.29% | 21.2% | [−6.01%,−4.57%] |
+| out-of-sample | 370 | −5.81% | 18.1% | [−6.49%,−5.12%] |
+
+**`strategy.promotion_gate.evaluate_promotion` verdict: `NEGATIVE`** —
+all three splits show a confident `NEGATIVE_PERFORMANCE` reading.
+Taken at face value, this is decisive evidence the design as
+constructed causes harm — the honest, unmodified reading of this
+project's own standard machinery, not softened.
+
+### Investigating before accepting: a result this far from the raw measurement warranted diagnosis, not just reporting
+
+The magnitude was implausible on its face: `H_MEANREV_006`/`007`/`008`
+already measured this identical bucket's raw h10 forward return at
++0.51%/+1.58%/+1.35% (dev/val/oos) with ~55-59% win rates. A real,
+cost-adjusted, position-sized executable version showing −8.81% at
+14.1% win rate is a 9+ percentage-point swing — far beyond what normal
+slippage/costs/next-bar-open entry timing could plausibly explain.
+Per this project's own standing discipline (verify before accepting a
+surprising result), this was investigated directly on real trades
+BEFORE being written up, not reported blind.
+
+**Diagnosis (a read-only inspection of real `Trade` records, no design
+change)**: position sizes are small — `RiskEngine`'s existing
+fixed-fractional sizing (`risk_per_trade_pct=0.5%` of equity) divided
+by `risk_per_unit = stop_distance = 20 x ATR` (the pre-registered wide
+stop) mechanically produces small quantities (universe-wide mean
+4.98-5.92 shares; 36-39% of ALL trades sized at exactly 1 share). Once
+this is combined with `CostModel.india_nse_intraday_2026()`'s FIXED
+(non-percentage) `brokerage_per_fill=20.0` component (charged on entry
+AND exit), the round-trip fixed cost lands on a tiny notional.
+
+**Gross (pre-cost) vs. net (cost-inclusive) comparison, universe-wide, h10, per split**:
+
+| Split | n | gross mean | net mean | avg cost (% of notional) | gross win rate |
+|---|---|---|---|---|---|
+| development | 1118 | **+0.56%** | −8.81% | 9.37% | 53.8% |
+| validation | 382 | **+1.97%** | −5.29% | 7.26% | 57.6% |
+| out-of-sample | 370 | **+1.42%** | −5.81% | 7.23% | 59.5% |
+
+**The gross (pre-cost) picture is consistent with — even modestly
+stronger than — the raw forward-return measurement, in both magnitude
+and win rate, across all three splits.** The underlying entry
+condition and the wide-stop/10-bar-cap exit mechanism together
+faithfully reproduce the effect `H_MEANREV_006`/`007`/`008` already
+found. **Average round-trip cost (7.2%-9.4% of notional) is roughly
+15x the size of the ENTIRE gross edge** — the net-negative promotion-
+gate verdict is explained almost entirely by this cost/sizing
+interaction, not by a breakdown of the entry signal itself.
+
+### A fourth, newly-discovered executable-conversion failure mode
+
+This project's registry already documents three independent instances
+of STOP-domination (`H_XSECT_002`, `H_MEANREV_004`, `H_EXIT_005`) —
+this entry's design specifically avoided that failure mode (zero
+STOP/TARGET exits, confirmed above) and, in doing so, surfaced a
+DIFFERENT one: **FIXED-COST DOMINATION ON UNDERSIZED POSITIONS**. A
+wide stop is necessary to avoid STOP-domination, but a wide stop
+directly shrinks fixed-fractional position size; a cost model with a
+meaningful FIXED (not purely percentage) per-fill component then
+consumes a crushing fraction of a small position's notional,
+regardless of whether the underlying signal is real. This is a
+genuinely different, disclosed, mechanistic lesson — not a restatement
+of the STOP-domination finding.
+
+### What this does and does NOT establish
+
+**Does NOT establish**: that this design is tradeable, that the signal
+is profitable net of realistic costs at this position-sizing scale, or
+that any promotion/live consideration is warranted. The unmodified
+promotion-gate verdict is `NEGATIVE` and is reported as such, not
+softened.
+
+**Does establish**: the raw relative-weakness oversold effect
+(`H_MEANREV_005`/`006` measurement) survives translation into a real,
+executable entry/exit mechanism largely intact on a GROSS basis — the
+entry logic and the wide-stop-plus-time-cap exit are not themselves
+the problem. The specific failure is a cost/position-sizing
+architecture mismatch, independently diagnosable and disclosed with
+its own mechanism, not a vague "it didn't work."
+
+### Verdict
+
+**REJECTED** — per this entry's own frozen evaluation
+(`PromotionVerdict.NEGATIVE`, mapped to this registry's own
+`HypothesisStatus.REJECTED`: decisive evidence of harm for the design
+AS CONSTRUCTED, not merely "unproven"). Per the explicit "no parameter
+optimization" instruction this entire entry was built under, NO
+stop-multiplier, position-sizing, or cost-model change was made or
+retried after seeing this result.
+
+### Open questions for a future, separately pre-registered entry (NOT pursued here)
+
+Explicitly named, not implemented: (a) a cost model with a smaller or
+zero FIXED per-fill component (percentage-only), more representative
+of some real discount-broker fee schedules, would need its own
+disclosed justification and its own pre-registration, not a retry of
+this one; (b) a position-sizing scheme that does not shrink
+proportionally with stop distance (e.g., sizing by a separate,
+distribution-derived risk measure rather than literally the stop
+distance) is a genuinely different design, not a parameter retune of
+this one; (c) trading at a larger capital base, where the SAME fixed
+per-fill cost is a proportionally smaller drag, is a scale question,
+not a signal question. None of these are pursued in this entry.
+
+## 13. Scope note
 
 Paper-only, no live/broker code touched. `run_time_based_exit_backtest`
 is the same isolated, non-live backtesting primitive `H_EXIT_004`/

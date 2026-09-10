@@ -3165,4 +3165,92 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "H_MEANREV_008_RISK_CHARACTERIZATION_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_MEANREV_009",
+            description=(
+                "Initial executable design, per explicit user mandate: derive an executable version of "
+                "H_MEANREV_006's own relative-weakness bucket from ALREADY-ESTABLISHED empirical values only "
+                "(no parameter optimization), then test it honestly against real trade simulation. "
+                "Pre-registered BEFORE any real backtest ran: docs/research/"
+                "H_MEANREV_009_EXECUTABLE_DESIGN_PREREGISTRATION.md, committed as its own commit prior to any "
+                "experiment code."
+            ),
+            rationale=(
+                "User-mandated move from pure measurement to executable design, following the project's own "
+                "MECHANISM -> RESPONSE DISTRIBUTION -> RISK DISTRIBUTION -> EXECUTABLE DESIGN sequence. Every "
+                "design choice reuses an already-established value: entry is H_MEANREV_006's own frozen "
+                "relative-weakness bucket (chosen over the higher-magnitude volatility bucket specifically "
+                "because H_MEANREV_008 documented its tail risk concentrates in crisis regimes with no risk "
+                "mechanism yet designed); exit reuses H_EXIT_005's own already-used wide-stop constant "
+                "(stop_atr_multiplier=20.0) plus H_MEANREV_006/007/008's own established h10 primary horizon "
+                "as the time cap; sizing/costs/evaluation are all unmodified existing infrastructure "
+                "(RiskEngine, CostModel.india_nse_intraday_2026(), strategy/promotion_gate.py)."
+            ),
+            expected_effect="No prior assumption -- an honest test of whether this specific, non-optimized design clears the project's own standard promotion bar.",
+            dataset_restrictions="COMBINED universe (206/208 symbols), identical to H_MEANREV_006/007/008. 10 years daily.",
+            experiment_design=(
+                "One new predicate (_oversold_2std_relative_weak) and one new one-entry candidates dict "
+                "(RELATIVE_WEAKNESS_GATED_CANDIDATES) in quant_research/mean_reversion_signal.py, plus one new "
+                "runner (run_universe_relative_weakness_time_exit_experiment) reusing backtesting.exit_"
+                "experiments.run_time_based_exit_backtest (H_EXIT_004's own unmodified infrastructure) "
+                "directly -- no new bar-processing loop needed. relative_strength_20 populated via a real "
+                "market_series=^NSEI pass to add_alpha_features (H_MEANREV_006's own established fix -- "
+                "confirmed all-NaN under the default pipeline)."
+            ),
+            success_criteria="strategy.promotion_gate.evaluate_promotion returns PROMOTED (all three splits confident POSITIVE_PERFORMANCE) -- the project's own standard bar, applied unmodified.",
+            failure_criteria="evaluate_promotion returns NEGATIVE, REJECTED, or INSUFFICIENT_DATA.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REAL EXECUTABLE BACKTEST (206/206 symbols built, 208 nominal; frozen entry, wide stop=20x ATR, "
+                "10-bar time cap, real NSE costs, real RiskEngine position sizing; trade counts dev=1118 "
+                "val=382 oos=370, all well above the 30-trade floor): exit-reason breakdown confirms the wide "
+                "stop worked exactly as designed -- ZERO STOP or TARGET exits across all >1800 trades, entirely "
+                "EXPIRED (time cap) or END_OF_DATA. "
+                "PROMOTION-GATE VERDICT (net of costs, per-trade returns via backtesting.universe."
+                "per_trade_returns, unmodified evaluate_promotion): NEGATIVE -- development mean=-8.81% "
+                "(CI=[-9.41%,-8.21%], win=14.1%), validation mean=-5.29% (CI=[-6.01%,-4.57%], win=21.2%), "
+                "out_of_sample mean=-5.81% (CI=[-6.49%,-5.12%], win=18.1%) -- all three CI-decisive negative. "
+                "This magnitude (a 9+ percentage-point swing from H_MEANREV_006/007/008's own raw h10 "
+                "measurement of the SAME bucket, +0.51%/+1.58%/+1.35%) was investigated directly on real Trade "
+                "records BEFORE being written up, per this project's own standing 'verify before accepting a "
+                "surprising result' discipline, rather than reported blind. "
+                "DIAGNOSIS (read-only inspection, no design change): RiskEngine's existing fixed-fractional "
+                "sizing (risk_per_trade_pct=0.5% of equity / risk_per_unit=20xATR, the pre-registered wide "
+                "stop) mechanically produces small positions -- universe-wide mean 4.98-5.92 shares per trade, "
+                "36-39% of ALL trades sized at exactly 1 share. CostModel.india_nse_intraday_2026()'s FIXED "
+                "(non-percentage) brokerage_per_fill=20.0 (charged on entry AND exit) then consumes a crushing "
+                "fraction of these tiny notionals. "
+                "GROSS (pre-cost) vs NET comparison, universe-wide, h10: development gross=+0.56% "
+                "(vs net=-8.81%, win=53.8%); validation gross=+1.97% (vs net=-5.29%, win=57.6%); out_of_sample "
+                "gross=+1.42% (vs net=-5.81%, win=59.5%). THE GROSS PICTURE IS CONSISTENT WITH -- EVEN MODESTLY "
+                "STRONGER THAN -- THE RAW FORWARD-RETURN MEASUREMENT in both magnitude and win rate, across all "
+                "three splits: the entry condition and the wide-stop/10-bar-cap exit mechanism together "
+                "faithfully reproduce the already-measured effect. Average round-trip cost (7.2%-9.4% of "
+                "notional) is roughly 15x the size of the ENTIRE gross edge -- the net-negative verdict is "
+                "explained almost entirely by this cost/sizing interaction, not a breakdown of the entry "
+                "signal itself. "
+                "A FOURTH, NEWLY-DISCOVERED EXECUTABLE-CONVERSION FAILURE MODE: this project's registry "
+                "already documents three independent STOP-domination instances (H_XSECT_002, H_MEANREV_004, "
+                "H_EXIT_005). This design specifically avoided that failure mode (confirmed: zero STOP/TARGET "
+                "exits) and surfaced a DIFFERENT one instead -- FIXED-COST DOMINATION ON UNDERSIZED POSITIONS: "
+                "a wide stop necessary to avoid STOP-domination directly shrinks fixed-fractional position "
+                "size, and a cost model with a meaningful FIXED per-fill component then consumes a crushing "
+                "fraction of a small position's notional, independent of whether the underlying signal is "
+                "real. "
+                "VERDICT: REJECTED (PromotionVerdict.NEGATIVE, mapped to HypothesisStatus.REJECTED -- decisive "
+                "evidence of harm for the design AS CONSTRUCTED, not softened). Per the explicit 'no parameter "
+                "optimization' mandate this entry was built under, no stop-multiplier, position-sizing, or "
+                "cost-model change was made or retried after seeing this result. WHAT THIS DOES NOT ESTABLISH: "
+                "that this design is tradeable, or that any promotion/live consideration is warranted -- "
+                "remains firmly paper-only, unpromoted. WHAT THIS DOES ESTABLISH: the raw relative-weakness "
+                "oversold effect survives translation into a real, executable entry/exit mechanism largely "
+                "intact on a gross basis -- the specific failure is a cost/position-sizing architecture "
+                "mismatch, independently diagnosed and disclosed with its own precise mechanism, not a vague "
+                "'it didn't work.' OPEN QUESTIONS for a future, separately pre-registered entry (NOT pursued "
+                "here, explicitly not a retune of this one): a cost model with a smaller/zero fixed per-fill "
+                "component; a position-sizing scheme that does not shrink proportionally with stop distance; "
+                "trading at a larger capital base where the same fixed cost is proportionally smaller. Full "
+                "writeup in docs/research/H_MEANREV_009_EXECUTABLE_DESIGN_PREREGISTRATION.md."
+            ),
+        ),
     )
