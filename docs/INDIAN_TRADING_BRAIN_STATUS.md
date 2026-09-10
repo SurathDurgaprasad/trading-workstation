@@ -643,6 +643,43 @@ single-symbol-at-a-time backtest architecture used throughout this
 project cannot model — a substantial future step, not started. Full
 writeup in `docs/research/H_MEANREV_010_EXECUTION_STRUCTURE_PREREGISTRATION.md`.
 
+**Multi-position portfolio construction — `H_MEANREV_011`, REJECTED,
+but a materially milder and more nuanced outcome than a confirmed
+failure, with a real, important methodological lesson.** Builds this
+project's first multi-position, event-driven, shared-capital portfolio
+simulator (none existed before — every prior backtest was either
+single-symbol or a periodic full-basket rebalance). `MAX_CONCURRENT_
+POSITIONS=4` derived directly from the existing `RiskConfig.
+max_exposure_pct=25.0` (not searched); equal-weight 25%-of-capital
+sizing; real NSE costs. **The decisive finding**: of 9,893 candidate
+signals across the universe, only 7-10% were ever accepted — 82-93%
+were rejected, overwhelmingly because the 4-slot cap was already full
+(45-50% of all rejections). This strongly suggests the signal clusters
+heavily (many stocks becoming simultaneously oversold-and-relatively-
+weak on the same dates, consistent with a market-wide, not purely
+idiosyncratic, phenomenon) — and the resulting accepted-trade sample is
+a systematically-filtered subset (chosen by an arbitrary chronological
++ alphabetical tie-break under heavy contention), not a representative
+one. Net returns: development +0.10% (CI=[−0.64%,+0.84%]), validation
+−0.51% (CI=[−2.05%,+1.02%]), out-of-sample −0.42% (CI=[−1.80%,+0.96%])
+— every split's CI straddles zero substantially. **This is
+`REJECTED` per the unmodified promotion gate, but it is a materially
+MILDER finding than `H_MEANREV_009`'s own decisive `NEGATIVE`** — no
+split is confidently negative, the honest read is "underpowered and
+mixed-direction," not "confirmed harm." **A genuine, disclosed
+success on one specific dimension**: portfolio-level tail risk is much
+improved — the worst single trade is −38.7% of that one position's own
+capital (matching `H_MEANREV_008`'s own already-known fat tail) but
+only −9.68% of TOTAL portfolio capital, versus `H_MEANREV_010`
+Candidate 2's own −65%-of-total-capital outcome. Portfolio drawdown
+remains substantial regardless (26-39%). **This entry does not cleanly
+answer whether the signal survives diversification — it demonstrates
+that this particular, simple, non-optimized scheduling rule cannot
+exercise enough of the signal's own sample to answer that question
+with confidence.** `H_MEANREV_009` and `H_MEANREV_010` remain
+unmodified, cited not rewritten. Full writeup in `docs/research/
+H_MEANREV_011_PORTFOLIO_CONSTRUCTION_PREREGISTRATION.md`.
+
 Nothing is promoted. Nothing should be traded. This remains
 **entirely paper-only research** — no signal in this whole thread has
 cleared this project's own promotion bar, and no live/broker execution
@@ -651,7 +688,7 @@ capability exists or was touched.
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(53 hypotheses tested to date).
+(54 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -774,7 +811,7 @@ with a serious extreme-tail-risk side effect; Candidate 3 is a
 diagnostic control only — see CURRENT ACTIVE EDGE STATUS above)**.
 Full evidence for each in `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (30)
+## REJECTED HYPOTHESES (31)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
@@ -871,7 +908,20 @@ a wide-stop-shrunk position produces — roughly 15x the entire gross
 edge; a genuinely new, fourth executable-conversion failure mode
 (fixed-cost domination on undersized positions), distinct from the
 three prior STOP-domination instances — see CURRENT ACTIVE EDGE STATUS
-above)**. Full evidence for each in `strategy/hypothesis_registry.py`.
+above)**, and **H_MEANREV_011 (multi-position portfolio construction —
+this project's first multi-symbol, shared-capital portfolio simulator;
+of 9,893 candidate signals only 7-10% were accepted, 82-93% rejected
+mostly because the 4-slot cap (derived from RiskConfig.max_exposure_
+pct=25.0, not searched) was already full — strong evidence of signal
+clustering and a real, disclosed selection-bias risk from the
+chronological+alphabetical tie-break under contention; every split's
+CI straddles zero, a materially milder "underpowered and mixed" result
+than H_MEANREV_009's own decisive NEGATIVE; portfolio-level tail risk
+genuinely improved (worst trade -9.68% of total capital vs
+H_MEANREV_010 Candidate 2's own -65%) but drawdown remains substantial
+and the result does not cleanly answer whether the signal survives
+diversification — see CURRENT ACTIVE EDGE STATUS above)**. Full
+evidence for each in `strategy/hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
 "entry timing underperforms random" — confirmatory, not an edge.)

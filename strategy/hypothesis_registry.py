@@ -3333,4 +3333,92 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "writeup in docs/research/H_MEANREV_010_EXECUTION_STRUCTURE_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_MEANREV_011",
+            description=(
+                "Does the frozen H_MEANREV_006 signal, exited the same frozen h10 way, survive conversion "
+                "into a realistic MULTI-POSITION portfolio -- multiple simultaneous positions, real capital "
+                "allocation, real Indian transaction costs -- without H_MEANREV_010 Candidate 2's own "
+                "disqualifying 100%-into-one-position concentration? No signal, threshold, or horizon change. "
+                "Pre-registered BEFORE any portfolio simulation ran: docs/research/"
+                "H_MEANREV_011_PORTFOLIO_CONSTRUCTION_PREREGISTRATION.md, committed as its own commit prior "
+                "to any experiment code."
+            ),
+            rationale=(
+                "User-mandated move from signal/execution research to portfolio construction. Audit confirmed "
+                "no existing multi-position, event-driven, shared-capital portfolio simulator exists in this "
+                "codebase -- every prior backtest is either single-symbol with dedicated capital or a periodic "
+                "full-basket rebalance (H_XSECT_005). Built the minimum new simulator required, reusing "
+                "H_MEANREV_010's own compute_fixed_notional_trade and backtesting/equity.py's build_equity_"
+                "curve unchanged for all price/cost/drawdown math. Portfolio parameters derived from existing "
+                "infrastructure, not searched: MAX_CONCURRENT_POSITIONS=4 directly from RiskConfig.max_"
+                "exposure_pct=25.0."
+            ),
+            expected_effect="No prior assumption -- a portfolio-construction test, not a directional prediction.",
+            dataset_restrictions="COMBINED universe (206/208 symbols), identical to H_MEANREV_009/010. 10 years daily.",
+            experiment_design=(
+                "One new module, quant_research/mean_reversion_portfolio.py (collect_candidate_events, "
+                "schedule_portfolio, summarize_portfolio -- 15 new tests), implementing chronological, "
+                "capital- and concurrency-constrained event scheduling. Candidates processed in strict "
+                "chronological order (ties broken by symbol name); accepted only if the symbol has no open "
+                "position, the portfolio is below the 4-position cap, and capital_per_position (=25% of "
+                "initial_capital, matching RiskConfig.max_exposure_pct) is available in cash. Real "
+                "CostModel.india_nse_intraday_2026(). Shared calendar-based dev/val/oos splits matching "
+                "quant_research.market_behavior._period_mask's own exact boundary convention."
+            ),
+            success_criteria="strategy.promotion_gate.evaluate_promotion PROMOTED -- all three splits confident POSITIVE_PERFORMANCE.",
+            failure_criteria="evaluate_promotion NEGATIVE or REJECTED.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REAL PORTFOLIO SIMULATION (206/206 symbols; frozen entry/exit/universe unchanged; "
+                "MAX_CONCURRENT_POSITIONS=4, capital_per_position=25000): "
+                "of 9893 total candidate signal events, only 555/111/105 (dev/val/oos, 7.2%-9.9%) were "
+                "ACCEPTED -- 82-93% rejected, overwhelmingly by capacity (45-50%) and cash (27-38%), before "
+                "even the one-position-per-symbol rule (10%). Net returns: development +0.10% (CI=[-0.64%,"
+                "+0.84%], STATISTICALLY_MEANINGLESS), validation -0.51% (CI=[-2.05%,+1.02%], STATISTICALLY_"
+                "MEANINGLESS), out_of_sample -0.42% (CI=[-1.80%,+0.96%], STATISTICALLY_MEANINGLESS). Every "
+                "split's CI straddles zero substantially -- promotion verdict REJECTED per the mechanical rule "
+                "(mixed point-estimate signs, no split confidently NEGATIVE_PERFORMANCE), a MATERIALLY MILDER "
+                "finding than H_MEANREV_009's own decisive NEGATIVE (all three splits CI-decisively negative "
+                "there); the honest characterization here is underpowered and mixed-direction, not confirmed "
+                "harm. "
+                "SEVERE, DISCLOSED SAMPLE-ATTRITION PROBLEM: the 4-position cap collapsed the sample from "
+                "several hundred-to-thousand-plus trades per split (H_MEANREV_009/010's own pooled scale) down "
+                "to 105-555 -- a direct, non-optimized consequence of the frozen concurrency cap. "
+                "INFERENCE, tied to verified rejection counts: ~45-50% capacity-driven rejection implies heavy "
+                "SIGNAL CLUSTERING (many symbols simultaneously oversold-and-relative-weak on the same dates) "
+                "-- consistent with this being partly a market-wide, not purely idiosyncratic, phenomenon; "
+                "concurrent positions accepted on a clustered day are plausibly correlated with each other, "
+                "not genuinely diversified (pairwise correlation itself NOT computed -- no existing "
+                "infrastructure, disclosed as a real scope limit). "
+                "SERIOUS DISCLOSED METHODOLOGICAL LIMITATION: the chronological+alphabetical tie-break under "
+                "heavy capacity constraint is an ARBITRARY, not economically-motivated, selection mechanism -- "
+                "the accepted-trade sample is a systematically-filtered subset of the full signal population, "
+                "not a representative one. Consistent with this: unlike H_MEANREV_009/010, GROSS P&L itself is "
+                "already mixed in sign here (val -7852, oos -4790) -- the accepted subset no longer cleanly "
+                "reproduces the raw signal's own positive edge, a genuinely different finding from every prior "
+                "entry in this family. This entry does NOT cleanly answer 'does the signal survive "
+                "diversification' -- it demonstrates this PARTICULAR simple scheduling rule cannot exercise "
+                "enough of the signal's own sample to answer that with confidence. "
+                "GENUINE, DISCLOSED SUCCESS on ONE dimension: portfolio-level tail risk is materially improved "
+                "-- development's worst trade (-9676.95) is -38.7% of that ONE position's own capital "
+                "(consistent with H_MEANREV_008's own already-documented fat tail) but only -9.68% of TOTAL "
+                "portfolio capital, vs H_MEANREV_010 Candidate 2's own -65%-of-TOTAL-capital outcome. Portfolio "
+                "drawdown remains substantial regardless (39.3%/26.4%/26.9% dev/val/oos), and average realized "
+                "concurrent positions (~2.1-2.2 of the 4 cap, ~53-55% capital utilization) show the portfolio "
+                "ran under its own nominal diversification target much of the time -- consistent with the "
+                "clustering inference (bursts of crowding followed by quieter, under-deployed stretches). "
+                "Liquidity: INCONCLUSIVE, as pre-registered -- no average-daily-volume/free-float data exists "
+                "anywhere in this repository. Top-5-trade concentration metric produced uninterpretable "
+                "extreme percentages (360%/-192%/-200%) given small/mixed-sign total net P&L -- disclosed as a "
+                "metric limitation at this sample size, not a real concentration finding either way. "
+                "VERDICT: REJECTED, matching evaluate_promotion's own unmodified verdict. H_MEANREV_009 "
+                "(REJECTED) and H_MEANREV_010 (INCONCLUSIVE) remain unmodified, cited as comparison points "
+                "only. NEXT BOTTLENECK identified, not pursued: candidate-selection design under signal "
+                "clustering -- how a portfolio should choose among simultaneously-eligible signals (by "
+                "strength, rotation, explicit diversification rules, or more/smaller slots) is a genuinely new "
+                "question, not a retune of this entry's own frozen design. Full writeup in docs/research/"
+                "H_MEANREV_011_PORTFOLIO_CONSTRUCTION_PREREGISTRATION.md."
+            ),
+        ),
     )
