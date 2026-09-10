@@ -639,6 +639,45 @@ data/live_state.db --live-source dhan --resilient
 --staleness-seconds 120`). No scheduler architecture change was made;
 this is a credential-provisioning gap, not a code defect.
 
+**Forecast-journal infrastructure audit, 2026-09-10 (read-only, no
+historical record modified)**: ran `main.py evaluate-forecasts
+--resilient` for real against the live `data/direction_forecasts.db`
+(no credentials needed — uses the standard cached/Yahoo provider, not
+the live Dhan feed) and read `predictions/direction_forecast.py`'s
+resolution logic directly. **Verdict: the resolution mechanism itself
+has no bug.** 15 total forecasts, 4 resolved (unchanged — the same
+known stale-reference-price batch already excluded from calibration
+above: RELIANCE/TCS/INFY/HDFCBANK, 1 correct/3 incorrect — this is
+NOT a new accuracy read, just a re-confirmation of an already-disclosed
+data-integrity issue), 11 legitimately still ACTIVE. The 11 ACTIVE
+ones are correctly unresolved, not stuck: `as_of=2026-09-08`,
+`horizon_bars=5`, and only ONE trading day (2026-09-09) has closed
+since — `evaluate_forecast` correctly reports `bars_observed=0` because
+the underlying market-data cache for these 11 symbols has not been
+refreshed since 2026-09-08T14:34 UTC (confirmed via `cache-status`),
+itself a downstream consequence of the scheduler being down (the
+scheduler's own ticks are what normally trigger fresh fetches). No
+retained-ACTIVE anomaly found (checked: no forecast's evaluation
+history ever showed `resolved=True` followed by a later `resolved=
+False`). **A real operational guardrail identified, NOT acted on**:
+all 11 of these symbols are also part of the 32-symbol research
+universe (`ORIGINAL_32_NSE_UNIVERSE`) with 10-year cached depth;
+`CachedMarketDataProvider` has no automatic invalidation and serves
+a cache hit as-is regardless of the caller's requested period, so a
+naive refresh (deleting the cache file and letting `evaluate-forecasts`
+refetch at its own default `--period=1y`) would silently downgrade
+these 11 symbols' research-grade 10-year depth to 1 year, corrupting
+every other hypothesis in this registry that touches them (the exact
+class of risk this project has hit before). Not done: even a
+depth-safe refresh today would only advance `bars_observed` from 0 to
+1 (one new trading day), nowhere near the 5-bar resolution threshold —
+no forecast would actually resolve, so the risk is not justified by
+the reward right now. This will resolve naturally once the scheduler
+is restored and its normal ticks resume advancing the cache correctly.
+**No code was changed** — per this audit's own finding, there is no
+bug to fix, matching the "if no bug exists and the scheduler is simply
+stopped: do NOT create unnecessary code" discipline.
+
 **The live scheduler stopped TWICE today** (2026-09-09): once overnight
 (found stopped at session start, restarted at market open, a real
 `pre_market` tick completed, 1 new prediction recorded) and once again
