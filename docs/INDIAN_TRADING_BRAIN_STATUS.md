@@ -609,6 +609,36 @@ further in this run)**. Full evidence for each in
 Both sample sizes are far too small for any statistical conclusion.
 This is the actual current bottleneck — not a missing capability.
 
+**Update 2026-09-10**: counts unchanged since 2026-09-08/09 above (15
+total directional forecasts, still the same 4 resolved/11 active; no
+new resolutions) — passive accumulation has not progressed, because
+the live scheduler was found STOPPED again this morning (see below),
+so no new `pre_market`/`market_open` ticks ran to add predictions or
+forecasts today.
+
+**Scheduler operational note, 2026-09-10**: found completely stopped
+at session start (zero python.exe processes; no `scheduler_runs.db`
+rows at all for 2026-09-10; today's `pre_market` slot already missed
+by the time this was discovered, ~09:17 IST, market already open).
+Restarted using the exact established command line, but the restart
+is NON-FUNCTIONAL: every `market_open` attempt fails with
+`DhanCredentialsMissingError` (`DHAN_CLIENT_ID`/`DHAN_ACCESS_TOKEN` not
+set in this session's shell, not in User/Machine Windows environment
+variables, and the codebase has no `.env` auto-loading anywhere —
+confirmed via `grep` for `dotenv`). Whatever shell originally launched
+the prior scheduler instance (PIDs 24472/24464) must have had these
+exported directly; per the credential-masking policy this session has
+never had access to their actual values and cannot restore them. The
+broken restart attempt was stopped cleanly rather than left spamming
+failed runs. **This requires the user's own action**: restart the
+scheduler from a shell where the Dhan credentials are set, using the
+exact established command line (`main.py schedule loop --watchlist-file
+market_data/watchlists/starter_nse.yaml --paper-execute
+--initial-capital 100000 --paper-db data/paper_trading.db --state-db
+data/live_state.db --live-source dhan --resilient
+--staleness-seconds 120`). No scheduler architecture change was made;
+this is a credential-provisioning gap, not a code defect.
+
 **The live scheduler stopped TWICE today** (2026-09-09): once overnight
 (found stopped at session start, restarted at market open, a real
 `pre_market` tick completed, 1 new prediction recorded) and once again
