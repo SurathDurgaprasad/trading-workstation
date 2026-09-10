@@ -173,7 +173,124 @@ entry that touches it), liquidity — assessed selectively, not as an
 unlimited slicing exercise, and only for whichever bucket(s) the
 primary comparison identifies as most informative.
 
-## 9. Scope note
+## 10. Reproducibility record
+
+- Universe/calendar identical to `H_MEANREV_006`: `COMBINED`, 206/208 symbols, `development_end=2023-11-25`, `validation_end=2025-04-17`.
+- Frozen thresholds reused verbatim: `RELSTRENGTH_MEDIAN=-6.8845%`, `ATR_PCT_33/67=2.6583%/3.6352%`.
+- Bucket-overlap contingency (development-period triggering observations, n=14,578): `RELWEAK_LOW`=1270 (8.7%), `RELWEAK_MID`=2346 (16.1%), `RELWEAK_HIGH`=3670 (25.2%), `MARKET_LOW`=2621 (18.0%), `MARKET_MID`=2488 (17.1%), `MARKET_HIGH`=2176 (14.9%). HIGH_VOL rate among `RELATIVE_WEAKNESS` observations = 50.4%, vs. 40.1% overall — a real but moderate (~10pp) overrepresentation, confirming genuine but not extreme confounding overlap between the two dimensions.
+
+## 11. Results
+
+Full evidence: `H_MEANREV_007` in `strategy/hypothesis_registry.py`.
+
+### Primary comparison (h10)
+
+| Bucket | Split | n | Mean | 95% CI |
+|---|---|---|---|---|
+| A (oversold alone) | development | 12854 | −0.14% | not decisive |
+| A | validation | 3362 | **+1.92%** | [+1.676%,+2.162%] |
+| A | out-of-sample | 4390 | **+0.59%** | [+0.389%,+0.788%] |
+| B (+relative weakness) | development | 6745 | **+0.51%** | [+0.254%,+0.761%] |
+| B | validation | 1491 | **+1.58%** | [+1.157%,+1.994%] |
+| B | out-of-sample | 1629 | **+1.35%** | [+0.997%,+1.693%] |
+| C (+high volatility) | development | 5677 | **−0.50%** | [−0.842%,−0.162%] (decisive NEGATIVE) |
+| C | validation | 792 | **+3.33%** | [+2.598%,+4.054%] |
+| C | out-of-sample | 914 | **+2.10%** | [+1.492%,+2.716%] |
+| D (joint) | development | 3575 | +0.40% | not decisive |
+| D | validation | 542 | **+3.07%** | [+2.115%,+4.034%] |
+| D | out-of-sample | 590 | **+2.08%** | [+1.331%,+2.833%] |
+
+**The frozen incremental-information test (h10, out-of-sample): D beats
+BOTH B and C? FALSE.** D (+2.08%) essentially TIES C (+2.10%, well
+within overlapping CIs) and both clearly exceed B (+1.35%) and A
+(+0.59%). Per this entry's own frozen reading (§4): D is not worse
+than both B and C (it clearly beats B), but it does NOT beat C — **the
+joint condition adds no incremental information beyond volatility
+alone.** This pattern (C ≈ D >> B > A) holds consistently in BOTH
+validation and out-of-sample.
+
+**A real, disclosed ASYMMETRY, not a symmetric null result**: comparing
+D against EACH component separately tells two different stories.
+D vs. C (does adding relative weakness on top of high volatility help)
+→ NO, negligible difference. D vs. B (does adding high volatility on
+top of relative weakness help) → YES, substantially (D +2.08% vs. B
++1.35% at OOS, D +3.07% vs. B +1.58% at validation) — **volatility adds
+real information on top of relative weakness, but relative weakness
+adds essentially nothing on top of volatility.** Volatility is the
+more dominant, magnitude-driving dimension between the two.
+
+**But dominance in magnitude is not the same as robustness.** B
+(relative weakness alone) is the ONLY one of A/B/C/D that is CI-decisive
+POSITIVE in ALL THREE splits, including development (+0.51%) — no sign
+reversal anywhere. C and D are BOTH vulnerable to the SAME
+development-period anomaly `H_MEANREV_006` already flagged: C is
+CI-decisive NEGATIVE in development (−0.50%), and D is not decisive
+there either (+0.40%, CI touches zero) — both inherit the instability
+that comes with conditioning on high volatility.
+
+### WITH-2020 vs. WITHOUT-2020 robustness (development period, h10)
+
+| Bucket | WITH 2020 | WITHOUT 2020 |
+|---|---|---|
+| A | +0.06% (not decisive) | **+0.98%** (decisive) |
+| B | **+0.52%** (decisive) | **+1.04%** (decisive) |
+| C | **−0.45%** (decisive NEGATIVE) | **+1.48%** (decisive POSITIVE) |
+| D | +0.36% (not decisive) | **+1.43%** (decisive) |
+
+**2020 is confirmed to be the entire source of C's and D's own
+development-period sign reversal — a complete flip, not a partial
+dampening.** Without 2020, C's own development result matches
+validation/OOS's own strongly positive shape almost perfectly (+1.48%
+vs. +3.33%/+2.10%). B, by contrast, is CI-decisive positive WITH 2020
+included, and only strengthens moderately when 2020 is excluded
+(+0.52% → +1.04%) — **2020 dampens B but never reverses it.** This
+confirms the mechanistic picture: 2020's systemic, broad-market crash
+disproportionately contaminates the volatility-conditioned buckets (C,
+D) — mechanically unsurprising, since a market-wide panic concentrates
+extreme-volatility observations — while the relative-weakness
+dimension, which does not condition on volatility at all, is far less
+exposed to that single year's own anomalous behavior.
+
+### Secondary descriptive: relative-weakness × volatility tercile (E)
+
+The full 6-cell breakdown (h10, all three splits) shows the same
+qualitative pattern within EVERY volatility tercile: `HIGH_VOL` cells
+(both `RELWEAK_HIGHVOL` and `MARKETDRIVEN_HIGHVOL`) show the largest
+magnitude effects in validation/out-of-sample (e.g. validation h10:
+`RELWEAK_HIGHVOL` +3.07%, `MARKETDRIVEN_HIGHVOL` +3.87%) but the
+worst development-period instability (`MARKETDRIVEN_HIGHVOL`
+development h10 = **−2.03%**, CI-decisive negative, the single most
+extreme cell in the whole table) — reinforcing that volatility, not
+relative weakness, is the dimension most entangled with the 2020
+anomaly.
+
+### Verdict
+
+**REJECTED** for this entry's own primary frozen claim — the joint
+condition (D) does NOT contain information beyond the stronger of its
+two components (C, high volatility) alone; the "genuinely different,
+more informative population" reading is not supported by the data.
+
+**Important, precisely disclosed secondary findings, not diminished by
+the REJECTED verdict**: (1) volatility is the more dominant driver of
+raw reversal MAGNITUDE between the two dimensions tested; (2) relative
+weakness is the more ROBUST dimension, uniquely surviving all three
+splits including the 2020-contaminated development period without a
+sign reversal; (3) the 2020 anomaly is now fully explained as a
+volatility-conditioning artifact, not a property of relative weakness
+or of the raw oversold signal's own robustness in general. Together
+these suggest the generalized oversold effect is a MIXTURE of (at
+least) two only-partially-overlapping populations — a
+large-magnitude-but-fragile volatility/overshoot component, and a
+smaller-magnitude-but-robust genuine relative-weakness component — not
+a single unified mechanism.
+
+Per §8's own frozen gate, the full adversarial-checks battery (symbol
+breadth, sector concentration, liquidity) was NOT run, since the
+primary D-vs-B/C comparison did not produce a decisive, novel
+interaction result warranting it.
+
+## 12. Scope note
 
 Pure historical-data research, read-only, reusing the already-built
 `COMBINED` universe datasets and features. Does not touch

@@ -2989,4 +2989,86 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "docs/research/H_MEANREV_006_MECHANISM_DECOMPOSITION_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_MEANREV_007",
+            description=(
+                "Confounding/mechanism test: does the strongest part of the generalized oversold effect "
+                "remain after simultaneously accounting for BOTH stock-specific relative weakness (H_MEANREV_"
+                "006 Q4) AND elevated volatility (H_MEANREV_006 Q3), or does one dimension dominate/absorb "
+                "the other's apparent effect? Pre-registered BEFORE any experiment code ran: docs/research/"
+                "H_MEANREV_007_CONFOUNDING_TEST_PREREGISTRATION.md, committed as its own commit prior to any "
+                "experiment code."
+            ),
+            rationale=(
+                "H_MEANREV_006 measured relative weakness and volatility as two INDEPENDENT conditioning "
+                "dimensions on the same frozen oversold entry. Neither test alone can distinguish a genuine "
+                "stock-specific mechanism from an effect largely explained by volatility, largely explained "
+                "by relative weakness, or a genuinely distinct joint population -- exactly the confounding "
+                "question this entry was designed to resolve, using H_MEANREV_006's own already-frozen "
+                "thresholds verbatim, no new degrees of freedom."
+            ),
+            expected_effect="No prior assumption on which dimension dominates -- this is a confounding test, not a directional prediction.",
+            dataset_restrictions="COMBINED universe (206/208 symbols), identical to H_MEANREV_006. 10 years daily.",
+            experiment_design=(
+                "Zero new production code -- reuses H_MEANREV_006's own dataset-building and feature code "
+                "verbatim (including the real market_series=^NSEI pass for relative_strength_20). Four frozen "
+                "buckets (A oversold alone, B +relative weakness, C +high volatility, D the joint condition) "
+                "using H_MEANREV_006's own frozen thresholds (RELSTRENGTH_MEDIAN=-6.8845%, ATR_PCT_67=3.6352%) "
+                "verbatim. Incremental-information test at h10 out-of-sample: does D's point estimate exceed "
+                "BOTH B's and C's own out-of-sample point estimates (the same operationalization H_MOMENTUM_"
+                "001 already used). Plus a mandatory bucket-overlap contingency check and a pre-specified "
+                "WITH-2020-vs-WITHOUT-2020 robustness comparison (development period only, since validation/"
+                "OOS never contained 2020)."
+            ),
+            success_criteria="D's out-of-sample point estimate at h10 exceeds BOTH B's and C's own out-of-sample point estimates -- the joint condition identifies a genuinely more informative population than either dimension alone.",
+            failure_criteria="D is no better than the stronger of B/C (the interaction adds nothing) or worse than both (the joint-population reading is not supported).",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REAL MEASUREMENT (206/208 symbols, 10y, frozen zscore_close_20 < -2.0 entry and H_MEANREV_"
+                "006's own frozen RELSTRENGTH_MEDIAN/ATR_PCT_67 thresholds, all unchanged; h10 primary): "
+                "out-of-sample -- A (oversold alone) n=4390 mean=+0.59% (CI=[+0.389%,+0.788%]); B "
+                "(+relative weakness) n=1629 mean=+1.35% (CI=[+0.997%,+1.693%]); C (+high volatility) n=914 "
+                "mean=+2.10% (CI=[+1.492%,+2.716%]); D (joint) n=590 mean=+2.08% (CI=[+1.331%,+2.833%]). "
+                "INCREMENTAL-INFORMATION TEST: D beats BOTH B and C? FALSE -- D essentially TIES C (well "
+                "within overlapping CIs) and both clearly exceed B and A, consistently in validation AND "
+                "out-of-sample (pattern: C approx= D >> B > A in both splits). "
+                "A REAL, DISCLOSED ASYMMETRY: D vs C (does relative weakness add anything on top of high "
+                "volatility) -- NO, negligible difference. D vs B (does high volatility add anything on top "
+                "of relative weakness) -- YES, substantially (D +2.08% vs B +1.35% oos; D +3.07% vs B +1.58% "
+                "validation). Volatility is the more dominant, magnitude-driving dimension between the two. "
+                "BUT dominance in magnitude is not robustness: B is the ONLY one of A/B/C/D that is "
+                "CI-decisive POSITIVE in ALL THREE splits including development (+0.51%), no sign reversal "
+                "anywhere; C and D are BOTH vulnerable to the SAME development-period instability H_MEANREV_"
+                "006 already flagged (C CI-decisive NEGATIVE in development, -0.50%; D not decisive there). "
+                "WITH-2020 vs WITHOUT-2020 ROBUSTNESS (development, h10): confirms 2020 is the ENTIRE source "
+                "of C's and D's own development-period sign reversal, a complete flip not a partial "
+                "dampening -- C: WITH 2020 -0.45% (decisive NEGATIVE) vs WITHOUT 2020 +1.48% (decisive "
+                "POSITIVE, matching validation/OOS's own shape); D: WITH 2020 +0.36% (not decisive) vs "
+                "WITHOUT 2020 +1.43% (decisive). B, by contrast, is CI-decisive positive WITH 2020 already "
+                "included and only strengthens when excluded (+0.52% -> +1.04%) -- 2020 dampens B but never "
+                "reverses it. Confirms the mechanism: 2020's systemic, broad-market crash mechanically "
+                "concentrates extreme-volatility observations, disproportionately contaminating the "
+                "volatility-conditioned buckets (C, D), while relative weakness (no volatility condition) is "
+                "far less exposed. "
+                "BUCKET-OVERLAP CONTINGENCY (development triggering observations, n=14578): HIGH_VOL rate "
+                "among RELATIVE_WEAKNESS observations = 50.4% vs 40.1% overall -- a real but moderate "
+                "(~10pp) overrepresentation, confirming genuine but not extreme confounding overlap, not "
+                "full independence and not near-total overlap either. "
+                "SECONDARY DESCRIPTIVE (relative-weakness x volatility tercile, 6 cells): the same "
+                "qualitative pattern holds within every tercile -- HIGH_VOL cells show the largest "
+                "validation/OOS magnitude but the worst development instability (MARKETDRIVEN_HIGHVOL "
+                "development h10 = -2.03%, CI-decisive negative, the single most extreme cell in the table). "
+                "VERDICT: REJECTED for this entry's own primary frozen claim (D does not contain information "
+                "beyond C alone). Important secondary findings preserved, not diminished by the REJECTED "
+                "verdict: volatility is the more dominant magnitude-driver; relative weakness is the more "
+                "ROBUST dimension (uniquely survives all 3 splits including 2020 without reversal); the 2020 "
+                "anomaly is now fully explained as a volatility-conditioning artifact. Together these suggest "
+                "the generalized oversold effect is a MIXTURE of at least two only-partially-overlapping "
+                "populations -- large-magnitude-but-fragile (volatility/overshoot) and smaller-magnitude-but-"
+                "robust (genuine relative weakness) -- not a single unified mechanism. Per this entry's own "
+                "frozen §8 gate, the full adversarial-checks battery (symbol/sector/liquidity) was NOT run, "
+                "since the primary comparison did not produce a decisive, novel interaction result warranting "
+                "it. Full writeup in docs/research/H_MEANREV_007_CONFOUNDING_TEST_PREREGISTRATION.md."
+            ),
+        ),
     )

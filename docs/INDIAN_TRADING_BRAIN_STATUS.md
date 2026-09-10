@@ -520,12 +520,37 @@ simply broad-market co-movement. No executable-strategy design follows
 from this entry — strictly the forward-return-response layer. Full
 writeup in `docs/research/H_MEANREV_006_MECHANISM_DECOMPOSITION_PREREGISTRATION.md`.
 
+**Confounding test — `H_MEANREV_007`, REJECTED for its own primary
+claim, with a genuinely important asymmetric secondary finding.** Does
+the joint condition (oversold + relative weakness + high volatility,
+same frozen thresholds as `H_MEANREV_006`) contain information beyond
+either dimension alone? At h10 out-of-sample: the joint condition
+(+2.08%) essentially TIES high-volatility-alone (+2.10%) and both
+clearly exceed relative-weakness-alone (+1.35%) — **volatility, not
+relative weakness, is the dominant magnitude-driving dimension**;
+adding relative weakness on top of high volatility adds nothing, while
+adding high volatility on top of relative weakness adds a lot. But
+magnitude is not robustness: relative-weakness-alone is the ONLY
+bucket of the four CI-decisive positive in ALL THREE splits including
+development, no reversal; the high-volatility-conditioned buckets are
+BOTH vulnerable to the same 2020-driven instability. A with/without-2020
+robustness check confirmed this precisely: excluding 2020, the
+high-volatility bucket's own development-period result flips from
+CI-decisive NEGATIVE (−0.45%) to CI-decisive POSITIVE (+1.48%) — a
+complete reversal, entirely explained by 2020 — while the
+relative-weakness bucket only dampens (+0.52% → +1.04%), never
+reverses. This suggests the generalized oversold effect is a MIXTURE
+of a large-magnitude-but-fragile volatility component and a
+smaller-magnitude-but-robust relative-weakness component, not one
+unified mechanism. Full writeup in `docs/research/
+H_MEANREV_007_CONFOUNDING_TEST_PREREGISTRATION.md`.
+
 Nothing is promoted. Nothing should be traded.
 
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(49 hypotheses tested to date).
+(50 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -628,7 +653,7 @@ MARKET_DRIVEN crash, the less-reliable bucket Q4 already identified) —
 see CURRENT ACTIVE EDGE STATUS above)**. Full evidence for each in
 `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (28)
+## REJECTED HYPOTHESES (29)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
@@ -702,8 +727,20 @@ critically, the UNCONDITIONED control on the same expanded universe
 was MORE decisive at out-of-sample than the gated version, the
 opposite of the relationship found on the original universe — the raw
 mean-reversion mechanism generalizes strongly, but the specific
-"TRENDING_UP-gating is the key ingredient" claim does not)**. Full
-evidence for each in `strategy/hypothesis_registry.py`.
+"TRENDING_UP-gating is the key ingredient" claim does not)**, and
+**H_MEANREV_007 (confounding test — does the joint relative-weakness +
+high-volatility condition beat either dimension alone, using
+H_MEANREV_006's own frozen thresholds? At h10 OOS the joint condition
+ties high-volatility-alone and both beat relative-weakness-alone —
+volatility dominates magnitude, but relative-weakness-alone is the
+only bucket CI-decisive positive in all three splits including 2020;
+a with/without-2020 check confirmed the high-volatility bucket's own
+development result completely reverses sign without 2020 while
+relative-weakness only dampens — suggesting the generalized effect is
+a mixture of a large-but-fragile volatility component and a
+smaller-but-robust relative-weakness component — see CURRENT ACTIVE
+EDGE STATUS above)**. Full evidence for each in
+`strategy/hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
 "entry timing underperforms random" — confirmatory, not an edge.)
@@ -1097,12 +1134,36 @@ year-stability addendum — see CURRENT ACTIVE EDGE STATUS and
 INCONCLUSIVE HYPOTHESES above.** The addendum confirmed the shared Q1/
 Q3 development-period anomaly is specifically a 2020 (COVID crash)
 effect, not a broad feature of the window — resolved, not left open.
-No further mean-reversion-family mechanism question is currently
-flagged as both genuinely new and cheap; the next candidates are the
-"next candidate families not yet tested" list above (turn-of-month
-calendar effects, volume-price divergence), each requiring its own
-fresh registry/data-depth audit before pre-registration, not a
-same-entry addendum.
+
+**Also done this segment — `H_MEANREV_007`, the confounding test
+between relative weakness and volatility, REJECTED for its own primary
+claim (the joint condition adds nothing beyond volatility alone) with
+an important asymmetric secondary finding (volatility dominates
+magnitude, relative weakness dominates robustness/stability through
+2020) — see CURRENT ACTIVE EDGE STATUS and REJECTED HYPOTHESES above.**
+This is a genuine mechanistic result (per the mission's own guidance:
+"if it establishes a strong mechanism, do NOT immediately optimize an
+executable strategy — instead update the research map and identify
+the next missing scientific layer"). The natural next scientific layer
+— NOT yet pursued, a candidate for the next segment, not pre-committed
+— is **RISK CHARACTERISTICS**: this whole mean-reversion-family
+research thread has so far reported mean/median/win-rate/CI, but never
+the DOWNSIDE tail (p5, worst-case magnitude) of each identified bucket
+specifically. Given `H_MEANREV_007` just showed the high-volatility
+bucket carries the largest mean magnitude AND the largest fragility
+(a full sign reversal in a crisis year), a natural, well-motivated
+question is whether its downside tail is proportionally worse too —
+directly relevant before any future exit/risk design, and answerable
+with the SAME already-frozen buckets and thresholds (no new parameter
+search). Not started this segment — a substantial unit of work was
+already completed.
+
+No further mean-reversion-family mechanism question beyond that is
+currently flagged as both genuinely new and cheap; the other next
+candidates remain the "next candidate families not yet tested" list
+above (turn-of-month calendar effects, volume-price divergence), each
+requiring its own fresh registry/data-depth audit before
+pre-registration.
 
 **If the exit-architecture thread is ever resumed (not currently
 planned)**: regime-invalidation exit (exit when `TRENDING_UP` ends),
