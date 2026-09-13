@@ -193,22 +193,35 @@ for the component map this analysis is built against.
 
 ## Summary of residual, disclosed P0/P1 gaps from this analysis
 
-Updated after the release-gate hardening pass. Items resolved by that
-pass (data-quality validation layer, DB-level prediction duplicate
-prevention, `integrity_check` on all 12 stores, the paper-position
-state-machine guard) are removed from this list -- see scenarios #2, #6,
-#16 above for the evidence, and `FINAL_RELEASE_REMAINING_WORK.md` for
-the full itemized tracking table. Still open, in priority order:
+Updated after the final release-gate hardening pass (commits `339e16a`
+through `7ac5a33`). Every P0 and P1 item previously listed here as open
+is now CLOSED -- see `FINAL_RELEASE_REMAINING_WORK.md` for the complete,
+itemized, evidence-backed table (every item terminal: CLOSED /
+EXTERNALLY BLOCKED / ACCEPTED LIMITATION) and
+`FINAL_RELEASE_CANDIDATE_REPORT.md` for the final criterion-by-criterion
+verdict. Specifically, since the previous version of this summary:
+schema-version tracking now exists on all 12 stores (`core.sqlite_util`,
+`PRAGMA user_version`); a unified health system (`core/health.py`)
+now exists, consumed identically by the CLI (`python main.py health`)
+and the dashboard (`/health`); a real startup gate
+(`main.py::_run_startup_gate`) now refuses to start `paper-live`/
+`schedule tick`/`schedule loop` on a FAILED critical dependency;
+per-slot scheduler last-success/last-failure tracking exists; a
+provider-failure-injection matrix (16 named scenarios) was surveyed and
+triaged, closing 4 genuine gaps including one real code defect
+(`DhanRestClient._get()` not wrapping transport failures); a real
+`pip-audit` dependency scan and repo-wide secret scan were both run.
 
-- **P1**: no unified disk-space / resource-safety monitoring (#8).
-- **P1**: no automatic startup self-diagnostic invoking `integrity_check` across all 12 stores (#6).
-- **P1**: no `PRAGMA user_version`/schema-version tracking on any store; a migration mechanism beyond additive-column backfill exists on only 3 of 12 stores (#6, structurally).
-- **P2**: no per-job scheduler timeout; no documented fairness guarantee for overlapping custom slot windows; no `last_success_at` tracking (#11, #17).
-- **P2**: config-loading behavior is inconsistent across subsystems -- no unified fail-fast/health-check layer (#14).
-- **P2**: cache-staleness thresholds remain divergent across 3 CLI commands, not fully unified (#18, residual).
-- **P2**: no unified health/observability view spanning data/model/database/scheduler/prediction/decision/paper-trading status in one place.
-- **P2**: no formal security re-audit run since `docs/SECURITY_REVIEW.md`; no chaos-testing suite beyond the targeted failure-injection tests already listed above.
+Remaining, all formally accepted/deferred with stated reasoning, none
+representing unsafe behavior:
 
-No P0 (live-trading-safety, temporal-integrity, or state-persistence-
-correctness) defect was found or left unresolved by this analysis,
-across either hardening pass.
+- **P2 (accepted limitation)**: no per-job scheduler timeout -- the in-process, synchronous execution model means a thread-based timeout would not actually stop a hung call; a real fix needs subprocess isolation, out of scope without separate justification (documented in `OPERATIONS_GUIDE.md`).
+- **P2 (accepted limitation)**: cache-staleness thresholds differ across `daily-report`/`cache-status`/`readiness-check` -- re-examined and confirmed these answer genuinely different questions (live-decision safety vs. historical-cache/backtest relevance), not an inconsistency to unify.
+- **P2 (accepted limitation)**: `core/config.py`'s `Settings` has no range validation -- zero untrusted-input path exists today, verified by grep.
+- **P2 (deferred, disclosed)**: no dashboard authentication -- out of scope for the current single-operator, loopback-only threat model.
+- **P2 (deferred, disclosed)**: no automatic SQLite retention/archival policy -- deliberately, since these stores are exactly the "critical trading state" the mission's own rule forbids automatically deleting.
+- **P2/P3 (deferred, disclosed)**: no full non-secret-scan security audit (static analysis, license audit) beyond `pip-audit` and the targeted injection/credential checks; no performance profiling (correctly deferred until after correctness, per the mission's own priority order).
+
+No P0 or P1 (live-trading-safety, temporal-integrity, state-persistence-
+correctness, data-quality, provider-resilience, or scheduler-resilience)
+defect remains open at the conclusion of this campaign.

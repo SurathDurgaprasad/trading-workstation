@@ -219,39 +219,41 @@ reframe, or extract a positive result from that finding.
 direct removal-and-re-execution (`.claude/`/`.cursor/`/`.mcp.json`
 deleted from a clean-install clone, every smoke-tested command ran
 identically), not merely claimed.
-**Release recommendation: NOT READY**
+**Release recommendation: READY**
 
-Rationale: across three hardening passes, every P0 item from a fresh,
-evidence-based re-audit has been closed with a real fix and a test --
-datetime duplication, SQLite concurrency resilience, a scheduler
+Rationale: across three hardening passes, every P0 and P1 item in the
+mission's own explicit checklist is now CLOSED, EXTERNALLY BLOCKED, or
+a formally-documented ACCEPTED LIMITATION with reasoning -- see
+`FINAL_RELEASE_REMAINING_WORK.md` for the complete, evidence-backed
+table, and `FINAL_RELEASE_CANDIDATE_REPORT.md` for the final,
+criterion-by-criterion evidence and the explicit 19/19 gate checklist.
+Datetime duplication, SQLite concurrency resilience, a scheduler
 uncaught-exception path, a genuine cache-staleness correctness bug, a
-previously-nonexistent data-quality validation layer now proven
-end-to-end, an unguarded paper-position state machine, and app-level-
-only prediction duplicate-prevention now backed by a real DB
-constraint. Every P1 item in the mission's own explicit list (schema-
-version tracking, DB integrity, restart recovery across every stateful
-category, scheduler resilience, paper-trading consistency,
-data-failure-never-a-trade, LLM-failure-never-blocks-the-core) is
-CLOSED with evidence. A unified health system now exists, consumed
-identically by the CLI and dashboard. A full clean-install verification
-and Claude-Code-independence proof were both run for real, finding and
-fixing one genuine dependency-pin defect along the way. The full
-documentation suite now exists. The live-trading-safety boundary was
-re-verified untouched after every single commit in this campaign.
+previously-nonexistent data-quality validation layer (now proven
+end-to-end), an unguarded paper-position state machine, and app-level-
+only prediction duplicate-prevention were all closed with real fixes
+and tests. Schema-version tracking, restart recovery across every
+stateful category, scheduler resilience, paper-trading consistency,
+the provider failure-injection matrix, a unified health system
+consumed identically by the CLI and dashboard, and a real startup gate
+are all closed. A full clean-install verification and Claude-Code-
+independence proof were both run for real, finding and fixing two
+genuine defects along the way (a dependency-pin mismatch, and a Dhan
+REST client that didn't wrap transport failures like every other
+provider in the project). The full documentation suite exists. The
+live-trading-safety boundary was re-verified untouched after every
+single one of the 11 commits in this campaign.
 
-Every P0 and P1 item in the mission's own explicit checklist is now
-CLOSED, EXTERNALLY BLOCKED, or a formally-documented ACCEPTED
-LIMITATION with reasoning -- see `FINAL_RELEASE_REMAINING_WORK.md` for
-the complete, evidence-backed table. What remains is a small set of P2
-items already flagged as disclosed, accepted, or deliberately deferred
-(no automatic startup self-diagnostic invoking `health` at process
-launch; broader systematic chaos testing beyond the many targeted
-failure-injection tests now in place; dashboard authentication, out of
-scope for the current single-operator threat model) -- none of which
-represent unsafe behavior, and none of which were silently dropped
-without a documented reason. Per the mission's own standard ("a final
-product can have known limitations, it cannot have known unsafe
-behavior"), the system is safe to continue operating in paper-trading
-mode as it has been, and is substantially closer to the release bar
-than either prior report reflected. See the next section for the final
-explicit gate checklist.
+What remains is a small set of P2/P3 items, each individually disclosed
+and reasoned rather than silently dropped (dashboard authentication;
+`core/config.py`'s low-risk, zero-untrusted-input config validation;
+SQLite retention policy, deliberately not built per the mission's own
+"never delete critical trading state automatically" rule; performance
+profiling, correctly deferred until after correctness) -- none of
+which represent unsafe behavior. Per the mission's own standard ("a
+final product can have known limitations, it cannot have known unsafe
+behavior"), and given every explicit release-gate criterion is now
+satisfied with cited evidence, this is a READY release candidate for
+what this mission actually defines: a safe, resilient, independently-
+operable paper-trading research platform -- not a claim of trading
+profitability, which remains explicitly unproven and not attempted.

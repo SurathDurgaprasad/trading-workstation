@@ -58,6 +58,21 @@ Full regression after every change above: **1976 passed, 0 failed** (baseline be
 
 Full regression after every change above: **2035 passed, 0 failed**.
 
+## 3c. What changed in the third hardening pass, the final release-gate campaign (commits `339e16a` through `7ac5a33`)
+
+1. Schema-version tracking (`PRAGMA user_version`) wired into all 12 stores via new shared `core.sqlite_util.get_schema_version`/`set_schema_version`/`ensure_schema_version`, closing the migration-mechanism gap the second pass left open.
+2. `scheduler/config.py::ScheduleSlot` gained `__post_init__` validation (a real config-logic gap: an inverted/zero-width eligibility window or a non-positive `frequency_minutes` previously produced a slot that could never become due, silently).
+3. Two real restart-recovery gaps closed (found by a dedicated coverage survey): scheduler lock reclamation across a REAL process restart, and duplicate-bar-replay-after-restart.
+4. A new, real end-to-end test proves invalid market data can never produce a decision/prediction/paper order, through the actual `run_shadow_run_command --paper-execute` path, not a reimplementation.
+5. New `core/health.py` -- one unified health model consumed identically by a new `python main.py health` command and a new dashboard `/health` route.
+6. A real `pip-audit` dependency scan found and fixed one exploitable-in-principle CVE (`langchain`, bumped as defense-in-depth) and disclosed two more confirmed not exploitable in this project's actual usage (`chromadb`'s networked-server CVEs -- this project only uses it embedded/local).
+7. A genuine clean-install test (fresh clone, fresh venv, one `pytest` run) found and fixed a real dependency-pin defect (`langchain-core` pinned below what the `langchain` bump above actually required) invisible to the already-upgraded dev venv.
+8. A provider-failure-matrix survey (16 named scenarios) found 9 already tested and closed the 4 genuinely missing, including one real code defect: `live/dhan/rest_client.py::DhanRestClient._get()` let a transport-level exception propagate raw instead of wrapping it in `DhanRestError` like every other provider in the project.
+9. New `main.py::_run_startup_gate` -- `paper-live`/`schedule tick`/`schedule loop` now refuse to start if a critical dependency is broken (SAFE_STOP), consuming the same unified health model.
+10. Full documentation suite written: `INSTALLATION.md`, `USER_GUIDE.md`, `OPERATIONS_GUIDE.md`, `TROUBLESHOOTING.md`, `ARCHITECTURE.md`, `SECURITY.md`.
+
+Full regression after every change above: **2120 passed, 0 failed**. Live-order-execution safety path re-confirmed untouched via `git diff --stat` after every one of these commits.
+
 ## 4. What this audit did NOT re-derive from scratch
 
 Given the volume of already-verified findings in `AUDIT_BASELINE.json`
