@@ -17,7 +17,16 @@ langchain==1.3.9
 # closes it anyway). See SECURITY.md for the full dependency-audit
 # finding, including chromadb (below), which pip-audit also flags with
 # no available fix version.
-langchain-core==1.4.1
+langchain-core==1.6.3
+# Bumped from 1.4.1 alongside the langchain 1.3.9 bump above --
+# langchain==1.3.9 itself requires langchain-core>=1.4.6, so the old
+# 1.4.1 pin was a genuine, unsatisfiable combination (ResolutionImpossible
+# in a real `pip install -r requirements.txt` from a fresh venv --
+# found by this campaign's own clean-install verification, not merely
+# assumed; the existing dev venv had already been silently upgraded to
+# a compatible langchain-core by `pip install langchain==1.3.9` itself,
+# which is exactly why this drift wasn't caught by the test suite alone
+# and needed a real, separate clean-install check to surface).
 langchain-community==0.4.2
 langchain-chroma==1.1.0
 langchain-ollama==1.1.0

@@ -88,12 +88,12 @@ def _check_database(db_paths: dict[str, Path]) -> ComponentHealth:
     import importlib
 
     findings: list[str] = []
-    any_checked = False
+    checked_count = 0
     for name, module_path, class_name in _STORE_REGISTRY:
         path = db_paths.get(name)
         if path is None or not Path(path).exists():
             continue
-        any_checked = True
+        checked_count += 1
         try:
             module = importlib.import_module(module_path)
             store_cls = getattr(module, class_name)
@@ -107,11 +107,11 @@ def _check_database(db_paths: dict[str, Path]) -> ComponentHealth:
         except Exception as exc:  # noqa: BLE001 -- a health check must never itself crash the caller
             findings.append(f"{name}: could not check ({type(exc).__name__}: {exc})")
 
-    if not any_checked:
+    if checked_count == 0:
         return ComponentHealth("database", ComponentStatus.UNKNOWN, "No store database files exist yet.")
     if findings:
         return ComponentHealth("database", ComponentStatus.FAILED, "; ".join(findings))
-    return ComponentHealth("database", ComponentStatus.HEALTHY, f"{len(db_paths)} store(s) checked, all ok.")
+    return ComponentHealth("database", ComponentStatus.HEALTHY, f"{checked_count} store(s) checked (of {len(db_paths)} configured), all ok.")
 
 
 def _check_disk(probe_dir: Path) -> ComponentHealth:

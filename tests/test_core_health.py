@@ -48,6 +48,25 @@ def test_database_check_reports_healthy_for_a_real_clean_store(tmp_path):
     assert health.get("database").status == ComponentStatus.HEALTHY
 
 
+def test_database_check_reports_actual_checked_count_not_configured_count(tmp_path):
+    """Real bug found via a clean-install smoke test: the HEALTHY detail
+    message previously reported len(db_paths) (every configured path,
+    whether or not its file actually existed) rather than how many were
+    genuinely found and checked -- a fresh install with only 3 of 11
+    stores ever created would misleadingly claim "11 store(s) checked"."""
+    from paper.store import PaperStore
+
+    paper_path = tmp_path / "paper.db"
+    PaperStore(paper_path).close()
+
+    health = collect_system_health(
+        db_paths={"paper": paper_path, "scheduler": tmp_path / "does-not-exist.db"},
+        probe_dir=tmp_path, check_ollama=False,
+    )
+
+    assert health.get("database").detail == "1 store(s) checked (of 2 configured), all ok."
+
+
 def test_database_check_reports_failed_for_a_corrupted_file(tmp_path):
     db_path = tmp_path / "paper.db"
     db_path.write_bytes(b"this is not a valid sqlite database file, deliberately corrupted for this test")

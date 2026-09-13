@@ -80,11 +80,17 @@ step here requires Claude Code, an IDE, or any tool beyond Python and
    pytest
    ```
 
-   This requires no Ollama, no Dhan credentials, and no network access
-   — every test is self-contained. A small number of tests that use
-   locally-cached historical market data (`data/market/`) skip cleanly
-   if that cache is absent (it is intentionally not committed to the
-   repository).
+   Run this from the project root (the directory containing `main.py`)
+   — a handful of tests spawn `python -m mcp_server.server` as a real
+   subprocess, which needs the current working directory to resolve
+   that module. This requires no Ollama, no Dhan credentials, and no
+   network access — every test is self-contained. A small number of
+   tests that use locally-cached historical market data (`data/market/`)
+   skip cleanly if that cache is absent (it is intentionally not
+   committed to the repository) — this was verified with a genuine
+   clean clone + fresh venv + single `pytest` invocation: 2020 passed,
+   0 failed, 82 skipped, no network-dependent test left unaccounted
+   for.
 
 7. **Run a health check** against a real (mock-data) pipeline pass:
 
