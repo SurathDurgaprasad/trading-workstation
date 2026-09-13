@@ -1,16 +1,18 @@
 # Final Product Readiness Report
 
 Branch: `final-product-hardening` (not yet merged to `main` as of this
-report). Companion documents: `FINAL_PRODUCT_AUDIT.md`,
-`FINAL_FAILURE_MODE_ANALYSIS.md`. Full regression: **1989 passed, 0
-failed** (`hardening_regression2.log`, run after every change in this
-session).
+report; commits `30242e5` then `c470305`). Companion documents:
+`FINAL_PRODUCT_AUDIT.md`, `FINAL_FAILURE_MODE_ANALYSIS.md`,
+`FINAL_RELEASE_REMAINING_WORK.md` (the live, itemized punch list this
+report summarizes). Full regression: **2035 passed, 0 failed**
+(re-run after every change across both hardening passes).
 
 This report is deliberately honest about scope. The originating
-mission (55 sections) is a genuine production-hardening campaign, not
-completable end-to-end in one session. What follows separates what was
-actually hardened and tested this session from what remains open,
-rather than overstating completion.
+mission (55 sections, then a 37-section release-gate follow-up) is a
+genuine production-hardening campaign, not completable end-to-end in
+one or two sessions. What follows separates what has actually been
+hardened and tested across both passes from what remains open, rather
+than overstating completion.
 
 ---
 
@@ -23,10 +25,19 @@ cross-cutting duplication risks without altering the architecture.
 
 **Data**: Yahoo Finance intraday (5-min bars, ~60-day window) plus
 India VIX and sector indices; NSE/BSE/SEBI have no official API (known,
-prior finding, unchanged). No formal OHLC-sanity/data-quality
-validation layer exists yet (disclosed gap, see failure-mode analysis
-#2). Cache-staleness reporting was fixed at the root cause this
-session (a bound-default parameter defeating overrides), not patched.
+prior finding, unchanged). A data-quality validation layer now exists
+(`market_data/validation.py::validate_ohlcv`, HEALTHY/DEGRADED/INVALID)
+and is wired into `market_intelligence/scanner.py` -- the actual
+scan -> decision -> paper-trade choke point -- so INVALID data
+(duplicate/non-chronological timestamps, symbol-identity mismatch) is
+excluded before any indicator or decision computation sees it, and
+`market/data_provider.py::OHLCV.from_dataframe` now also drops
+individual rows with an impossible OHLC relationship (high<low etc),
+extending the same silent-drop mechanism it already used for NaN rows.
+Gap detection (missing bars) and staleness are DEGRADED-level findings,
+visible but not blocking. Cache-staleness reporting was fixed at the
+root cause in the prior pass (a bound-default parameter defeating
+overrides), not patched.
 
 **Prediction**: The Phase 1 ML baseline (`ml_research/`) is a
 completed, isolated research artifact: ROC-AUC 0.575-0.615 across 4
@@ -43,10 +54,17 @@ session; unchanged in behavior. Model/decision separation preserved.
 **Risk**: `risk/engine.py` unmodified this session (confirmed via `git
 diff --stat main` -- not in the 28 changed files).
 
-**Paper trading**: Working, hardened this session (WAL mode, 30s busy
-timeout, new `integrity_check()`/`db_size_bytes()` methods on
-`PaperStore`). Restart-recovery of open positions has real, pre-existing
-test coverage (`tests/test_paper_restart.py`), re-confirmed passing.
+**Paper trading**: Working, hardened across both passes (WAL mode, 30s
+busy timeout, `integrity_check()`/`db_size_bytes()` on `PaperStore`).
+The position state machine is now guarded at the data layer:
+`PaperStore.update_position()` enforces CLOSED as a terminal state
+(`WHERE status != 'CLOSED'`), raising a new
+`paper.errors.InvalidPositionTransitionError` on a double-close or
+reopen attempt instead of allowing it silently -- previously prevented
+only by caller discipline. Restart-recovery of open positions has real,
+pre-existing test coverage (`tests/test_paper_restart.py`), re-confirmed
+passing; the new guard was confirmed to change nothing on the normal
+path (full `paper/` suite, 135 tests, unaffected).
 
 **Dashboard**: Working, unmodified this session. No authentication if
 exposed beyond loopback (known, accepted for the current single-operator
@@ -55,13 +73,27 @@ threat model; not a new finding).
 **CLI**: Working, ~30 subcommands, unmodified this session except the
 new `--cache-root` flag on `daily-report`.
 
-**Persistence**: All 12 SQLite stores now use WAL mode + a 30s busy
-timeout (was: no WAL, 5s stdlib default), verified via a real
-threading-based concurrent-reader-not-blocked-by-writer test. 3 of 12
-stores (scheduler, paper, live_state -- the most safety-critical) now
-expose `integrity_check()`; 9 of 12 do not yet. Only 1 of 12 has a
-schema-migration mechanism (`_ensure_column`-equivalent); the other 11
-do not (disclosed gap).
+**Persistence**: All 12 SQLite stores use WAL mode + a 30s busy timeout
+(was: no WAL, 5s stdlib default), verified via a real threading-based
+concurrent-reader-not-blocked-by-writer test. `integrity_check()`/
+`db_size_bytes()` now cover **all 12 stores** (was 3 of 12 -- the
+9 that lacked them each gained both, delegating to the same shared
+`core.sqlite_util` functions). `predictions/store.py` and
+`predictions/direction_forecast_store.py` now enforce real DB-level
+`UNIQUE(symbol, entry_time)`/`UNIQUE(symbol, as_of)` constraints via a
+migration (a real, previously-app-level-only-and-non-atomic
+duplicate-prevention gap, now closed) -- the migration backfills the
+new column from each pre-existing row's own `data_json` and skips the
+index gracefully (reporting `duplicate_prevention_enforced_at_db_level
+= False`, never crashing startup or deleting data) if an
+already-deployed database happens to already contain duplicates. The
+additive-column migration helper (`live/state_store.py`'s former
+private `_ensure_column`) is now shared (`core.sqlite_util.ensure_column`),
+used by 3 of 12 stores. **Still open**: no `PRAGMA user_version`/
+schema-version tracking on any store, and 9 of 12 have no migration
+mechanism at all (only the 3 that needed one so far have it) --
+disclosed, deferred, a genuinely larger undertaking than the
+integrity/size-check extension.
 
 **Recovery**: Scheduler restart recovery via on-disk RUNNING-row
 reclamation (`reclaim_stale_locks`) is pre-existing and unmodified, with
@@ -94,41 +126,58 @@ understanding the system's history and design. The specific
 `TROUBLESHOOTING.md`/`ARCHITECTURE.md`/`SECURITY.md` suite the mission
 requests does **not** exist as discrete documents (disclosed gap).
 
-**Testing**: 1989 tests passing, 0 failing, after every change in this
-session, including a real threading-based concurrency test and a real
-failure-injection test for the scheduler (not merely more assertions on
-existing paths). Test suite growth this session: +13 (`core/timeutil`),
-+6 (`core/sqlite_util`), +6 (integrity/size checks on `paper`/
-`live_state` stores), +1 (scheduler failure injection); 3 pre-existing
-tests were fixed from flaky/environment-dependent to fully hermetic.
-Chaos/failure-injection testing beyond this one new scheduler test was
-not expanded this session (disclosed gap against the mission's broader
-"chaos testing" ask).
+**Testing**: 2035 tests passing, 0 failing, after every change across
+both hardening passes, including a real threading-based concurrency
+test and real failure-injection tests (scheduler setup-phase failure,
+INVALID market data, a double-close position transition, a duplicate
+prediction race). Growth across both passes: +13 (`core/timeutil`),
++11 (`core/sqlite_util`, incl. `ensure_column`/`try_create_unique_index`),
++34 (`market_data/validation.py` + the OHLC-relationship row filter),
++4 (position state-machine guard), +8 (predictions/forecast duplicate
+prevention), +18 (integrity/size checks across the 9 previously-
+uncovered stores), +2 (scheduler/cache-staleness fixes from the first
+pass). 9 pre-existing tests were fixed at the root cause across both
+passes: 3 from flaky/environment-dependent cache-staleness assumptions
+(first pass), and 6 from a fixture bug the new prediction-duplicate
+constraint correctly surfaced -- multiple same-symbol predictions
+sharing one hardcoded `entry_time`, data no real caller could
+legitimately produce (second pass; fixtures corrected, constraint not
+weakened). Chaos/failure-injection testing beyond the handful of
+targeted tests above was not built as a systematic suite (disclosed
+gap against the mission's broader "chaos testing" ask).
 
 ---
 
 ## Known limitations (disclosed, not unsafe)
 
-1. No formal data-quality validation layer for OHLC sanity (missing/duplicate/non-monotonic bars, impossible high/low/close relationships).
+1. Gap detection (missing bars) in `market_data/validation.py` is a heuristic (not calendar-aware -- a genuine market holiday/weekend can also trigger it), reported DEGRADED not INVALID; no OHLC-sanity check runs on the offline `ml_research`/`quant_research` data paths, only the live scanner path.
 2. No unified startup self-diagnostic command producing DEGRADED vs SAFE-STOP status across all subsystems.
-3. `integrity_check()` exists on 3 of 12 SQLite stores, not all 12; no automatic invocation at startup on any of them yet.
-4. Schema-migration mechanism exists on 1 of 12 stores; the other 11 have no equivalent for future schema changes.
-5. Predictions duplicate-prevention is application-level only, not enforced by a database `UNIQUE` constraint.
-6. No per-job scheduler timeout; no documented fairness guarantee for overlapping custom scheduler slot windows.
-7. Cache-staleness thresholds remain divergent across `daily-report` (now canonical, fixed), `cache-status` (30 days), and `readiness-check` (hardcoded 7 days) -- not fully unified.
-8. Config-loading validation is inconsistent across subsystems -- some fail fast with a clear error, others may silently fall back to a default.
-9. No unified health/observability dashboard spanning every subsystem in one view.
-10. No dedicated `INSTALLATION.md`/`USER_GUIDE.md`/`OPERATIONS_GUIDE.md`/`TROUBLESHOOTING.md`/`ARCHITECTURE.md`/`SECURITY.md` document suite (README and phase-history docs are extensive but not organized this way).
-11. Clean-install / no-Claude-Code-dependency verification was not explicitly re-run this session as a standalone test.
-12. Chaos/failure-injection testing is limited to the one new scheduler test; broader chaos testing (provider outage simulation, disk-full simulation, DB corruption simulation) was not built this session.
-13. Dashboard has no authentication; safe only for the current loopback/single-operator deployment model.
+3. No `PRAGMA user_version`/schema-version tracking on any of the 12 stores; a real migration mechanism (beyond additive-column backfill) exists on only 3 of 12.
+4. No per-job scheduler timeout; no documented fairness guarantee for overlapping custom scheduler slot windows; no `last_success_at` tracking in `SchedulerRunStore`.
+5. Cache-staleness thresholds remain divergent across `daily-report` (canonical, fixed), `cache-status` (30 days), and `readiness-check` (hardcoded 7 days) -- not fully unified.
+6. Config-loading validation is inconsistent across subsystems -- some fail fast with a clear error, others may silently fall back to a default.
+7. No unified health/observability dashboard spanning every subsystem in one view.
+8. No dedicated `INSTALLATION.md`/`USER_GUIDE.md`/`OPERATIONS_GUIDE.md`/`TROUBLESHOOTING.md`/`ARCHITECTURE.md`/`SECURITY.md` document suite (README and phase-history docs are extensive but not organized this way).
+9. Clean-install / no-Claude-Code-dependency verification was not explicitly re-run as a standalone test across either pass.
+10. Chaos/failure-injection testing is limited to the handful of targeted tests listed above (scheduler setup failure, INVALID data exclusion, position double-close, prediction duplicate race); broader systematic chaos testing (provider outage simulation, disk-full simulation, DB corruption simulation) was not built.
+11. Dashboard has no authentication; safe only for the current loopback/single-operator deployment model.
+12. No formal security re-audit was run this pass (the prior `docs/SECURITY_REVIEW.md` findings are unchanged; this pass's own new code was spot-checked, not independently re-audited).
+
+**Closed since the first hardening pass** (previously listed here, now
+resolved with tests -- see `FINAL_RELEASE_REMAINING_WORK.md` for full
+evidence): data-quality validation layer now exists and gates the
+scanner; `integrity_check()`/`db_size_bytes()` now cover all 12 stores,
+not 3; predictions duplicate-prevention is now a real DB-level
+constraint, not application-level only; paper position state
+transitions are now guarded (CLOSED is enforced as terminal).
 
 None of the above represent unsafe behavior: live order execution
 remains structurally blocked (`tests/test_dhan_no_real_orders.py`,
-confirmed unmodified and passing), the deterministic risk/decision core
-is untouched, and every safety-critical restart/recovery path that was
-checked (kill-switch, paper-position restart, scheduler-lock
-reclamation) was found already correct and left as-is.
+confirmed unmodified and passing across both passes), the deterministic
+risk/decision core is untouched, and every safety-critical
+restart/recovery path that was checked (kill-switch, paper-position
+restart, scheduler-lock reclamation) was found already correct and left
+as-is.
 
 ## Remaining external dependencies
 
@@ -167,19 +216,23 @@ optional, non-blocking critic/RAG advisory layer, which the system
 continues to operate correctly without per failure-mode analysis #3)
 **Release recommendation: NOT READY**
 
-Rationale: this session closed real, verified P0/P1-adjacent gaps
-(datetime duplication, SQLite concurrency resilience, a scheduler
-uncaught-exception path, a genuine cache-staleness correctness bug) with
-tests proving each fix, and left the live-trading-safety boundary
-completely untouched and re-verified intact. However, the mission's own
-Definition of Done spans data-quality validation, unified observability,
-a full documentation suite, broader chaos testing, and several
-database-hardening items (migration mechanism, DB-level uniqueness
-constraints, startup self-diagnostics) that remain genuinely
-unimplemented, not merely undocumented. Per the mission's own standard
-("a final product can have known limitations, it cannot have known
-unsafe behavior"), the system is safe to continue operating in
-paper-trading mode as it has been, but does not yet meet the bar for
-being declared the final, independently-operable product this mission
-defines. The concrete next-priority items are listed above in
-`FINAL_FAILURE_MODE_ANALYSIS.md`'s summary, in P1/P2 order.
+Rationale: across both hardening passes, every P0 item identified by a
+fresh, evidence-based re-audit has been closed with a real fix and a
+test proving it -- datetime duplication, SQLite concurrency resilience,
+a scheduler uncaught-exception path, a genuine cache-staleness
+correctness bug, a previously-nonexistent data-quality validation
+layer now gating the scan->decision->paper-trade path, an unguarded
+paper-position state machine, and app-level-only prediction
+duplicate-prevention now backed by a real DB constraint. The
+live-trading-safety boundary was re-verified untouched after every
+single change (`git diff --stat main`, both passes). However, the
+mission's own Definition of Done still spans unified observability, a
+full documentation suite, systematic chaos testing, schema-version
+tracking, and a broader migration mechanism across all 12 stores that
+remain genuinely unimplemented, not merely undocumented. Per the
+mission's own standard ("a final product can have known limitations, it
+cannot have known unsafe behavior"), the system is safe to continue
+operating in paper-trading mode as it has been, but does not yet meet
+the bar for being declared the final, independently-operable product
+this mission defines. The concrete next-priority items are the P1-2
+(remainder)/P1-3/P1-4/P2 rows in `FINAL_RELEASE_REMAINING_WORK.md`.

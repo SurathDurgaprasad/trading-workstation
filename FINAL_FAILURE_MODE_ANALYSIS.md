@@ -22,11 +22,11 @@ for the component map this analysis is built against.
 ### 2. Malformed or impossible OHLCV data (e.g., high < low, non-monotonic timestamps, duplicate bars)
 
 - **FAILURE**: upstream data provider returns corrupt or out-of-order data.
-- **DETECTION**: **partial** -- candle-builder rejection counters exist (`docs/OBSERVABILITY.md`) for the live tick path; no equivalent explicit OHLC-sanity validation layer exists for the historical/cache data path.
-- **SAFE RESPONSE**: not formally defined as a deterministic health-status model (FRESH/STALE/INVALID) for this specific failure class.
-- **RECOVERY**: N/A -- undefined.
-- **USER VISIBILITY**: none dedicated.
-- **Evidence**: **[ASSUMED]** gap, disclosed. This is the mission's own explicitly-named "data-quality layer" requirement (mission section on data-quality) and remains unimplemented this session. **This is a real, open P1 item**, not fabricated as solved.
+- **DETECTION**: **fixed in the release-gate pass** -- `market_data/validation.py::validate_ohlcv` classifies a series HEALTHY/DEGRADED/INVALID (duplicate/non-chronological timestamps, symbol-identity mismatch, gaps, staleness); `market/data_provider.py::OHLCV.from_dataframe` also drops individual rows with an impossible OHLC relationship (high<low, close outside [low,high]), the same mechanism it already used for NaN rows. Live-tick-path candle-builder rejection counters (`docs/OBSERVABILITY.md`) remain a separate, pre-existing detection layer for that different path.
+- **SAFE RESPONSE**: `market_intelligence/scanner.py`'s `_screen_symbol`/`_fetch_benchmark` exclude the symbol (`ExcludedCandidate`, never scored) on an INVALID report -- the exact "INVALID DATA -> NO PREDICTION/DECISION" rule this mission requires, verified by a dedicated failure-injection test.
+- **RECOVERY**: automatic on the next fetch of clean data; no manual intervention needed.
+- **USER VISIBILITY**: the exclusion reason (`"Data quality: ..."`) is visible in the scan report's `excluded` list, the same place a fetch failure already surfaces.
+- **Evidence**: **[VERIFIED-TEST]** `tests/test_market_intelligence_scanner.py::test_invalid_data_quality_is_excluded_not_scored`, `tests/test_market_data_validation.py` (11 tests), `tests/test_market_data.py::test_ohlcv_from_dataframe_filters_rows_with_impossible_ohlc_relationships`. **Residual, disclosed gap**: gap/missing-bar detection is a non-calendar-aware heuristic (DEGRADED, not INVALID -- a real market holiday can also trigger it); the offline `ml_research`/`quant_research` data paths are not yet gated by this validator, only the live scanner path.
 
 ### 3. LLM/RAG provider (Claude API) unreachable, rate-limited, or returns malformed output
 
@@ -58,11 +58,11 @@ for the component map this analysis is built against.
 ### 6. SQLite database corruption
 
 - **FAILURE**: disk error, power loss mid-write, filesystem issue.
-- **DETECTION**: `PRAGMA integrity_check`, now exposed via `core.sqlite_util.integrity_check()` on 3 of 12 stores (scheduler, paper, live_state -- the three most safety/state-critical).
-- **SAFE RESPONSE**: not automatically invoked on every startup; an operator must run the check explicitly (no automatic startup self-diagnostic wired to it yet).
+- **DETECTION**: `PRAGMA integrity_check`, now exposed via `core.sqlite_util.integrity_check()` on **all 12 stores** (release-gate pass extended this from the first pass's 3 of 12 -- scheduler, paper, live_state -- to every store).
+- **SAFE RESPONSE**: still not automatically invoked on every startup; an operator must run the check explicitly (no automatic startup self-diagnostic wired to it yet).
 - **RECOVERY**: manual -- restore from a backup or accept data loss on the affected store; no automated repair.
-- **USER VISIBILITY**: only if the operator runs the check.
-- **Evidence**: **[VERIFIED-CODE]** the capability exists and is tested (`tests/test_core_sqlite_util.py`, plus new tests in `test_paper_store.py`/`test_live_state_store.py` this session, both passing). **Gap, disclosed**: not wired into automatic startup diagnostics; 9 of 12 stores still lack the capability entirely.
+- **USER VISIBILITY**: only if the operator runs the check; not yet surfaced through a single CLI command spanning all 12 stores.
+- **Evidence**: **[VERIFIED-CODE]** the capability exists and is tested on all 12 stores (`tests/test_core_sqlite_util.py` plus dedicated tests in each of the 12 stores' own test files, all passing). **Gap, disclosed**: not wired into automatic startup diagnostics; no unified command surfaces all 12 results together.
 
 ### 7. SQLite lock contention (scheduler + dashboard + CLI concurrent access)
 
@@ -146,12 +146,12 @@ for the component map this analysis is built against.
 
 ### 16. Duplicate prediction/order-intent record written twice
 
-- **FAILURE**: a retried call or race condition causes the same logical prediction to be inserted twice.
-- **DETECTION**: **app-level only** -- `predictions/store.py` and `predictions/direction_forecast_store.py` prevent duplicates in application logic, not via a database-level `UNIQUE` constraint.
-- **SAFE RESPONSE**: relies on the application never having a code path that double-inserts; not enforced as a hard invariant by the schema itself.
-- **RECOVERY**: N/A if it happens -- would require manual dedup.
-- **USER VISIBILITY**: none dedicated.
-- **Evidence**: **[VERIFIED-CODE]** confirmed via schema reading in a prior phase of this session (noted in Pending Tasks); **real, disclosed gap**, not fixed this session.
+- **FAILURE**: a retried call or race condition (e.g. a manual `predict` CLI invocation overlapping a scheduled `daily-report` run against the same `predictions.db`) causes the same logical symbol+entry-bar prediction to be inserted twice.
+- **DETECTION**: **fixed in the release-gate pass** -- `predictions/store.py` and `predictions/direction_forecast_store.py` now migrate in a real `entry_time`/`as_of` column (backfilled from each pre-existing row's own `data_json`) and attempt a genuine `UNIQUE(symbol, entry_time)`/`UNIQUE(symbol, as_of)` index at the database level, not just an application-level check.
+- **SAFE RESPONSE**: `save_prediction`/`save_forecast` now raise a typed `DuplicatePredictionError`/`DuplicateForecastError` on a genuine constraint hit; both real `main.py` call sites already check `has_prediction_for_entry`/`has_forecast_for_bar` first, so this is a race backstop, not a behavior change on the normal single-writer path (confirmed: 113 prediction/forecast/tracker tests unaffected). If an already-deployed database happens to already contain duplicate rows (possible under the old app-level-only prevention), the unique index is skipped gracefully -- `duplicate_prevention_enforced_at_db_level = False` -- rather than crashing startup or deleting the pre-existing rows.
+- **RECOVERY**: N/A for the constraint itself (it prevents new duplicates going forward); a database already carrying historical duplicates is not automatically deduplicated (disclosed -- see mission's own "never delete critical trading state automatically" rule).
+- **USER VISIBILITY**: `duplicate_prevention_enforced_at_db_level` is queryable on the store instance; not yet surfaced through a CLI/dashboard health view (that gap remains -- see scenario/gap summary below).
+- **Evidence**: **[VERIFIED-TEST]** 8 new tests across `tests/test_predictions_store.py`, `tests/test_direction_forecast_store.py`, `tests/test_core_sqlite_util.py`, including a simulated pre-migration on-disk schema and a simulated pre-existing-duplicate database exercising the graceful-degradation path.
 
 ### 17. Overlapping custom scheduler slot windows
 
@@ -193,17 +193,22 @@ for the component map this analysis is built against.
 
 ## Summary of residual, disclosed P0/P1 gaps from this analysis
 
-These are the concrete items this analysis surfaces as still open, in
-priority order, carried into `FINAL_PRODUCT_READINESS_REPORT.md`:
+Updated after the release-gate hardening pass. Items resolved by that
+pass (data-quality validation layer, DB-level prediction duplicate
+prevention, `integrity_check` on all 12 stores, the paper-position
+state-machine guard) are removed from this list -- see scenarios #2, #6,
+#16 above for the evidence, and `FINAL_RELEASE_REMAINING_WORK.md` for
+the full itemized tracking table. Still open, in priority order:
 
-- **P1**: no explicit OHLC/data-quality validation layer (#2).
 - **P1**: no unified disk-space / resource-safety monitoring (#8).
-- **P1**: no automatic startup self-diagnostic invoking `integrity_check` (#6).
-- **P1**: migration mechanism (`_ensure_column`-equivalent) exists on only 1 of 12 stores (#6, structurally).
-- **P2**: app-level-only (not DB-level `UNIQUE`) duplicate prevention for predictions (#16).
-- **P2**: no per-job scheduler timeout; no documented fairness guarantee for overlapping custom slot windows (#17).
+- **P1**: no automatic startup self-diagnostic invoking `integrity_check` across all 12 stores (#6).
+- **P1**: no `PRAGMA user_version`/schema-version tracking on any store; a migration mechanism beyond additive-column backfill exists on only 3 of 12 stores (#6, structurally).
+- **P2**: no per-job scheduler timeout; no documented fairness guarantee for overlapping custom slot windows; no `last_success_at` tracking (#11, #17).
 - **P2**: config-loading behavior is inconsistent across subsystems -- no unified fail-fast/health-check layer (#14).
 - **P2**: cache-staleness thresholds remain divergent across 3 CLI commands, not fully unified (#18, residual).
+- **P2**: no unified health/observability view spanning data/model/database/scheduler/prediction/decision/paper-trading status in one place.
+- **P2**: no formal security re-audit run since `docs/SECURITY_REVIEW.md`; no chaos-testing suite beyond the targeted failure-injection tests already listed above.
 
 No P0 (live-trading-safety, temporal-integrity, or state-persistence-
-correctness) defect was found or left unresolved by this analysis.
+correctness) defect was found or left unresolved by this analysis,
+across either hardening pass.
