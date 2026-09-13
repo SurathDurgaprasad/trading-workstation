@@ -119,11 +119,19 @@ of this pass's scope.
 
 **Security**: Unchanged from the prior `docs/SECURITY_REVIEW.md`
 findings (SQL injection clean, XSS clean, path traversal fixed, no
-secrets in git history); this session's own new code was spot-checked
-for the same classes (no string-interpolated SQL introduced, no
-secrets touched) and introduces no new surface. No full re-audit was
-run this session (disclosed scope choice, not a gap in the underlying
-security posture).
+secrets in git history); every new file across both hardening passes
+was spot-checked for the same classes (no string-interpolated SQL
+introduced, no secrets touched) and introduces no new surface. A
+repo-wide secret scan was re-run in the release-gate pass (high-
+confidence patterns: AWS keys, PEM private-key headers, Slack/OpenAI/
+GitHub token formats) -- zero matches outside two obviously-fake test
+fixture tokens (`tests/test_dhan_market_data_source.py`,
+`tests/test_market_data_adapter_builders.py`, both literal strings like
+`"fake-token-for-tests"`); confirmed `.gitignore` covers `.env`/`.env.*`/
+`*.pem`/`*.key` and no such file is tracked. No FULL re-audit
+(dependency CVE scan, filesystem/shell-command/network-exposure audit)
+was run across either pass (disclosed scope choice, not a claim the
+underlying posture changed).
 
 **Observability**: `docs/OBSERVABILITY.md`'s existing candle-builder
 rejection counters are real and unchanged. No unified, single-command
@@ -172,7 +180,7 @@ gap against the mission's broader "chaos testing" ask).
 9. Clean-install / no-Claude-Code-dependency verification was not explicitly re-run as a standalone test across either pass.
 10. Chaos/failure-injection testing is limited to the handful of targeted tests listed above (scheduler setup failure, INVALID data exclusion, position double-close, prediction duplicate race); broader systematic chaos testing (provider outage simulation, disk-full simulation, DB corruption simulation) was not built.
 11. Dashboard has no authentication; safe only for the current loopback/single-operator deployment model.
-12. No formal security re-audit was run this pass (the prior `docs/SECURITY_REVIEW.md` findings are unchanged; this pass's own new code was spot-checked, not independently re-audited).
+12. A repo-wide high-confidence secret scan was re-run and found clean (see Security above), but no full re-audit (dependency CVE scan, filesystem/shell-command/network-exposure audit) has been run since the prior `docs/SECURITY_REVIEW.md`.
 
 **Closed since the first hardening pass** (previously listed here, now
 resolved with tests -- see `FINAL_RELEASE_REMAINING_WORK.md` for full
