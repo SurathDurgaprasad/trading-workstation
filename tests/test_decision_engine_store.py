@@ -83,3 +83,15 @@ def test_decisions_are_immutable_history_not_updated_in_place(tmp_path):
     assert not hasattr(store, "update_decision")
     assert len(store.list_decisions_for_symbol("AAPL")) == 2
     store.close()
+
+
+def test_integrity_check_reports_ok_for_a_healthy_database(tmp_path):
+    store = DecisionStore(tmp_path / "decisions.db")
+    assert store.integrity_check() == "ok"
+    store.close()
+
+
+def test_db_size_bytes_reflects_a_real_file(tmp_path):
+    store = DecisionStore(tmp_path / "decisions.db")
+    assert store.db_size_bytes() > 0
+    store.close()

@@ -8,6 +8,7 @@ beyond symbol/timestamps), and keeping them apart means an existing
 predictions.db reader is never surprised by a differently-shaped row.
 """
 
+import json
 import sqlite3
 
 from core import sqlite_util
@@ -16,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from predictions.direction_forecast import DirectionForecastEvaluation, DirectionForecastRecord
+from predictions.errors import DuplicateForecastError
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS forecasts (
@@ -47,9 +49,36 @@ class DirectionForecastStore:
         self._conn = sqlite_util.connect(self.db_path)
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
+        self.duplicate_prevention_enforced_at_db_level = self._migrate_as_of_column_and_unique_index()
+
+    def _migrate_as_of_column_and_unique_index(self) -> bool:
+        """Final-product-hardening: same migration as predictions/store.py's
+        PredictionStore._migrate_entry_time_column_and_unique_index -- see
+        its docstring for the full rationale. has_forecast_for_bar's own
+        check-then-insert is non-atomic; this adds a real `as_of` column
+        (backfilled from each row's own data_json) and a genuine
+        UNIQUE(symbol, as_of) index, skipped gracefully (never crashing
+        startup or deleting data) if a pre-existing database already has
+        duplicate rows on that key."""
+        sqlite_util.ensure_column(self._conn, "forecasts", "as_of", "TEXT")
+        rows = self._conn.execute("SELECT forecast_id, data_json FROM forecasts WHERE as_of IS NULL").fetchall()
+        for forecast_id, data_json in rows:
+            as_of = json.loads(data_json)["as_of"]
+            self._conn.execute("UPDATE forecasts SET as_of = ? WHERE forecast_id = ?", (as_of, forecast_id))
+        return sqlite_util.try_create_unique_index(
+            self._conn, index_name="idx_forecasts_symbol_as_of", table="forecasts", columns="symbol, as_of"
+        )
 
     def close(self) -> None:
         self._conn.close()
+
+    def integrity_check(self) -> str:
+        """Final-product-hardening: PRAGMA integrity_check, extended to
+        every store -- see core.sqlite_util.integrity_check's docstring."""
+        return sqlite_util.integrity_check(self._conn)
+
+    def db_size_bytes(self) -> int:
+        return sqlite_util.db_size_bytes(self.db_path)
 
     @contextmanager
     def transaction(self):
@@ -65,11 +94,19 @@ class DirectionForecastStore:
     # --- forecasts -----------------------------------------------------------
 
     def save_forecast(self, forecast: DirectionForecastRecord) -> None:
-        with self.transaction():
-            self._conn.execute(
-                "INSERT INTO forecasts (forecast_id, symbol, created_at, data_json) VALUES (?,?,?,?)",
-                (forecast.forecast_id, forecast.symbol, forecast.created_at.isoformat(), forecast.model_dump_json()),
-            )
+        """Raises DuplicateForecastError if the DB-level UNIQUE(symbol,
+        as_of) constraint is active and this exact symbol+bar was
+        already recorded -- see _migrate_as_of_column_and_unique_index."""
+        try:
+            with self.transaction():
+                self._conn.execute(
+                    "INSERT INTO forecasts (forecast_id, symbol, created_at, as_of, data_json) VALUES (?,?,?,?,?)",
+                    (forecast.forecast_id, forecast.symbol, forecast.created_at.isoformat(), forecast.as_of.isoformat(), forecast.model_dump_json()),
+                )
+        except sqlite3.IntegrityError as exc:
+            if "UNIQUE constraint failed" not in str(exc):
+                raise
+            raise DuplicateForecastError(symbol=forecast.symbol, as_of=forecast.as_of) from exc
 
     def get_forecast(self, forecast_id: str) -> DirectionForecastRecord | None:
         row = self._conn.execute("SELECT data_json FROM forecasts WHERE forecast_id = ?", (forecast_id,)).fetchone()

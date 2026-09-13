@@ -54,6 +54,20 @@ def test_ohlcv_from_dataframe_filters_nan_rows():
     assert len(ohlcv.bars) == 4  # the NaN row is dropped, not coerced to 0/None
 
 
+def test_ohlcv_from_dataframe_filters_rows_with_impossible_ohlc_relationships():
+    """Final-product-hardening: a row where High < Low (or Close/Open
+    fall outside [Low, High]) is a structurally impossible candle --
+    provider corruption, not a valid market observation. Dropped via
+    the same mechanism as the NaN case above, not coerced or repaired."""
+    frame = _synthetic_frame(5)
+    high_col, low_col = frame.columns.get_loc("High"), frame.columns.get_loc("Low")
+    frame.iloc[2, high_col], frame.iloc[2, low_col] = frame.iloc[2, low_col], frame.iloc[2, high_col]  # swap: High < Low now
+
+    ohlcv = OHLCV.from_dataframe(symbol="TEST", interval="1d", frame=frame)
+
+    assert len(ohlcv.bars) == 4
+
+
 def test_ohlcv_from_dataframe_missing_columns_raises():
     frame = pd.DataFrame({"Open": [1.0], "High": [2.0]})  # missing Low/Close/Volume
 

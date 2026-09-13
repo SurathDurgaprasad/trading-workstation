@@ -5,7 +5,9 @@ from __future__ import annotations
 import sqlite3
 import threading
 
-from core.sqlite_util import DEFAULT_BUSY_TIMEOUT_SECONDS, connect
+import pytest
+
+from core.sqlite_util import DEFAULT_BUSY_TIMEOUT_SECONDS, connect, ensure_column, try_create_unique_index
 
 
 def test_connect_enables_wal_mode(tmp_path):
@@ -80,3 +82,57 @@ def test_concurrent_reader_is_not_blocked_by_a_writer_under_wal(tmp_path):
 
     assert not thread.is_alive(), "reader blocked on an in-progress writer under WAL mode -- should not happen"
     assert reader_result.get("rows") == 1  # sees the pre-transaction committed state, not the writer's uncommitted row
+
+
+def test_ensure_column_adds_a_missing_column(tmp_path):
+    conn = connect(tmp_path / "test.db")
+    conn.execute("CREATE TABLE t (x INTEGER)")
+
+    ensure_column(conn, "t", "y", "TEXT")
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(t)").fetchall()}
+    assert "y" in columns
+    conn.close()
+
+
+def test_ensure_column_is_idempotent_and_does_not_touch_existing_data(tmp_path):
+    conn = connect(tmp_path / "test.db")
+    conn.execute("CREATE TABLE t (x INTEGER, y TEXT)")
+    conn.execute("INSERT INTO t VALUES (1, 'kept')")
+
+    ensure_column(conn, "t", "y", "TEXT")  # column already exists -- must be a no-op, not an error
+    ensure_column(conn, "t", "y", "TEXT")  # calling twice must also be safe
+
+    row = conn.execute("SELECT x, y FROM t").fetchone()
+    assert row == (1, "kept")
+    conn.close()
+
+
+def test_try_create_unique_index_succeeds_on_clean_data(tmp_path):
+    conn = connect(tmp_path / "test.db")
+    conn.execute("CREATE TABLE t (a TEXT, b TEXT)")
+    conn.execute("INSERT INTO t VALUES ('x', 'y')")
+
+    created = try_create_unique_index(conn, index_name="idx_t_ab", table="t", columns="a, b")
+
+    assert created is True
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO t VALUES ('x', 'y')")
+    conn.close()
+
+
+def test_try_create_unique_index_reports_false_instead_of_raising_on_preexisting_duplicates(tmp_path):
+    """The exact scenario this function exists for: a real, already-
+    deployed database that already has duplicate rows on the columns a
+    NEW unique constraint is being added to prevent going forward. Must
+    not crash application startup -- reported as False so the caller can
+    disclose the limitation instead."""
+    conn = connect(tmp_path / "test.db")
+    conn.execute("CREATE TABLE t (a TEXT, b TEXT)")
+    conn.execute("INSERT INTO t VALUES ('dup', 'dup')")
+    conn.execute("INSERT INTO t VALUES ('dup', 'dup')")
+
+    created = try_create_unique_index(conn, index_name="idx_t_ab", table="t", columns="a, b")
+
+    assert created is False
+    conn.close()

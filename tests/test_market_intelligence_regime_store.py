@@ -103,3 +103,15 @@ def test_save_report_is_write_once_duplicate_scan_id_raises(tmp_path):
     with pytest.raises(sqlite3.IntegrityError):
         store.save_report(_report(scan_id="scan-1"))
     store.close()
+
+
+def test_integrity_check_reports_ok_for_a_healthy_database(tmp_path):
+    store = MarketRegimeStore(tmp_path / "regime.db")
+    assert store.integrity_check() == "ok"
+    store.close()
+
+
+def test_db_size_bytes_reflects_a_real_file(tmp_path):
+    store = MarketRegimeStore(tmp_path / "regime.db")
+    assert store.db_size_bytes() > 0
+    store.close()

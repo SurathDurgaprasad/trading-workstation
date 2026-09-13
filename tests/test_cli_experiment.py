@@ -3,7 +3,7 @@ network anywhere in this file: experiment registration only reads the
 CURRENT default config's own deterministic version_id() (a pure, local
 computation), and compare only reads already-persisted stores."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -218,15 +218,25 @@ def test_experiment_compare_empty_registry(tmp_path, capsys):
 # --- recommend (Phase 38) -----------------------------------------------------
 
 
-def _seed_resolved_predictions(decision_store, prediction_store, *, config_version: str, win_count: int, loss_count: int, id_prefix: str) -> None:
+def _seed_resolved_predictions(
+    decision_store, prediction_store, *, config_version: str, win_count: int, loss_count: int, id_prefix: str, entry_day_offset: int = 0
+) -> None:
     """Registers `win_count` TARGET_HIT + `loss_count` STOP_HIT resolved
     predictions, all attributed to `config_version`, so an experiment's
-    comparison window over them has a deterministic, known win rate."""
+    comparison window over them has a deterministic, known win rate.
+
+    entry_time varies per prediction (final-product-hardening: predictions/
+    store.py now enforces a real DB-level UNIQUE(symbol, entry_time)
+    constraint -- every prediction here uses the same "AAPL" symbol, so a
+    fixed entry_time would collide after the first insert). `entry_day_offset`
+    additionally keeps two DIFFERENT calls in the same test (baseline vs.
+    candidate, both seeding "AAPL") from colliding with each other."""
     i = 0
     for is_win in [True] * win_count + [False] * loss_count:
         i += 1
         decision_id = f"{id_prefix}-dec-{i}"
         prediction_id = f"{id_prefix}-pred-{i}"
+        entry_time = datetime(2024, 1, 1) + timedelta(days=entry_day_offset + i)
         decision_store.save_decision(Decision(
             decision_id=decision_id, symbol="AAPL", as_of=datetime(2024, 6, 1, tzinfo=timezone.utc), label=DecisionLabel.BUY,
             rationale=["fake"], config_version=config_version, scanner_evidence=_candidate(), research_evidence=None,
@@ -235,7 +245,7 @@ def _seed_resolved_predictions(decision_store, prediction_store, *, config_versi
         prediction_store.save_prediction(PredictionRecord(
             prediction_id=prediction_id, decision_id=decision_id, symbol="AAPL", created_at=datetime.now(timezone.utc),
             label=DecisionLabel.BUY, entry_price=100.0, stop_price=95.0, target_price=110.0,
-            entry_time=datetime(2024, 6, 1), horizon_bars=20, interval="1d",
+            entry_time=entry_time, horizon_bars=20, interval="1d",
         ))
         outcome = PredictionOutcomeState.TARGET_HIT if is_win else PredictionOutcomeState.STOP_HIT
         actual_return = 0.10 if is_win else -0.05
@@ -306,8 +316,8 @@ def test_experiment_recommend_end_to_end_recommends_promotion(tmp_path, capsys):
 
     decision_store = DecisionStore(decision_db)
     prediction_store = PredictionStore(predictions_db)
-    _seed_resolved_predictions(decision_store, prediction_store, config_version="cfg-A", win_count=15, loss_count=15, id_prefix="base")  # 50% win rate, 30 resolved
-    _seed_resolved_predictions(decision_store, prediction_store, config_version="cfg-B", win_count=21, loss_count=9, id_prefix="cand")  # 70% win rate, 30 resolved
+    _seed_resolved_predictions(decision_store, prediction_store, config_version="cfg-A", win_count=15, loss_count=15, id_prefix="base", entry_day_offset=0)  # 50% win rate, 30 resolved
+    _seed_resolved_predictions(decision_store, prediction_store, config_version="cfg-B", win_count=21, loss_count=9, id_prefix="cand", entry_day_offset=1000)  # 70% win rate, 30 resolved
     decision_store.close()
     prediction_store.close()
 
@@ -342,8 +352,8 @@ def test_experiment_recommend_no_improvement_with_a_small_margin(tmp_path, capsy
 
     decision_store = DecisionStore(decision_db)
     prediction_store = PredictionStore(predictions_db)
-    _seed_resolved_predictions(decision_store, prediction_store, config_version="cfg-A", win_count=15, loss_count=15, id_prefix="base")  # 50%
-    _seed_resolved_predictions(decision_store, prediction_store, config_version="cfg-B", win_count=17, loss_count=13, id_prefix="cand")  # ~56.7%, below the 10pp bar
+    _seed_resolved_predictions(decision_store, prediction_store, config_version="cfg-A", win_count=15, loss_count=15, id_prefix="base", entry_day_offset=0)  # 50%
+    _seed_resolved_predictions(decision_store, prediction_store, config_version="cfg-B", win_count=17, loss_count=13, id_prefix="cand", entry_day_offset=1000)  # ~56.7%, below the 10pp bar
     decision_store.close()
     prediction_store.close()
 

@@ -41,6 +41,14 @@ class ResearchStore:
     def close(self) -> None:
         self._conn.close()
 
+    def integrity_check(self) -> str:
+        """Final-product-hardening: PRAGMA integrity_check, extended to
+        every store -- see core.sqlite_util.integrity_check's docstring."""
+        return sqlite_util.integrity_check(self._conn)
+
+    def db_size_bytes(self) -> int:
+        return sqlite_util.db_size_bytes(self.db_path)
+
     @contextmanager
     def transaction(self):
         self._conn.execute("BEGIN")

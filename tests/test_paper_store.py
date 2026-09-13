@@ -126,3 +126,61 @@ def test_wal_mode_is_enabled(tmp_path):
     mode = store._conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode.lower() == "wal"
     store.close()
+
+
+def _position(**overrides):
+    from paper.models import Position, PositionStatus
+
+    base = dict(
+        position_id="p1", symbol="TEST", status=PositionStatus.OPEN, signal_id="s1",
+        entry_order_id="o1", entry_fill_id="f1", entry_time=datetime(2026, 1, 1),
+        entry_price=100.0, quantity=1, stop_price=95.0, target_price=110.0,
+    )
+    base.update(overrides)
+    return Position(**base)
+
+
+def test_update_position_allows_a_normal_open_to_closed_transition():
+    from paper.models import PositionStatus
+
+    store = PaperStore(":memory:")
+    store.save_position(_position())
+
+    store.update_position(_position(status=PositionStatus.CLOSED, exit_price=105.0))
+
+    assert store.get_position("p1").status == PositionStatus.CLOSED
+
+
+def test_update_position_rejects_a_second_close_of_an_already_closed_position():
+    """Final-product-hardening: CLOSED is a terminal state -- two exit
+    paths racing on the same position (e.g. a stop-hit check and an
+    end-of-data force-close both firing) must not silently double-close
+    or silently no-op; it must be a loud, surfaced error."""
+    from paper.errors import InvalidPositionTransitionError
+    from paper.models import PositionStatus
+
+    store = PaperStore(":memory:")
+    store.save_position(_position())
+    store.update_position(_position(status=PositionStatus.CLOSED, exit_price=105.0))
+
+    with pytest.raises(InvalidPositionTransitionError):
+        store.update_position(_position(status=PositionStatus.CLOSED, exit_price=106.0))
+
+
+def test_update_position_rejects_reopening_a_closed_position():
+    from paper.errors import InvalidPositionTransitionError
+    from paper.models import PositionStatus
+
+    store = PaperStore(":memory:")
+    store.save_position(_position())
+    store.update_position(_position(status=PositionStatus.CLOSED, exit_price=105.0))
+
+    with pytest.raises(InvalidPositionTransitionError):
+        store.update_position(_position(status=PositionStatus.OPEN))
+
+
+def test_update_position_on_a_nonexistent_position_raises_value_error():
+    store = PaperStore(":memory:")
+
+    with pytest.raises(ValueError, match="no such position"):
+        store.update_position(_position(position_id="does-not-exist"))

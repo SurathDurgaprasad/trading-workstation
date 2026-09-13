@@ -127,6 +127,29 @@ def test_data_fetch_failure_is_excluded_with_reason_not_a_crash():
     assert "Data fetch failed" in report.excluded[0].reason
 
 
+def test_invalid_data_quality_is_excluded_not_scored():
+    """Release-gate mission's own hard rule: INVALID data must never
+    reach a prediction/decision. Constructs a series with a duplicate
+    bar timestamp -- one of market_data.validation.validate_ohlcv's
+    INVALID conditions -- and confirms the symbol is excluded before
+    any indicator/decision computation ever sees it, the same way a
+    fetch failure already is, not merely scored with degraded data."""
+    bars = _bars(_uptrend())
+    bars[5] = OHLCVBar(
+        timestamp=bars[4].timestamp,  # duplicate of the prior bar's timestamp
+        open=bars[5].open, high=bars[5].high, low=bars[5].low, close=bars[5].close, volume=bars[5].volume,
+    )
+    ohlcv = OHLCV(symbol="DUPTS", interval="1d", bars=bars)
+    provider = _FakeProvider({"DUPTS": ohlcv})
+
+    report = run_scan(_universe("DUPTS"), provider=provider, benchmark_symbol=None)
+
+    assert report.candidates == []
+    assert len(report.excluded) == 1
+    assert "Data quality" in report.excluded[0].reason
+    assert "duplicate" in report.excluded[0].reason.lower()
+
+
 def test_one_bad_symbol_does_not_abort_the_scan_for_the_rest():
     provider = _FakeProvider(
         {"GOOD": _ohlcv("GOOD", _uptrend()), "BAD": MarketDataError("simulated outage")}

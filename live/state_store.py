@@ -41,8 +41,6 @@ Three tables:
     rejection would leave no trace anywhere.
 """
 
-import sqlite3
-
 from core import sqlite_util
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -177,33 +175,17 @@ class FeedStatusRecord:
     for honesty rather than assuming)."""
 
 
-def _ensure_column(conn: sqlite3.Connection, table: str, column: str, coltype: str) -> None:
-    """Additive, idempotent migration for a table that may already exist
-    on disk (every real deployed live_state.db does) with an older schema.
-    CREATE TABLE IF NOT EXISTS in _SCHEMA only creates a table that is
-    entirely missing; it silently does nothing to add a new column to a
-    table that already exists -- SQLite has no CREATE-OR-ALTER. Without
-    this, a column added only to the _SCHEMA string above would work
-    against a fresh test DB (created new, so it includes the column from
-    the start) while breaking every real, already-created production DB
-    the moment code tries to read/write the new column -- exactly the
-    "write migration-safe changes, do not break existing databases"
-    hazard this project holds itself to. table/column names here are
-    always our own hardcoded literals, never user input, so this f-string
-    is not a SQL-injection risk despite not being parameterized (SQLite
-    does not support parameterizing identifiers in DDL)."""
-    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-    if column not in existing:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
-
-
 class LiveStateStore:
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
         self._conn = sqlite_util.connect(self.db_path)
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
-        _ensure_column(self._conn, "feed_status", "last_price", "REAL")
+        # Final-product-hardening: this store's own additive-column
+        # migration helper is now core.sqlite_util.ensure_column -- see
+        # that module's docstring (extracted from here, the same
+        # treatment already given to integrity_check/db_size_bytes).
+        sqlite_util.ensure_column(self._conn, "feed_status", "last_price", "REAL")
 
     def close(self) -> None:
         self._conn.close()

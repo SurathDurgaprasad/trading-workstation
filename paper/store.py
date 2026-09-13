@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from backtesting.trade import Trade
+from paper.errors import InvalidPositionTransitionError
 from paper.models import JournalEntry, JournalOutcome, PaperFill, PaperOrder, Position
 from risk.account import Account
 from risk.contracts import RiskDecision
@@ -230,10 +231,27 @@ class PaperStore:
         )
 
     def update_position(self, position: Position) -> None:
-        self._conn.execute(
-            "UPDATE positions SET status = ?, data_json = ?, updated_at = ? WHERE position_id = ?",
+        """Final-product-hardening: CLOSED is the position state
+        machine's one terminal state (paper/models.py::PositionStatus)
+        -- once closed, no further mutation is valid (not a reopen, not
+        a second close, not a stray bars_held update racing a close).
+        Guarded here with `WHERE status != 'CLOSED'` rather than trusting
+        every caller to re-check `get_position().status` first, since
+        this is the single call site every position mutation already
+        flows through (see paper/engine.py's `_process_open_position`
+        and `_close_position`). A 0-row update means the guard fired --
+        raised as InvalidPositionTransitionError, never a silent no-op,
+        since a caller reaching this state has a real bug worth
+        surfacing (e.g. two exit paths racing on the same position)."""
+        cursor = self._conn.execute(
+            "UPDATE positions SET status = ?, data_json = ?, updated_at = ? WHERE position_id = ? AND status != 'CLOSED'",
             (position.status.value, position.model_dump_json(), _now(), position.position_id),
         )
+        if cursor.rowcount == 0:
+            existing = self.get_position(position.position_id)
+            if existing is None:
+                raise ValueError(f"Cannot update position {position.position_id!r}: no such position exists.")
+            raise InvalidPositionTransitionError(position_id=position.position_id, attempted_status=position.status.value)
 
     def get_open_position(self, symbol: str) -> Position | None:
         row = self._conn.execute(

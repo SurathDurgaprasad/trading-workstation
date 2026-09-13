@@ -11,6 +11,7 @@ to it later is always a NEW row in prediction_evaluations, referencing
 the original by prediction_id.
 """
 
+import json
 import sqlite3
 
 from core import sqlite_util
@@ -18,6 +19,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from predictions.errors import DuplicatePredictionError
 from predictions.models import PredictionEvaluation, PredictionOutcomeState, PredictionRecord
 
 _SCHEMA = """
@@ -51,9 +53,55 @@ class PredictionStore:
         self._conn = sqlite_util.connect(self.db_path)
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
+        self.duplicate_prevention_enforced_at_db_level = self._migrate_entry_time_column_and_unique_index()
+
+    def _migrate_entry_time_column_and_unique_index(self) -> bool:
+        """Final-product-hardening: `has_prediction_for_entry` (below)
+        was, until this migration, the ONLY duplicate-prevention this
+        table had -- an application-level check-then-insert with no
+        transaction spanning the check and the insert, so two concurrent
+        callers (e.g. a manual `predict` overlapping a scheduled one)
+        could both pass the check and double-insert a prediction for the
+        same symbol+entry bar. `prediction_id` is a UUID surrogate key
+        that never collides in practice, so the PRIMARY KEY alone gave
+        no protection against this.
+
+        Adds a real `entry_time` column (previously only inside each
+        row's opaque `data_json` blob) via core.sqlite_util.ensure_column
+        (safe on an existing production predictions.db -- additive, does
+        not touch existing rows' data_json), backfills it for any
+        pre-existing rows by parsing their own data_json (their own
+        already-recorded truth, not a guess), then attempts a genuine
+        UNIQUE(symbol, entry_time) index. If an already-deployed database
+        happens to already contain duplicate (symbol, entry_time) rows
+        (possible under the old app-level-only check), the index
+        creation is skipped rather than crashing startup or silently
+        deleting a row -- see core.sqlite_util.try_create_unique_index's
+        own docstring. Returns whether the DB-level constraint is
+        actually active, surfaced via `duplicate_prevention_enforced_at_db_level`
+        so a caller/health-check can know which guarantee it's actually
+        getting rather than assuming the stronger one always holds."""
+        sqlite_util.ensure_column(self._conn, "predictions", "entry_time", "TEXT")
+        rows = self._conn.execute(
+            "SELECT prediction_id, data_json FROM predictions WHERE entry_time IS NULL"
+        ).fetchall()
+        for prediction_id, data_json in rows:
+            entry_time = json.loads(data_json)["entry_time"]
+            self._conn.execute("UPDATE predictions SET entry_time = ? WHERE prediction_id = ?", (entry_time, prediction_id))
+        return sqlite_util.try_create_unique_index(
+            self._conn, index_name="idx_predictions_symbol_entry_time", table="predictions", columns="symbol, entry_time"
+        )
 
     def close(self) -> None:
         self._conn.close()
+
+    def integrity_check(self) -> str:
+        """Final-product-hardening: PRAGMA integrity_check, extended to
+        every store -- see core.sqlite_util.integrity_check's docstring."""
+        return sqlite_util.integrity_check(self._conn)
+
+    def db_size_bytes(self) -> int:
+        return sqlite_util.db_size_bytes(self.db_path)
 
     @contextmanager
     def transaction(self):
@@ -69,11 +117,29 @@ class PredictionStore:
     # --- predictions -------------------------------------------------------
 
     def save_prediction(self, prediction: PredictionRecord) -> None:
-        with self.transaction():
-            self._conn.execute(
-                "INSERT INTO predictions (prediction_id, decision_id, symbol, created_at, data_json) VALUES (?,?,?,?,?)",
-                (prediction.prediction_id, prediction.decision_id, prediction.symbol, prediction.created_at.isoformat(), prediction.model_dump_json()),
-            )
+        """Raises DuplicatePredictionError if the DB-level UNIQUE(symbol,
+        entry_time) constraint is active (see
+        _migrate_entry_time_column_and_unique_index) and this exact
+        symbol+entry_time was already recorded -- an atomic guarantee
+        `has_prediction_for_entry`'s check-then-insert alone cannot give,
+        since two callers can both pass that check before either has
+        inserted. If the constraint is not active (a pre-existing
+        database with unresolved historical duplicates -- see
+        `duplicate_prevention_enforced_at_db_level`), this still
+        succeeds, matching the prior behavior exactly."""
+        try:
+            with self.transaction():
+                self._conn.execute(
+                    "INSERT INTO predictions (prediction_id, decision_id, symbol, created_at, entry_time, data_json) VALUES (?,?,?,?,?,?)",
+                    (
+                        prediction.prediction_id, prediction.decision_id, prediction.symbol,
+                        prediction.created_at.isoformat(), prediction.entry_time.isoformat(), prediction.model_dump_json(),
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            if "UNIQUE constraint failed" not in str(exc):
+                raise
+            raise DuplicatePredictionError(symbol=prediction.symbol, entry_time=prediction.entry_time) from exc
 
     def get_prediction(self, prediction_id: str) -> PredictionRecord | None:
         row = self._conn.execute("SELECT data_json FROM predictions WHERE prediction_id = ?", (prediction_id,)).fetchone()

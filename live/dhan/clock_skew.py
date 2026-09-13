@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Callable
 
+from core.timeutil import as_utc_aware
 from live.dhan.config import DHAN_REST_BASE_URL, DhanCredentials
 
 # (url, headers) -> (status_code, Date response header, or None if absent).
@@ -91,9 +92,7 @@ def measure_clock_skew(
     after = datetime.now(timezone.utc)
     if not date_header:
         raise ClockSkewUnavailable(f"No Date header in the Dhan REST response (HTTP {status_code}).")
-    server_time = parsedate_to_datetime(date_header)
-    if server_time.tzinfo is None:
-        server_time = server_time.replace(tzinfo=timezone.utc)
+    server_time = as_utc_aware(parsedate_to_datetime(date_header))
     midpoint_local = before + (after - before) / 2
     skew_seconds = (midpoint_local - server_time).total_seconds()
     measured_at = after

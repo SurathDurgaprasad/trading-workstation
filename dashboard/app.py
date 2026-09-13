@@ -36,6 +36,7 @@ from starlette.responses import HTMLResponse, RedirectResponse
 from starlette.routing import Route
 
 import live.workstation as workstation
+from core.timeutil import as_utc_aware
 from dashboard import intelligence
 
 _REFRESH_SECONDS = 15
@@ -217,9 +218,7 @@ def _clock_skew_banner() -> str:
             '<p class="muted">Never measured in this environment. Run <code>readiness-check --deep</code> or start a '
             "<code>paper-live --source dhan</code> session to measure real local-vs-Dhan-server clock skew.</p>"
         )
-    measured_at = datetime.fromisoformat(record.measured_at)
-    if measured_at.tzinfo is None:
-        measured_at = measured_at.replace(tzinfo=timezone.utc)
+    measured_at = as_utc_aware(datetime.fromisoformat(record.measured_at))
     age_seconds = (datetime.now(timezone.utc) - measured_at).total_seconds()
     age_text = f"{age_seconds:,.0f}s ago" if age_seconds < 120 else f"{age_seconds / 60:,.1f} min ago"
     staleness_note = (

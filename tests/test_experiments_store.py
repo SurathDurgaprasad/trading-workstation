@@ -107,3 +107,15 @@ def test_store_persists_across_reconnect(tmp_path):
     store2 = ExperimentStore(db_path)
     assert store2.get_experiment("exp-1") is not None
     store2.close()
+
+
+def test_integrity_check_reports_ok_for_a_healthy_database(tmp_path):
+    store = ExperimentStore(tmp_path / "experiments.db")
+    assert store.integrity_check() == "ok"
+    store.close()
+
+
+def test_db_size_bytes_reflects_a_real_file(tmp_path):
+    store = ExperimentStore(tmp_path / "experiments.db")
+    assert store.db_size_bytes() > 0
+    store.close()

@@ -65,3 +65,51 @@ def db_size_bytes(db_path: str | Path) -> int:
     exist (never an exception for a not-yet-created database)."""
     path = Path(db_path)
     return path.stat().st_size if path.exists() else 0
+
+
+def ensure_column(conn: sqlite3.Connection, table: str, column: str, coltype: str) -> None:
+    """Additive, idempotent migration for a table that may already exist
+    on disk with an older schema. `CREATE TABLE IF NOT EXISTS` in a
+    store's own `_SCHEMA` only creates a table that is entirely missing;
+    it silently does nothing to add a new column to a table that already
+    exists -- SQLite has no CREATE-OR-ALTER. Without this, a column added
+    only to a `_SCHEMA` string works against a fresh test DB (created
+    new, so it includes the column from the start) while breaking every
+    real, already-created production DB the moment code tries to
+    read/write the new column.
+
+    Previously implemented once, independently, in live/state_store.py
+    (final-product-hardening phase: extracted here, the same treatment
+    already given to `integrity_check`/`db_size_bytes`, so a second store
+    needing the identical migration primitive -- predictions/store.py's
+    natural-key backfill -- does not have to re-derive or duplicate it).
+    table/column names here are always our own hardcoded literals, never
+    user input, so this f-string is not a SQL-injection risk despite not
+    being parameterized (SQLite does not support parameterizing
+    identifiers in DDL)."""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+
+
+def try_create_unique_index(conn: sqlite3.Connection, *, index_name: str, table: str, columns: str) -> bool:
+    """Attempts `CREATE UNIQUE INDEX IF NOT EXISTS` and reports whether it
+    succeeded, rather than letting a real, already-deployed database that
+    happens to already contain duplicate rows on `columns` (the exact
+    scenario a NEW unique constraint is being added to prevent) crash
+    application startup. This is deliberately soft-fail-and-report, not
+    silent: a caller that gets False back has a genuine, disclosable
+    known-limitation ("this store's natural-key uniqueness is not
+    currently enforced at the database level because pre-existing
+    duplicate rows were found") to surface via integrity_check or a
+    startup log, rather than the process refusing to start over old
+    data nothing can safely repair automatically (see this module's
+    home mission's own "never delete critical trading state
+    automatically" rule -- deduplicating existing rows is exactly that
+    kind of automatic, unreviewed data deletion, so it is never
+    attempted here)."""
+    try:
+        conn.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {table}({columns})")
+        return True
+    except sqlite3.IntegrityError:
+        return False

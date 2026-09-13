@@ -72,3 +72,15 @@ def test_store_persists_across_reconnect(tmp_path):
     reopened = ScanHistoryStore(db_path)
     assert reopened.get_report("scan-1") is not None
     reopened.close()
+
+
+def test_integrity_check_reports_ok_for_a_healthy_database(tmp_path):
+    store = ScanHistoryStore(tmp_path / "scanner.db")
+    assert store.integrity_check() == "ok"
+    store.close()
+
+
+def test_db_size_bytes_reflects_a_real_file(tmp_path):
+    store = ScanHistoryStore(tmp_path / "scanner.db")
+    assert store.db_size_bytes() > 0
+    store.close()

@@ -76,6 +76,33 @@ class OHLCVBar(BaseModel):
     )
 
 
+def _row_has_valid_ohlc_relationship(row: "pd.Series") -> bool:
+    """Final-product-hardening: a real, previously-unguarded gap -- the
+    pydantic `Field(gt=0)`/`Field(ge=0)` constraints on OHLCVBar check
+    that each of open/high/low/close/volume is individually a sane
+    number, but nothing checked the RELATIONSHIP between them (high is
+    actually the max, low is actually the min). A row where e.g.
+    high < low or close is outside [low, high] is a structurally
+    impossible candle -- upstream provider corruption, not a valid
+    market observation -- and would otherwise silently flow into
+    every downstream indicator/feature/decision computation.
+
+    Dropped here using the exact same mechanism `from_dataframe`
+    already uses for NaN rows (a filter on the row-construction list
+    comprehension, not a raise) -- deliberately NOT a raise, since a
+    single malformed row from an otherwise-good multi-year fetch
+    should not make the whole symbol unusable; dropping is also the
+    established, tested behavior of this exact function for the NaN
+    case, so this is an extension of an existing precedent, not a new
+    policy. Callers wanting NEW-bar-level validation (duplicate
+    timestamps, gaps, staleness -- properties of the SERIES, not a
+    single row) should use market_data/validation.py's
+    `validate_ohlcv`, which runs after this filter has already
+    removed structurally-impossible rows."""
+    open_, high, low, close = float(row["Open"]), float(row["High"]), float(row["Low"]), float(row["Close"])
+    return high >= low and high >= open_ and high >= close and low <= open_ and low <= close
+
+
 class OHLCV(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -137,6 +164,7 @@ class OHLCV(BaseModel):
             and pd.notna(row["Low"])
             and pd.notna(row["Close"])
             and pd.notna(row["Volume"])
+            and _row_has_valid_ohlc_relationship(row)
         ]
         return cls(symbol=symbol, interval=interval, bars=bars)
 

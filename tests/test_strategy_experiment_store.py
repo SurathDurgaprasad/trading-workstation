@@ -96,3 +96,15 @@ def test_records_persist_across_separate_store_instances_on_the_same_db_file(tmp
     fetched = store2.get(experiment_id)
 
     assert fetched == record
+
+
+def test_integrity_check_reports_ok_for_a_healthy_database(tmp_path):
+    store = ExperimentRegistryStore(tmp_path / "experiments.db")
+    assert store.integrity_check() == "ok"
+    store.close()
+
+
+def test_db_size_bytes_reflects_a_real_file(tmp_path):
+    store = ExperimentRegistryStore(tmp_path / "experiments.db")
+    assert store.db_size_bytes() > 0
+    store.close()

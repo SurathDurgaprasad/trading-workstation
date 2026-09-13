@@ -25,6 +25,7 @@ from core.timeutil import to_naive
 from market.data_provider import MarketDataError, MarketDataProvider
 from market.indicators import compute_indicator_series
 from market_data.universe import MarketUniverse
+from market_data.validation import DataQualityStatus, validate_ohlcv
 from market_intelligence.config import ScannerConfig
 from market_intelligence.models import CandidateScore, ExcludedCandidate, ScanReport
 
@@ -129,8 +130,16 @@ def _fetch_benchmark(
         return None, None
     try:
         ohlcv = provider.fetch_ohlcv(benchmark_symbol, period=period, interval=interval)
+    except MarketDataError as exc:
+        return None, f"Failed to fetch/compute benchmark {benchmark_symbol!r}: {exc}"
+
+    quality = validate_ohlcv(ohlcv, expected_symbol=benchmark_symbol, check_freshness=False)
+    if quality.status is DataQualityStatus.INVALID:
+        return None, f"Data quality for benchmark {benchmark_symbol!r}: {'; '.join(quality.issues)}"
+
+    try:
         series = compute_indicator_series(ohlcv)
-    except (MarketDataError, ValueError) as exc:
+    except ValueError as exc:
         return None, f"Failed to fetch/compute benchmark {benchmark_symbol!r}: {exc}"
     return series, None
 
@@ -150,6 +159,19 @@ def _screen_symbol(
         ohlcv = provider.fetch_ohlcv(normalized, period=period, interval=interval)
     except MarketDataError as exc:
         return ExcludedCandidate(symbol=normalized, as_of=None, reason=f"Data fetch failed: {exc}")
+
+    quality = validate_ohlcv(ohlcv, expected_symbol=normalized, check_freshness=False)
+    if quality.status is DataQualityStatus.INVALID:
+        # Release-gate mission: INVALID data must never reach a
+        # prediction or a decision. Excluded here, before indicators are
+        # ever computed on it, the same way a fetch failure already is --
+        # staleness is intentionally NOT checked at this layer (the
+        # scanner runs on `period`-bounded historical windows where
+        # "staleness" of the whole fetch is a separate, already-covered
+        # concern -- see cache-status/daily-report); only structural
+        # validity (duplicates, ordering, gaps, symbol identity) gates
+        # the scan.
+        return ExcludedCandidate(symbol=normalized, as_of=None, reason=f"Data quality: {'; '.join(quality.issues)}")
 
     try:
         series = compute_indicator_series(ohlcv)

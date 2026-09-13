@@ -98,3 +98,15 @@ def test_different_candidates_do_not_leak_into_each_others_history(tmp_path):
     assert len(store.history_for_candidate("candidate_b")) == 1
     assert store.history_for_candidate("candidate_a")[0].verdict.value == "PROMOTED"
     assert store.history_for_candidate("candidate_b")[0].verdict.value == "NEGATIVE"
+
+
+def test_integrity_check_reports_ok_for_a_healthy_database(tmp_path):
+    store = PromotionGateStore(tmp_path / "promotion.db")
+    assert store.integrity_check() == "ok"
+    store.close()
+
+
+def test_db_size_bytes_reflects_a_real_file(tmp_path):
+    store = PromotionGateStore(tmp_path / "promotion.db")
+    assert store.db_size_bytes() > 0
+    store.close()
