@@ -3214,6 +3214,17 @@ def run_schedule_command(args: argparse.Namespace) -> None:
         if args.check_integrity:
             integrity_result = store.integrity_check()
             db_size = store.db_size_bytes()
+        # Final-product-hardening: per-slot last-success/last-failure
+        # summary (release-gate mission section 11) -- gathered from
+        # actual run history (not the schedule config, which may not be
+        # loaded here and may have changed since some of these runs),
+        # so an operator can see "is THIS job healthy" at a glance
+        # instead of scanning the full run list below for it.
+        slot_summaries = []
+        for slot_name in store.distinct_slot_names():
+            last_success = store.last_successful_run_for_slot(slot_name)
+            last_failure = store.last_failed_run_for_slot(slot_name)
+            slot_summaries.append((slot_name, last_success, last_failure))
         store.close()
 
         print("=" * 70)
@@ -3223,6 +3234,16 @@ def run_schedule_command(args: argparse.Namespace) -> None:
         if args.check_integrity:
             size_kb = db_size / 1024.0
             print(f"Integrity check: {integrity_result}   (file size: {size_kb:.1f} KB)\n")
+        if slot_summaries:
+            print("Per-slot summary:")
+            for slot_name, last_success, last_failure in slot_summaries:
+                success_text = last_success.finished_at.isoformat() if last_success and last_success.finished_at else "never"
+                if last_failure and last_failure.finished_at:
+                    failure_text = f"{last_failure.finished_at.isoformat()} ({last_failure.error or last_failure.detail})"
+                else:
+                    failure_text = "never"
+                print(f"  {slot_name:12s} last success={success_text:32s} last failure={failure_text}")
+            print()
         if not runs:
             print("No scheduler runs recorded yet -- run `schedule tick` or `schedule loop` first.")
         for run in runs:

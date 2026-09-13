@@ -104,7 +104,18 @@ clean `TickResult` instead), backed by a new failure-injection test.
 Kill-switch state is read fresh from disk on every call (zero caching,
 confirmed via re-reading `live/state_store.py` and its existing restart
 test at `tests/test_live_state_store.py:131-140`) -- unmodified and
-re-verified, not newly built.
+re-verified, not newly built. `schedule status` now shows a per-slot
+last-success/last-failure summary (`SchedulerRunStore.
+last_successful_run_for_slot`/`last_failed_run_for_slot`, new this
+pass) so an operator can see whether a specific job is healthy without
+scanning the full run list. Per-job timeout was deliberately NOT
+implemented: `_execute_slot` runs in-process and synchronously, so a
+naive thread-based timeout would not actually stop a hung call -- it
+would report a timeout while the original call kept running
+unsupervised, a worse failure mode than today's (a stuck lock, already
+reclaimed by `reclaim_stale_locks`). A real preemptive timeout needs
+subprocess isolation, a larger architectural change deliberately out
+of this pass's scope.
 
 **Security**: Unchanged from the prior `docs/SECURITY_REVIEW.md`
 findings (SQL injection clean, XSS clean, path traversal fixed, no
@@ -154,7 +165,7 @@ gap against the mission's broader "chaos testing" ask).
 2. No unified startup self-diagnostic command producing DEGRADED vs SAFE-STOP status across all subsystems.
 3. No `PRAGMA user_version`/schema-version tracking on any of the 12 stores; a real migration mechanism (beyond additive-column backfill) exists on only 3 of 12.
 4. No per-job scheduler timeout; no documented fairness guarantee for overlapping custom scheduler slot windows; no `last_success_at` tracking in `SchedulerRunStore`.
-5. Cache-staleness thresholds remain divergent across `daily-report` (canonical, fixed), `cache-status` (30 days), and `readiness-check` (hardcoded 7 days) -- not fully unified.
+5. Cache-staleness thresholds differ across `daily-report` (`CriticConfig().max_data_staleness_seconds`, ~5 days -- governs LIVE-feed trustworthiness for a real decision), `cache-status` (operator-configurable, default 30 days), and `readiness-check` (hardcoded 7 days). Re-examined this pass: `readiness-check`'s own code comment is explicit that this check is "irrelevant to the LIVE feed itself... relevant if also running any backtest comparison" -- i.e. these three are not actually the same concept (live-decision safety vs. historical-cache/backtest relevance), so unifying them into one value would conflate two genuinely different questions rather than fix an inconsistency. Downgraded from "gap" to "intentional differentiation, correctly commented but not yet documented as intentional in a shared place" -- the residual, smaller item is giving `readiness-check`'s and `cache-status`'s thresholds names/constants instead of bare literals, for discoverability.
 6. Config-loading validation is inconsistent across subsystems -- some fail fast with a clear error, others may silently fall back to a default.
 7. No unified health/observability dashboard spanning every subsystem in one view.
 8. No dedicated `INSTALLATION.md`/`USER_GUIDE.md`/`OPERATIONS_GUIDE.md`/`TROUBLESHOOTING.md`/`ARCHITECTURE.md`/`SECURITY.md` document suite (README and phase-history docs are extensive but not organized this way).

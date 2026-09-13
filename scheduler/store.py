@@ -173,6 +173,41 @@ class SchedulerRunStore:
         ).fetchall()
         return [RunRecord.model_validate_json(r[0]) for r in rows]
 
+    def last_successful_run_for_slot(self, slot_name: str) -> RunRecord | None:
+        """Final-product-hardening: release-gate mission section 11 asks
+        every scheduled job to be able to answer "last completed" and
+        "last failed," not just today's -- distinct from
+        `latest_run_for_slot_today` (deliberately date-scoped, used by
+        `due_slot()`'s own frequency check). This answers "when did this
+        job last actually succeed at all," which matters after a
+        multi-day failure streak or a scheduler restart, when today's own
+        history may show nothing but failures or nothing yet."""
+        row = self._conn.execute(
+            "SELECT data_json FROM scheduler_runs WHERE slot_name = ? AND status = ? ORDER BY started_at DESC LIMIT 1",
+            (slot_name, RunStatus.COMPLETED.value),
+        ).fetchone()
+        return RunRecord.model_validate_json(row[0]) if row else None
+
+    def last_failed_run_for_slot(self, slot_name: str) -> RunRecord | None:
+        """Symmetric with last_successful_run_for_slot -- surfaces the
+        most recent failure (with its own `detail`/`error` fields) for an
+        operator to see WHY a job has not been succeeding, without
+        scrolling through `list_runs`'s full history to find it."""
+        row = self._conn.execute(
+            "SELECT data_json FROM scheduler_runs WHERE slot_name = ? AND status = ? ORDER BY started_at DESC LIMIT 1",
+            (slot_name, RunStatus.FAILED.value),
+        ).fetchone()
+        return RunRecord.model_validate_json(row[0]) if row else None
+
+    def distinct_slot_names(self) -> list[str]:
+        """Every slot name that has ever actually run, derived from run
+        history rather than a schedule config file -- so a per-slot
+        summary works even when the caller has no config loaded (the
+        default schedule, or a config that changed since some of these
+        runs happened)."""
+        rows = self._conn.execute("SELECT DISTINCT slot_name FROM scheduler_runs ORDER BY slot_name").fetchall()
+        return [row[0] for row in rows]
+
     def integrity_check(self) -> str:
         """Phase 39 -- long-run operations: a read-only `PRAGMA
         integrity_check` an operator can run after days/weeks of

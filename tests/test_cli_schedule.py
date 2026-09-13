@@ -249,6 +249,33 @@ def test_schedule_status_after_a_tick_shows_the_run(tmp_path, capsys):
     assert "COMPLETED" in output
 
 
+def test_schedule_status_shows_a_per_slot_last_success_summary(tmp_path, capsys):
+    """Final-product-hardening: release-gate mission section 11 -- an
+    operator should be able to see "is THIS job healthy" without
+    scanning the full run list."""
+    tick_args = parse_args(["schedule", "tick", "--symbols", "AAPL", "--benchmark", "", "--now", _TRADING_TIME, *_db_args(tmp_path)])
+    run_schedule_command(tick_args)
+    capsys.readouterr()
+
+    status_args = parse_args(["schedule", "status", "--run-db", str(tmp_path / "runs.db")])
+    run_schedule_command(status_args)
+    output = capsys.readouterr().out
+
+    assert "Per-slot summary:" in output
+    assert "intraday" in output
+    assert "last success=" in output
+    assert "last failure=never" in output
+
+
+def test_schedule_status_per_slot_summary_shows_never_before_any_run(tmp_path, capsys):
+    status_args = parse_args(["schedule", "status", "--run-db", str(tmp_path / "runs.db")])
+    run_schedule_command(status_args)
+    output = capsys.readouterr().out
+
+    assert "Per-slot summary:" not in output  # nothing has ever run -- no slots to summarize
+    assert "No scheduler runs recorded yet" in output
+
+
 def test_schedule_loop_stops_after_max_ticks_without_sleeping(tmp_path, capsys, monkeypatch):
     """--max-ticks bounds the loop for a scripted/CI-safe run; the second
     tick (same slot, same day, well within the frequency window) is

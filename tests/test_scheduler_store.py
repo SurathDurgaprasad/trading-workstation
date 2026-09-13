@@ -227,3 +227,55 @@ def test_db_size_bytes_is_zero_for_a_path_that_does_not_exist(tmp_path):
 
     os.remove(tmp_path / "runs.db")
     assert store.db_size_bytes() == 0
+
+
+# --- final-product-hardening: per-slot last-success/last-failure -----------
+
+
+def test_last_successful_run_for_slot_is_none_when_nothing_has_run(store):
+    assert store.last_successful_run_for_slot("pre_market") is None
+
+
+def test_last_successful_run_for_slot_finds_the_most_recent_completion(store):
+    store.start_run(run_id="r1", slot_name="pre_market", run_date="2026-09-01", started_at=datetime(2026, 9, 1, tzinfo=timezone.utc))
+    store.finish_run(run_id="r1", status=RunStatus.COMPLETED, finished_at=datetime(2026, 9, 1, 1, tzinfo=timezone.utc))
+    store.start_run(run_id="r2", slot_name="pre_market", run_date="2026-09-02", started_at=datetime(2026, 9, 2, tzinfo=timezone.utc))
+    store.finish_run(run_id="r2", status=RunStatus.COMPLETED, finished_at=datetime(2026, 9, 2, 1, tzinfo=timezone.utc))
+
+    last_success = store.last_successful_run_for_slot("pre_market")
+
+    assert last_success.run_id == "r2"
+
+
+def test_last_successful_run_for_slot_ignores_failed_runs():
+    """A slot that has only ever failed must report None, not a FAILED
+    run mistaken for a success."""
+    store = SchedulerRunStore(":memory:")
+    store.start_run(run_id="r1", slot_name="pre_market", run_date="2026-09-01", started_at=datetime(2026, 9, 1, tzinfo=timezone.utc))
+    store.finish_run(run_id="r1", status=RunStatus.FAILED, error="boom")
+
+    assert store.last_successful_run_for_slot("pre_market") is None
+    store.close()
+
+
+def test_last_failed_run_for_slot_carries_the_error_detail():
+    store = SchedulerRunStore(":memory:")
+    store.start_run(run_id="r1", slot_name="pre_market", run_date="2026-09-01", started_at=datetime(2026, 9, 1, tzinfo=timezone.utc))
+    store.finish_run(run_id="r1", status=RunStatus.FAILED, error="simulated Yahoo outage")
+
+    last_failure = store.last_failed_run_for_slot("pre_market")
+
+    assert last_failure.error == "simulated Yahoo outage"
+    store.close()
+
+
+def test_distinct_slot_names_lists_every_slot_that_has_ever_run(store):
+    store.start_run(run_id="r1", slot_name="pre_market", run_date="2026-09-01", started_at=datetime.now(timezone.utc))
+    store.start_run(run_id="r2", slot_name="post_market", run_date="2026-09-01", started_at=datetime.now(timezone.utc))
+    store.start_run(run_id="r3", slot_name="pre_market", run_date="2026-09-02", started_at=datetime.now(timezone.utc))  # same slot again
+
+    assert store.distinct_slot_names() == ["post_market", "pre_market"]  # alphabetical, deduplicated
+
+
+def test_distinct_slot_names_is_empty_when_nothing_has_run(store):
+    assert store.distinct_slot_names() == []
