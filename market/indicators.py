@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.timeutil import to_naive
 from market.data_provider import OHLCV
 
 VolumeTrend = Literal["increasing", "decreasing", "neutral"]
@@ -157,11 +158,7 @@ def compute_indicators(ohlcv: OHLCV) -> TechnicalIndicators:
     atr_14 = compute_atr(high, low, close, ATR_PERIOD)
     volume_analysis = compute_volume_analysis(volume)
 
-    as_of = frame.index[-1]
-    if not isinstance(as_of, datetime):
-        as_of = pd.Timestamp(as_of).to_pydatetime()
-    if as_of.tzinfo is not None:
-        as_of = as_of.replace(tzinfo=None)
+    as_of = to_naive(frame.index[-1])
 
     macd_values = _latest_macd(macd_frame)
     return TechnicalIndicators(

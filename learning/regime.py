@@ -11,6 +11,7 @@ from enum import Enum
 
 import pandas as pd
 
+from core.timeutil import match_index_awareness
 from market.data_provider import MarketDataError, MarketDataProvider
 from market.indicators import compute_sma
 from strategy.regime_filters import BROAD_TREND_SMA_PERIOD
@@ -46,11 +47,7 @@ def classify_regime_at(
     # aware scalar (or vice versa). Normalize `as_of` to match the index's
     # own awareness, never the reverse (never invent a timezone for the bar
     # data itself).
-    as_of_for_comparison = as_of
-    if frame.index.tz is not None and as_of.tzinfo is None:
-        as_of_for_comparison = as_of.replace(tzinfo=timezone.utc)
-    elif frame.index.tz is None and as_of.tzinfo is not None:
-        as_of_for_comparison = as_of.replace(tzinfo=None)
+    as_of_for_comparison = match_index_awareness(as_of, frame.index)
     history = frame[frame.index <= as_of_for_comparison]
     if len(history) < BROAD_TREND_SMA_PERIOD:
         return MarketRegime.UNKNOWN

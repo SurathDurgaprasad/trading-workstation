@@ -193,6 +193,29 @@ def test_run_tick_does_not_reclaim_a_fresh_lock(tmp_path, run_store):
     assert result.ran is False  # still held
 
 
+def test_run_tick_does_not_crash_on_a_lock_acquisition_failure(tmp_path, run_store, monkeypatch):
+    """Final-product-hardening phase: an unexpected failure (e.g.
+    sqlite3.OperationalError under real lock contention) in the SETUP
+    phase -- before any lock is acquired -- previously propagated
+    straight out of run_tick uncaught. No lock was ever acquired here, so
+    there is nothing to release; run_tick must still return a clean,
+    non-raising TickResult."""
+    def _raise(*args, **kwargs):
+        raise RuntimeError("simulated database contention")
+
+    monkeypatch.setattr(run_store, "active_lock", _raise)
+
+    result = run_tick(schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", now=_TRADING_TIME, **_db_paths(tmp_path))
+
+    assert result.ran is False
+    assert "Tick setup failed" in result.reason
+    assert "simulated database contention" in result.reason
+    assert result.reclaimed_run_ids == ()
+    # No lock was ever acquired -- confirm nothing was left dangling
+    # (checked via list_runs, since active_lock itself is still patched).
+    assert run_store.list_runs() == []
+
+
 def test_run_tick_records_a_failed_run_without_crashing_when_no_universe_is_given(tmp_path, run_store):
     """No --symbols/--watchlist-file for a shadow_run slot must fail ONE
     tick gracefully (FAILED RunRecord), never raise out of run_tick --

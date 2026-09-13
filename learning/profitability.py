@@ -179,22 +179,18 @@ def _max_drawdown(returns_in_order: list[float]) -> float | None:
     return max_dd
 
 
-def _normalize_for_sort(value: datetime) -> datetime:
-    """Both naive (Yahoo/mock convention) and UTC-aware (real Dhan
-    live-overlay convention, since Phase 16) `entry_time` values can
-    coexist across different predictions in the SAME store -- e.g. some
-    shadow-runs used --live-source dhan and others didn't. Sorting them
-    directly raises TypeError ("can't compare offset-naive and
-    offset-aware datetimes"); normalize to UTC-aware first, same fix
-    class as market.data_provider._to_timestamp / learning.regime.
-    classify_regime_at / experiments.comparison._naive_utc."""
-    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
-
-
 def compute_profitability_report(items: list["EvaluatedPrediction"]) -> ProfitabilityReport:
+    from core.timeutil import as_utc_aware
     from learning.analysis import _resolved_returns
 
-    chronological = sorted(items, key=lambda item: _normalize_for_sort(item.prediction.entry_time))
+    # Both naive (Yahoo/mock convention) and UTC-aware (real Dhan
+    # live-overlay convention, since Phase 16) `entry_time` values can
+    # coexist across different predictions in the SAME store -- e.g. some
+    # shadow-runs used --live-source dhan and others didn't. Sorting them
+    # directly raises TypeError; core.timeutil.as_utc_aware normalizes
+    # first -- see that module's own docstring for the historical bug
+    # class this fixes (Phase 33/37/42), previously re-fixed locally here.
+    chronological = sorted(items, key=lambda item: as_utc_aware(item.prediction.entry_time))
     returns = _resolved_returns(chronological)
     return compute_profitability_report_from_returns(returns)
 

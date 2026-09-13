@@ -5,6 +5,8 @@ from typing import Protocol, runtime_checkable
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.timeutil import to_naive
+
 
 class MarketDataProviderName(str, Enum):
     YAHOO = "yahoo"
@@ -202,24 +204,17 @@ def get_market_data_provider(
 
 
 def _to_timestamp(value: object) -> datetime:
-    # Phase 33 bug fix: `pd.Timestamp` IS a `datetime` subclass, so the
-    # `isinstance(value, datetime)` branch below previously matched EVERY
-    # real DataFrame index value from `.iterrows()` (always a pd.Timestamp)
-    # and returned it completely as-is -- the tzinfo-stripping logic three
-    # lines down was DEAD CODE for the one call site that actually matters
-    # (OHLCV.from_dataframe), only ever running for a raw, non-Timestamp,
-    # non-datetime input (e.g. a plain string) that needed `pd.Timestamp(value)`
-    # to parse it in the first place. Found via a real scan against a live
-    # benchmark (^NSEI) whose Yahoo data carries an Asia/Kolkata-aware
-    # index: market_intelligence.scanner._screen_symbol's benchmark
-    # reindex raised `TypeError: Cannot compare dtypes datetime64[us,
-    # UTC+05:30] and datetime64[us]` because ^NSEI's bars kept their real
-    # tzinfo while other symbols' bars (whatever Yahoo happened to hand
-    # back for them) did not -- a direct violation of this project's own
-    # "Yahoo/mock bars are naive by convention" invariant, documented and
-    # relied on in live/freshness.py, market_data/quality.py, and
-    # learning/regime.py alike.
-    parsed = value if isinstance(value, datetime) else pd.Timestamp(value).to_pydatetime()
-    if parsed.tzinfo is not None:
-        return parsed.replace(tzinfo=None)
-    return parsed
+    # Phase 33 bug fix, preserved here for history: `pd.Timestamp` IS a
+    # `datetime` subclass, so a naive `isinstance(value, datetime)` branch
+    # previously matched EVERY real DataFrame index value from
+    # `.iterrows()` (always a pd.Timestamp) and returned it completely
+    # as-is -- the tzinfo-stripping logic was DEAD CODE for the one call
+    # site that actually matters (OHLCV.from_dataframe). Found via a real
+    # scan against a live benchmark (^NSEI) whose Yahoo data carries an
+    # Asia/Kolkata-aware index -- a direct violation of this project's own
+    # "Yahoo/mock bars are naive by convention" invariant. This is now
+    # core.timeutil.to_naive's own logic, centralized after the SAME fix
+    # had to be independently reapplied at four other call sites
+    # (predictions/tracker.py had two of them) -- see that module's own
+    # docstring for the full policy this consolidates.
+    return to_naive(value)

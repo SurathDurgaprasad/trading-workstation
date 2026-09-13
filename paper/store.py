@@ -12,6 +12,8 @@ hand-builds a dict that bypasses the model's own validation.
 
 import json
 import sqlite3
+
+from core import sqlite_util
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -112,12 +114,24 @@ def _now() -> str:
 class PaperStore:
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
-        self._conn = sqlite3.connect(self.db_path, isolation_level=None)
+        self._conn = sqlite_util.connect(self.db_path)
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
 
     def close(self) -> None:
         self._conn.close()
+
+    def integrity_check(self) -> str:
+        """Final-product-hardening phase: `PRAGMA integrity_check` for
+        the paper-trading database -- previously only scheduler/store.py
+        had this capability, despite this being one of the two most
+        safety-critical stores in the project (real account/position
+        state). Returns "ok" for a healthy database, or SQLite's own
+        corruption findings otherwise."""
+        return sqlite_util.integrity_check(self._conn)
+
+    def db_size_bytes(self) -> int:
+        return sqlite_util.db_size_bytes(self.db_path)
 
     @contextmanager
     def transaction(self):

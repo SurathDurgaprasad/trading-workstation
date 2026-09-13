@@ -168,42 +168,56 @@ def run_tick(
     now_utc = now_ist.astimezone(timezone.utc)
     run_date = now_ist.date().isoformat()
 
-    reclaimed = run_store.reclaim_stale_locks(staleness_seconds=staleness_seconds, now=now_utc)
-    reclaimed_ids = tuple(r.run_id for r in reclaimed)
+    # Final-product-hardening phase: this whole setup block (every call
+    # that happens BEFORE a lock is actually acquired via try_start_run)
+    # previously sat outside any exception handling -- an unexpected
+    # sqlite3.OperationalError here (lock contention beyond core.
+    # sqlite_util's own busy-timeout window, or any other unexpected
+    # failure) would propagate straight out of run_tick uncaught. Since
+    # no lock has been acquired yet at this point, there is nothing to
+    # release/finish -- report cleanly instead of crashing the caller
+    # (schedule tick has no outer except of its own; schedule loop's own
+    # outer catch would survive this, but a single `schedule tick`
+    # invocation would not).
+    try:
+        reclaimed = run_store.reclaim_stale_locks(staleness_seconds=staleness_seconds, now=now_utc)
+        reclaimed_ids = tuple(r.run_id for r in reclaimed)
 
-    if schedule_config.is_holiday(now_ist.date()):
-        return TickResult(ran=False, reason=f"{run_date} is a configured exchange holiday -- no slot will run.", reclaimed_run_ids=reclaimed_ids)
+        if schedule_config.is_holiday(now_ist.date()):
+            return TickResult(ran=False, reason=f"{run_date} is a configured exchange holiday -- no slot will run.", reclaimed_run_ids=reclaimed_ids)
 
-    active = run_store.active_lock()
-    if active is not None:
-        return TickResult(
-            ran=False,
-            reason=(
-                f"Another run is already in progress (run_id={active.run_id[:12]}, slot={active.slot_name!r}, "
-                f"started {active.started_at.isoformat()}) -- skipping this tick to avoid an overlapping run."
-            ),
-            reclaimed_run_ids=reclaimed_ids,
-        )
-
-    session = current_market_session(now_ist)
-    if not session.is_weekday:
-        return TickResult(ran=False, reason=f"{now_ist.strftime('%A')} is not a trading day.", reclaimed_run_ids=reclaimed_ids)
-
-    due = schedule_config.due_slot(now=now_ist, run_store=run_store, run_date=run_date)
-    if due is None:
-        return TickResult(ran=False, reason="No configured slot is due at this time.", reclaimed_run_ids=reclaimed_ids)
-
-    run_id = RunRecord.new_id()
-    started = run_store.try_start_run(run_id=run_id, slot_name=due.name, run_date=run_date, started_at=now_utc)
-    if started is None:
-        # Lost a race against another process that started a run between
-        # this tick's earlier `active_lock()` check and now -- see
-        # `SchedulerRunStore.try_start_run`'s docstring. Correctness does
-        # not depend on this branch being reached often; it exists so a
-        # genuine race never silently produces two overlapping runs.
         active = run_store.active_lock()
-        detail = f"run_id={active.run_id[:12]}, slot={active.slot_name!r}" if active is not None else "lock contention"
-        return TickResult(ran=False, reason=f"Another run started concurrently ({detail}) -- skipping this tick to avoid an overlapping run.", reclaimed_run_ids=reclaimed_ids)
+        if active is not None:
+            return TickResult(
+                ran=False,
+                reason=(
+                    f"Another run is already in progress (run_id={active.run_id[:12]}, slot={active.slot_name!r}, "
+                    f"started {active.started_at.isoformat()}) -- skipping this tick to avoid an overlapping run."
+                ),
+                reclaimed_run_ids=reclaimed_ids,
+            )
+
+        session = current_market_session(now_ist)
+        if not session.is_weekday:
+            return TickResult(ran=False, reason=f"{now_ist.strftime('%A')} is not a trading day.", reclaimed_run_ids=reclaimed_ids)
+
+        due = schedule_config.due_slot(now=now_ist, run_store=run_store, run_date=run_date)
+        if due is None:
+            return TickResult(ran=False, reason="No configured slot is due at this time.", reclaimed_run_ids=reclaimed_ids)
+
+        run_id = RunRecord.new_id()
+        started = run_store.try_start_run(run_id=run_id, slot_name=due.name, run_date=run_date, started_at=now_utc)
+        if started is None:
+            # Lost a race against another process that started a run between
+            # this tick's earlier `active_lock()` check and now -- see
+            # `SchedulerRunStore.try_start_run`'s docstring. Correctness does
+            # not depend on this branch being reached often; it exists so a
+            # genuine race never silently produces two overlapping runs.
+            active = run_store.active_lock()
+            detail = f"run_id={active.run_id[:12]}, slot={active.slot_name!r}" if active is not None else "lock contention"
+            return TickResult(ran=False, reason=f"Another run started concurrently ({detail}) -- skipping this tick to avoid an overlapping run.", reclaimed_run_ids=reclaimed_ids)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 -- see comment above; no lock was acquired, nothing to release
+        return TickResult(ran=False, reason=f"Tick setup failed before any slot started: {type(exc).__name__}: {exc}", reclaimed_run_ids=())
 
     try:
         detail = _execute_slot(

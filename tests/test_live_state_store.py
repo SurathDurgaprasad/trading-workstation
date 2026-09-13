@@ -341,3 +341,22 @@ def test_critic_rejection_survives_a_reopened_connection(tmp_path):
     rejections = store2.list_critic_rejections()
     assert len(rejections) == 1
     assert rejections[0].verdict == "INSUFFICIENT_EVIDENCE"
+
+
+def test_integrity_check_reports_ok_for_a_healthy_database(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    assert store.integrity_check() == "ok"
+    store.close()
+
+
+def test_db_size_bytes_reflects_a_real_file(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    assert store.db_size_bytes() > 0
+    store.close()
+
+
+def test_wal_mode_is_enabled(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    mode = store._conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert mode.lower() == "wal"
+    store.close()

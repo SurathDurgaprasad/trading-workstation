@@ -25,6 +25,8 @@ either model needing to reference the other.
 
 import json
 import sqlite3
+
+from core import sqlite_util
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -73,7 +75,7 @@ def _report_from_dict(data: dict) -> MarketRegimeReport:
 class MarketRegimeStore:
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
-        self._conn = sqlite3.connect(self.db_path, isolation_level=None)
+        self._conn = sqlite_util.connect(self.db_path)
         self._conn.executescript(_SCHEMA)
 
     def close(self) -> None:

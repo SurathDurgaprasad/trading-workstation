@@ -13,6 +13,7 @@ latter, unchanged, for the lifetime view).
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from core.timeutil import as_utc_aware as _naive_utc
 from experiments.models import Experiment
 from experiments.store import ExperimentStore
 from learning.analysis import EvaluatedPrediction, _resolution_stats, _resolved_returns
@@ -28,17 +29,6 @@ class ExperimentComparison:
     win_rate: float | None
     average_return: float | None
     profit_factor: float | None
-
-
-def _naive_utc(value: datetime) -> datetime:
-    """Normalizes to a UTC-aware datetime regardless of whether `value`
-    arrived naive -- avoids the exact naive/aware comparison bug Phase 33
-    found in market.data_provider._to_timestamp / learning.regime.
-    classify_regime_at. This project's own predictions/experiments are
-    always created with an aware `datetime.now(timezone.utc)` in
-    practice, but a caller-constructed value (e.g. in a test) might not
-    be -- never assume."""
-    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 def compare_experiments(experiments: list[Experiment], items: list[EvaluatedPrediction], store: ExperimentStore, *, now: datetime | None = None) -> list[ExperimentComparison]:

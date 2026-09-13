@@ -153,11 +153,13 @@ def test_daily_report_does_not_record_forecasts_unless_forecasts_db_given(tmp_pa
     assert "Forecasts recorded" not in capsys.readouterr().out
 
 
-def test_daily_report_forecasts_db_records_one_forecast_per_symbol_and_is_duplicate_safe(tmp_path, capsys):
+def test_daily_report_forecasts_db_records_one_forecast_per_symbol_and_is_duplicate_safe(tmp_path, capsys, _isolated_cache_root):
+    _write_fresh_meta(_isolated_cache_root, "RELIANCE.NS")
+    _write_fresh_meta(_isolated_cache_root, "TCS.NS")
     args = parse_args([
         "daily-report", "--symbols", "RELIANCE.NS,TCS.NS", "--benchmark", "", "--top", "2",
         "--scanner-db", str(tmp_path / "scanner.db"), "--regime-db", str(tmp_path / "regime.db"),
-        "--forecasts-db", str(tmp_path / "forecasts.db"),
+        "--forecasts-db", str(tmp_path / "forecasts.db"), "--cache-root", str(_isolated_cache_root),
     ])
     run_daily_report_command(args)
     assert "Forecasts recorded this run: 2" in capsys.readouterr().out
@@ -180,50 +182,60 @@ def test_daily_report_forecasts_db_records_one_forecast_per_symbol_and_is_duplic
 # --- cache staleness (real incident: a symbol whose cache silently went stale --
 # still a cache HIT, so a forecast/report could be recorded against a stale
 # reference_price with no warning at all) --------------------------------------
+#
+# HARDENING NOTE (final-product-hardening phase): these tests previously
+# wrote directly into the REAL backtesting.cache.CACHE_ROOT (data/market/)
+# because report_cache_staleness's own `cache_root` parameter is a bound
+# default that main.py never threaded a value into -- monkeypatching the
+# module-level CACHE_ROOT name never reached it, so "fresh" in these tests
+# actually meant "the real RELIANCE.NS/TCS.NS cache files on disk happen
+# to still be within the 5-day threshold right now," which silently broke
+# every ~5 days as wall-clock time passed independent of anything these
+# tests controlled. Fixed properly, not patched around: `daily-report` now
+# accepts --cache-root (main.py), so these tests inject a fully isolated,
+# tmp_path-scoped cache root and control every symbol's own freshness
+# directly -- no dependency on real on-disk state, no future re-flake.
 
 
 @pytest.fixture
-def _stale_cache_symbol():
-    """Writes a REAL meta.json (backtesting.cache.CACHE_ROOT is a bound
-    default on report_cache_staleness, so monkeypatching the module-level
-    name would NOT reach it -- this exercises the real, default cache
-    root main.py itself uses, with a throwaway, obviously-test symbol
-    name, cleaned up in teardown)."""
+def _isolated_cache_root(tmp_path):
+    cache_root = tmp_path / "cache_root"
+    cache_root.mkdir()
+    return cache_root
+
+
+def _write_meta(cache_root, symbol: str, *, age: timedelta, interval: str = "1d") -> None:
     import json
     from datetime import timezone
-    from pathlib import Path
 
-    from backtesting.cache import CACHE_ROOT
-
-    symbol = "ZZ_STALE_TEST_SYMBOL"
-    symbol_dir = CACHE_ROOT / symbol
+    retrieved_at = datetime.now(timezone.utc) - age
+    symbol_dir = cache_root / symbol
     symbol_dir.mkdir(parents=True, exist_ok=True)
-    old = datetime.now(timezone.utc) - timedelta(days=13)
-    meta_path = symbol_dir / "1d.meta.json"
-    meta_path.write_text(json.dumps({
-        "symbol": symbol, "interval": "1d", "period": "1y",
-        "start": (old - timedelta(days=365)).isoformat(), "end": old.isoformat(),
-        "retrieved_at": old.isoformat(), "bar_count": 250,
+    (symbol_dir / f"{interval}.meta.json").write_text(json.dumps({
+        "symbol": symbol, "interval": interval, "period": "1y",
+        "start": (retrieved_at - timedelta(days=365)).isoformat(), "end": retrieved_at.isoformat(),
+        "retrieved_at": retrieved_at.isoformat(), "bar_count": 250,
     }))
-    try:
-        yield symbol
-    finally:
-        for f in symbol_dir.glob("*"):
-            f.unlink()
-        symbol_dir.rmdir()
 
 
-def test_daily_report_warns_and_skips_forecast_for_stale_cached_symbol(tmp_path, capsys, _stale_cache_symbol):
+def _write_fresh_meta(cache_root, symbol: str, interval: str = "1d") -> None:
+    _write_meta(cache_root, symbol, age=timedelta(hours=1), interval=interval)
+
+
+def test_daily_report_warns_and_skips_forecast_for_stale_cached_symbol(tmp_path, capsys, _isolated_cache_root):
+    stale_symbol = "ZZ_STALE_TEST_SYMBOL"
+    _write_fresh_meta(_isolated_cache_root, "RELIANCE.NS")
+    _write_meta(_isolated_cache_root, stale_symbol, age=timedelta(days=13))
     args = parse_args([
-        "daily-report", "--symbols", f"RELIANCE.NS,{_stale_cache_symbol}", "--benchmark", "", "--top", "2",
+        "daily-report", "--symbols", f"RELIANCE.NS,{stale_symbol}", "--benchmark", "", "--top", "2",
         "--scanner-db", str(tmp_path / "scanner.db"), "--regime-db", str(tmp_path / "regime.db"),
-        "--forecasts-db", str(tmp_path / "forecasts.db"),
+        "--forecasts-db", str(tmp_path / "forecasts.db"), "--cache-root", str(_isolated_cache_root),
     ])
     run_daily_report_command(args)
 
     output = capsys.readouterr().out
     assert "DATA STALENESS WARNING" in output
-    assert _stale_cache_symbol in output
+    assert stale_symbol in output
     assert "STALE DATA" in output
     assert "1 skipped -- stale data" in output
     assert "Forecasts recorded this run: 1 " in output
@@ -232,15 +244,18 @@ def test_daily_report_warns_and_skips_forecast_for_stale_cached_symbol(tmp_path,
 
     store = DirectionForecastStore(tmp_path / "forecasts.db")
     recorded_symbols = {f.symbol for f in store.list_forecasts()}
-    assert _stale_cache_symbol not in recorded_symbols
+    assert stale_symbol not in recorded_symbols
     assert "RELIANCE.NS" in recorded_symbols
     store.close()
 
 
-def test_daily_report_no_staleness_warning_when_cache_is_fresh(tmp_path, capsys):
+def test_daily_report_no_staleness_warning_when_cache_is_fresh(tmp_path, capsys, _isolated_cache_root):
+    _write_fresh_meta(_isolated_cache_root, "RELIANCE.NS")
+    _write_fresh_meta(_isolated_cache_root, "TCS.NS")
     args = parse_args([
         "daily-report", "--symbols", "RELIANCE.NS,TCS.NS", "--benchmark", "", "--top", "2",
         "--scanner-db", str(tmp_path / "scanner.db"), "--regime-db", str(tmp_path / "regime.db"),
+        "--cache-root", str(_isolated_cache_root),
     ])
     run_daily_report_command(args)
 

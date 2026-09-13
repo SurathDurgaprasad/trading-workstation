@@ -12,6 +12,8 @@ prediction history.
 """
 
 import sqlite3
+
+from core import sqlite_util
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,7 +41,7 @@ def _now() -> str:
 class ScanHistoryStore:
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
-        self._conn = sqlite3.connect(self.db_path, isolation_level=None)
+        self._conn = sqlite_util.connect(self.db_path)
         self._conn.executescript(_SCHEMA)
 
     def close(self) -> None:

@@ -21,6 +21,7 @@ import pandas as pd
 
 from backtesting.execution import OpenPosition, check_exit
 from backtesting.trade import ExitReason
+from core.timeutil import to_naive
 from critic.models import CriticAssessment
 from decision_engine.models import Decision, DecisionLabel
 from market.data_provider import MarketDataError, MarketDataProvider
@@ -135,7 +136,7 @@ def evaluate_prediction(
     # offset of a few hours can only misclassify a bar right at a
     # day-boundary edge case -- a real, disclosed residual risk, not a
     # silent one.
-    entry_time = prediction.entry_time.replace(tzinfo=None) if prediction.entry_time.tzinfo is not None else prediction.entry_time
+    entry_time = to_naive(prediction.entry_time)
     subsequent = frame[frame.index > entry_time]
 
     if subsequent.empty:
@@ -270,8 +271,9 @@ def _evaluation(
 
 
 def _naive(value) -> datetime:
-    if not isinstance(value, datetime):
-        value = pd.Timestamp(value).to_pydatetime()
-    if value.tzinfo is not None:
-        value = value.replace(tzinfo=None)
-    return value
+    """Market/bar-data convention -- see core.timeutil's own module
+    docstring for the historical bug class this centralizes. This file
+    previously had TWO independent inline implementations of this exact
+    logic (this one, and the entry_time normalization above) -- both now
+    delegate to the same shared function."""
+    return to_naive(value)

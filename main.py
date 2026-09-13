@@ -1434,23 +1434,34 @@ def run_daily_report_command(args: argparse.Namespace) -> None:
     # weeks ago) still returns a cache HIT, so `candidate.as_of` (and the
     # reference_price a forecast records) can be quietly stale even though
     # nothing about the scan itself fails or warns. Reuses the SAME 5-day
-    # (432000s) threshold critic/config.py's own DATA_FRESHNESS check
-    # already uses (sized to survive a long weekend/holiday without a false
-    # positive) -- not a new number invented for this check.
-    from backtesting.cache import report_cache_staleness
+    # threshold critic/config.py's own DATA_FRESHNESS check already uses
+    # (sized to survive a long weekend/holiday without a false positive) --
+    # imported directly, not a second hardcoded literal that only claims
+    # to match it (a real drift risk found during final-product hardening:
+    # this used to be an independent `STALE_DATA_END_SECONDS = 432_000.0`
+    # that would silently stop matching critic/config.py's own value if
+    # that one were ever tuned).
+    from pathlib import Path
 
-    STALE_DATA_END_SECONDS = 432_000.0
+    from backtesting.cache import CACHE_ROOT, report_cache_staleness
+    from critic.config import CriticConfig
+
+    stale_data_end_seconds = CriticConfig().max_data_staleness_seconds
+    cache_root = Path(args.cache_root) if getattr(args, "cache_root", None) else CACHE_ROOT
     stale_symbols: set[str] = set()
-    staleness_records = report_cache_staleness([c.symbol for c in scan_report.candidates], interval=args.interval)
+    staleness_records = report_cache_staleness([c.symbol for c in scan_report.candidates], interval=args.interval, cache_root=cache_root)
     now_utc = datetime.now(timezone.utc)
     for record in staleness_records:
         if record.data_end is None:
             continue
-        data_end = record.data_end if record.data_end.tzinfo is not None else record.data_end.replace(tzinfo=timezone.utc)
-        if (now_utc - data_end).total_seconds() > STALE_DATA_END_SECONDS:
+        from core.timeutil import as_utc_aware
+
+        data_end = as_utc_aware(record.data_end)
+        if (now_utc - data_end).total_seconds() > stale_data_end_seconds:
             stale_symbols.add(record.symbol)
     if stale_symbols:
-        print(f"\n*** DATA STALENESS WARNING: {len(stale_symbols)} candidate(s) have cached data older than 5 days -- direction/forecast for these is NOT based on current market conditions: {', '.join(sorted(stale_symbols))} ***")
+        stale_days_label = f"{stale_data_end_seconds / 86_400:.1f} days"
+        print(f"\n*** DATA STALENESS WARNING: {len(stale_symbols)} candidate(s) have cached data older than {stale_days_label} -- direction/forecast for these is NOT based on current market conditions: {', '.join(sorted(stale_symbols))} ***")
         print("*** Run `python main.py cache-status` to check, and delete+refetch data/market/<SYMBOL>/ for any symbol shown above before trusting this report. ***")
 
     regime_report = build_market_regime_report(
@@ -3764,6 +3775,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     daily_report_parser.add_argument("--forecast-horizon-bars", type=int, default=5, help="Bars after as_of before an unresolved forecast is checked for resolution (default: 5).")
     daily_report_parser.add_argument("--top", type=int, default=10, help="Print only the top N ranked candidates (default: 10).")
     daily_report_parser.add_argument("--resilient", action="store_true", help="Wrap the market-data provider with timeout/retry-with-backoff/circuit-breaker protection (default: off).")
+    daily_report_parser.add_argument("--cache-root", type=str, default=None, help="Override the market-data cache root used for the staleness check (default: backtesting.cache.CACHE_ROOT). Exists mainly for test isolation -- the real cache root is what every normal invocation uses.")
 
     research_parser = subparsers.add_parser(
         "research",

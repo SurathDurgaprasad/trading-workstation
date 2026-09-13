@@ -11,6 +11,8 @@ disk, not in a variable.
 """
 
 import sqlite3
+
+from core import sqlite_util
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,7 +37,7 @@ CREATE INDEX IF NOT EXISTS idx_scheduler_runs_status ON scheduler_runs(status);
 class SchedulerRunStore:
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
-        self._conn = sqlite3.connect(self.db_path, isolation_level=None)
+        self._conn = sqlite_util.connect(self.db_path)
         self._conn.executescript(_SCHEMA)
 
     def close(self) -> None:
@@ -176,10 +178,11 @@ class SchedulerRunStore:
         integrity_check` an operator can run after days/weeks of
         unattended `schedule loop` operation, without writing raw SQL.
         Returns "ok" for a healthy database; anything else is SQLite's
-        own list of corruption findings, joined by "; "."""
-        rows = self._conn.execute("PRAGMA integrity_check").fetchall()
-        results = [row[0] for row in rows]
-        return "; ".join(results) if results else "ok"
+        own list of corruption findings, joined by "; ". Final-product-
+        hardening phase: now delegates to core.sqlite_util (the same
+        capability was previously implemented only here; every other
+        store can now offer it too without re-deriving this)."""
+        return sqlite_util.integrity_check(self._conn)
 
     def db_size_bytes(self) -> int:
-        return Path(self.db_path).stat().st_size if Path(self.db_path).exists() else 0
+        return sqlite_util.db_size_bytes(self.db_path)

@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
+from core.timeutil import to_naive
 from market.data_provider import MarketDataError, MarketDataProvider
 from market.indicators import compute_indicator_series
 from market_data.universe import MarketUniverse
@@ -313,9 +314,6 @@ def _finalize_candidate(item: _Passed, sector_strength_score: float | None, conf
 
 
 def _as_of(series: pd.DataFrame) -> datetime:
-    value = series.index[-1]
-    if not isinstance(value, datetime):
-        value = pd.Timestamp(value).to_pydatetime()
-    if value.tzinfo is not None:
-        value = value.replace(tzinfo=None)
-    return value
+    """Market/bar-data convention -- see core.timeutil's own module
+    docstring for the historical bug class this centralizes."""
+    return to_naive(series.index[-1])

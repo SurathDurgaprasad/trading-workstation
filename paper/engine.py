@@ -40,6 +40,7 @@ import pandas as pd
 from backtesting.costs import CostModel
 from backtesting.execution import EXECUTION_MODEL_VERSION, OpenPosition, check_exit, close_trade
 from backtesting.trade import ExitReason
+from core.timeutil import to_naive
 from paper.errors import OutOfOrderBarError
 from paper.models import (
     FillKind,
@@ -76,9 +77,9 @@ def _new_id() -> str:
 
 def _naive(ts: datetime) -> datetime:
     """Strips tzinfo so bar timestamps compare/store consistently regardless
-    of whether the data provider returned tz-aware or tz-naive values — same
-    normalization market/context.py already applies to `as_of`."""
-    return ts.replace(tzinfo=None) if ts.tzinfo is not None else ts
+    of whether the data provider returned tz-aware or tz-naive values --
+    market/bar-data convention, see core.timeutil's own module docstring."""
+    return to_naive(ts)
 
 
 class BarOutcome(str, Enum):

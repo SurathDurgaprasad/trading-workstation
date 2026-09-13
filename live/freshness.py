@@ -15,6 +15,8 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from core.timeutil import to_naive
+
 _INTERVAL_PATTERN = re.compile(r"^(\d+)(m|h|d|wk|mo)$")
 
 _UNIT_TO_TIMEDELTA_KWARGS = {
@@ -80,7 +82,9 @@ class FreshnessPolicy:
 
 
 def _naive(ts: datetime) -> datetime:
-    return ts.replace(tzinfo=None) if ts.tzinfo is not None else ts
+    """Market/bar-data convention -- see core.timeutil's own module
+    docstring for the historical bug class this centralizes."""
+    return to_naive(ts)
 
 
 DEFAULT_FRESHNESS_POLICY = FreshnessPolicy()

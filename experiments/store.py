@@ -7,6 +7,8 @@ annotated) is always a NEW row in experiment_events.
 """
 
 import sqlite3
+
+from core import sqlite_util
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -37,7 +39,7 @@ CREATE INDEX IF NOT EXISTS idx_experiment_events_experiment_id ON experiment_eve
 class ExperimentStore:
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
-        self._conn = sqlite3.connect(self.db_path, isolation_level=None)
+        self._conn = sqlite_util.connect(self.db_path)
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
 

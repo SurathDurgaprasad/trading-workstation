@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel, ConfigDict
 
+from core.timeutil import to_naive
 from decision_engine.direction import DirectionalAssessment, DirectionLabel
 from market.data_provider import MarketDataError, MarketDataProvider
 
@@ -124,7 +125,7 @@ def evaluate_forecast(
         )
 
     frame = ohlcv.to_dataframe()
-    as_of = forecast.as_of.replace(tzinfo=None) if forecast.as_of.tzinfo is not None else forecast.as_of
+    as_of = to_naive(forecast.as_of)
     subsequent = frame[frame.index > as_of]
 
     if subsequent.empty:

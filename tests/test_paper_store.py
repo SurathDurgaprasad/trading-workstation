@@ -107,3 +107,22 @@ def test_signal_deserializes_an_old_pre_decision_id_json_blob():
     )
     signal = Signal.model_validate_json(old_style_json)
     assert signal.decision_id is None
+
+
+def test_integrity_check_reports_ok_for_a_healthy_database(tmp_path):
+    store = PaperStore(tmp_path / "paper.db")
+    assert store.integrity_check() == "ok"
+    store.close()
+
+
+def test_db_size_bytes_reflects_a_real_file(tmp_path):
+    store = PaperStore(tmp_path / "paper.db")
+    assert store.db_size_bytes() > 0
+    store.close()
+
+
+def test_wal_mode_is_enabled(tmp_path):
+    store = PaperStore(tmp_path / "paper.db")
+    mode = store._conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert mode.lower() == "wal"
+    store.close()
