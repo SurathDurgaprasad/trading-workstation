@@ -133,6 +133,15 @@ pytest
 
 Some tests use cached historical market data (`data/market/`) or a downloaded Dhan instrument master (`data/dhan/`) that are intentionally not committed to this repository (redistributing bulk third-party market data publicly is outside the scope of what this project wants to do). Those tests skip cleanly when the cache is absent; the caching layer will re-fetch on demand where the code path calls for it. No test requires real Dhan credentials or a live connection.
 
+## Documentation
+
+- [`INSTALLATION.md`](INSTALLATION.md) — clone to running system, step by step
+- [`USER_GUIDE.md`](USER_GUIDE.md) — task-oriented command reference
+- [`OPERATIONS_GUIDE.md`](OPERATIONS_GUIDE.md) — unattended/scheduled operation, monitoring, backup, restart
+- [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — symptom → cause → recovery for common failure scenarios
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — component map, persistence, datetime/data-quality policy, safety invariants
+- [`SECURITY.md`](SECURITY.md) — credential handling, live-order-blocking evidence, dependency audit
+
 ## Project status
 
 Development has proceeded in numbered phases, each with its own forensic audit and report — see [`docs/PHASE_HISTORY.md`](docs/PHASE_HISTORY.md) for the full index, including the original phase reports preserved under `docs/phases/`. As of Phase 27, all 793 tests pass standalone — the full suite has no external-service dependency (a previously Ollama-dependent test was corrected to mock that dependency, matching its actual intent; see the Phase 17 report). The human-operated workstation (CLI, dashboard, MCP, approval workflow, kill switch, reconciliation) and the real Dhan market-data adapter are both code-complete, tested, and — as of Phase 16 — verified against the live Dhan service.

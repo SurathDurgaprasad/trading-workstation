@@ -7,13 +7,31 @@
 # direct-dependency contract, not a full `pip freeze`.
 
 langgraph==1.2.4
-langchain==1.3.4
+langchain==1.3.9
+# Final-product-hardening: bumped from 1.3.4 (PYSEC-2026-2192, a
+# filesystem-path-confinement issue in langchain's agent file-search
+# middleware and prompt/chain-config loaders -- this project imports
+# only langchain_core/langchain_text_splitters/langchain_community/
+# langchain_chroma, never those specific vulnerable components, so this
+# was not actually exploitable here, but the patch bump is low-risk and
+# closes it anyway). See SECURITY.md for the full dependency-audit
+# finding, including chromadb (below), which pip-audit also flags with
+# no available fix version.
 langchain-core==1.4.1
 langchain-community==0.4.2
 langchain-chroma==1.1.0
 langchain-ollama==1.1.0
 langchain-text-splitters==1.1.2
 chromadb==1.5.9
+# 4 known CVEs (PYSEC-2026-311/3813/3814/3815) exist for this version,
+# all specifically in chromadb's networked, multi-tenant HTTP server
+# mode (/api/v2/tenants/.../collections endpoints, RBAC authorization).
+# This project uses chromadb exclusively as an embedded, local,
+# file-backed store (langchain_chroma.Chroma(persist_directory=...) --
+# see rag/retriever.py, rag/vector_store.py) -- the vulnerable HTTP
+# server is never started, so these CVEs are not exploitable in this
+# deployment. No fix version is listed by pip-audit; left pinned rather
+# than bumped speculatively. See SECURITY.md.
 pydantic==2.13.4
 yfinance==1.4.1
 pandas==3.0.3
