@@ -140,6 +140,35 @@ def test_kill_switch_survives_a_reopened_connection(tmp_path):
     assert reason == "persisted halt"
 
 
+def test_activate_kill_switch_logs_a_warning_with_the_reason(tmp_path, caplog):
+    """Autonomous hardening cycle 4: a kill-switch activation previously
+    left zero trace in application logs -- only a row change in this
+    store's own db, invisible to an operator watching a --log-file
+    stream rather than actively polling health/readiness-check. This is
+    the ONE place both the CLI (main.py, directly) and the dashboard
+    (via live.workstation.activate_kill_switch) funnel through, so
+    logging here covers every current and future caller."""
+    import logging
+
+    store = LiveStateStore(tmp_path / "state.db")
+    with caplog.at_level(logging.WARNING, logger="live.state_store"):
+        store.activate_kill_switch(reason="simulated provider outage")
+
+    assert any("KILL SWITCH ACTIVATED" in r.message and "simulated provider outage" in r.message for r in caplog.records)
+
+
+def test_reset_kill_switch_logs_a_warning(tmp_path, caplog):
+    import logging
+
+    store = LiveStateStore(tmp_path / "state.db")
+    store.activate_kill_switch(reason="test halt")
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="live.state_store"):
+        store.reset_kill_switch()
+
+    assert any("KILL SWITCH RESET" in r.message for r in caplog.records)
+
+
 # --- feed status (Phase 15) ---------------------------------------------------
 
 

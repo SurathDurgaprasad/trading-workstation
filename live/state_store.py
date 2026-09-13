@@ -41,6 +41,8 @@ Three tables:
     rejection would leave no trace anywhere.
 """
 
+import logging
+
 from core import sqlite_util
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -48,6 +50,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from strategy.signal import Signal
+
+logger = logging.getLogger(__name__)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS pending_approvals (
@@ -296,6 +300,17 @@ class LiveStateStore:
         return (bool(row[0]), row[1], row[2])
 
     def activate_kill_switch(self, reason: str = "manual activation") -> None:
+        # Autonomous hardening cycle 4: this is the ONE place every kill-
+        # switch activation passes through (main.py's CLI path calls this
+        # directly; the dashboard's POST handler calls it via
+        # live.workstation.activate_kill_switch) -- logging it HERE, not at
+        # each caller, guarantees it is captured regardless of which
+        # surface triggered it, present or future. Previously this safety
+        # event left NO trace in application logs at all -- only a row
+        # change in this store's own db, invisible to an operator watching
+        # a `--log-file`-backed `schedule loop`/dashboard log stream rather
+        # than actively polling `health`/`readiness-check`.
+        logger.warning("KILL SWITCH ACTIVATED: %s (db=%s)", reason, self.db_path)
         self._conn.execute(
             "INSERT INTO kill_switch (id, active, activated_at, reason, updated_at) VALUES (1, 1, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET active=1, activated_at=excluded.activated_at, reason=excluded.reason, updated_at=excluded.updated_at",
@@ -303,6 +318,7 @@ class LiveStateStore:
         )
 
     def reset_kill_switch(self) -> None:
+        logger.warning("KILL SWITCH RESET (db=%s)", self.db_path)
         self._conn.execute(
             "INSERT INTO kill_switch (id, active, activated_at, reason, updated_at) VALUES (1, 0, NULL, NULL, ?) "
             "ON CONFLICT(id) DO UPDATE SET active=0, activated_at=NULL, reason=NULL, updated_at=excluded.updated_at",

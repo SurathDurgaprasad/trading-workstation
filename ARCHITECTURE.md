@@ -157,3 +157,8 @@ it already used for NaN rows.
 - **The kill switch is read fresh from disk on every check** — zero
   caching, so a restart can never silently "forget" an active kill
   switch.
+- **Every kill-switch activation/reset is logged** — `LiveStateStore.
+  activate_kill_switch`/`reset_kill_switch` (the one choke point every
+  caller, CLI or dashboard, goes through) emits a `logger.warning`, so
+  the event is visible in a `--log-file`-backed log stream, not only by
+  actively polling `health`/`readiness-check`.
