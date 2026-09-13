@@ -42,3 +42,27 @@ class InvalidPositionTransitionError(Exception):
             f"Cannot update position {position_id!r}: it is already CLOSED "
             f"(attempted to set status={attempted_status!r}). CLOSED is a terminal state."
         )
+
+
+class InvalidOrderTransitionError(Exception):
+    """Autonomous hardening cycle: same rationale as
+    InvalidPositionTransitionError, for PaperOrder. OrderStatus is
+    PENDING/FILLED (paper/models.py) -- FILLED is terminal, there is no
+    domain-supported path back to PENDING, and an order cannot be
+    filled twice. Today's ONLY caller (paper/engine.py's
+    _fill_pending_order) is already protected against a double-fill by
+    process_bar's own transaction wrapping + get_pending_order's
+    status='PENDING' filter (a second concurrent caller would see the
+    order as already FILLED and never reach update_order for it at
+    all) -- this guard is deliberate defense-in-depth at the data
+    layer, matching the exact same posture PaperStore.update_position
+    already takes, so a FUTURE caller (not just today's one) cannot
+    silently corrupt an order's terminal state either."""
+
+    def __init__(self, *, order_id: str, attempted_status: str):
+        self.order_id = order_id
+        self.attempted_status = attempted_status
+        super().__init__(
+            f"Cannot update order {order_id!r}: it is already FILLED "
+            f"(attempted to set status={attempted_status!r}). FILLED is a terminal state."
+        )

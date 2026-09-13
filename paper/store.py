@@ -6,8 +6,13 @@ transactions (spec §10) — no ORM, no ambient/implicit transaction magic.
 Every row stores a full `data_json` (the object's own model_dump_json())
 alongside a handful of scalar columns needed for lookups (symbol, status,
 signal_id). Reconstruction always goes through the real Pydantic model's
-own validator (`Model.model_validate_json(...)`) — this store never
-hand-builds a dict that bypasses the model's own validation.
+own validator, via `core.sqlite_util.parse_model_json` (a thin wrapper
+around `Model.model_validate_json(...)` that turns a malformed row -- a
+real, if rare, reachable failure mode found by an autonomous hardening
+cycle's SQLite-adversarial-resilience audit -- into a clear
+`MalformedRowError` instead of a raw, uncaught `pydantic.ValidationError`)
+— this store never hand-builds a dict that bypasses the model's own
+validation.
 """
 
 import json
@@ -19,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from backtesting.trade import Trade
-from paper.errors import InvalidPositionTransitionError
+from paper.errors import InvalidOrderTransitionError, InvalidPositionTransitionError
 from paper.models import JournalEntry, JournalOutcome, PaperFill, PaperOrder, Position
 from risk.account import Account
 from risk.contracts import RiskDecision
@@ -171,7 +176,7 @@ class PaperStore:
 
     def get_signal(self, signal_id: str) -> Signal | None:
         row = self._conn.execute("SELECT data_json FROM signals WHERE signal_id = ?", (signal_id,)).fetchone()
-        return Signal.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(Signal, row[0], row_identifier=signal_id) if row else None
 
     # --- risk decisions ------------------------------------------------------
 
@@ -186,7 +191,7 @@ class PaperStore:
         row = self._conn.execute(
             "SELECT data_json FROM risk_decisions WHERE risk_decision_id = ?", (risk_decision_id,)
         ).fetchone()
-        return RiskDecision.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(RiskDecision, row[0], row_identifier=risk_decision_id) if row else None
 
     # --- orders --------------------------------------------------------------
 
@@ -197,17 +202,29 @@ class PaperStore:
         )
 
     def update_order(self, order: PaperOrder) -> None:
-        self._conn.execute(
-            "UPDATE paper_orders SET status = ?, data_json = ? WHERE order_id = ?",
+        """Autonomous hardening cycle: FILLED is PaperOrder's own
+        terminal state (see InvalidOrderTransitionError's own
+        docstring for the full rationale, mirroring
+        update_position's identical guard) -- `WHERE status != 'FILLED'`
+        rather than trusting the caller. A 0-row update means an
+        order that is either already FILLED or does not exist; either
+        way, silently doing nothing would hide a real bug."""
+        cursor = self._conn.execute(
+            "UPDATE paper_orders SET status = ?, data_json = ? WHERE order_id = ? AND status != 'FILLED'",
             (order.status.value, order.model_dump_json(), order.order_id),
         )
+        if cursor.rowcount == 0:
+            existing = self._conn.execute("SELECT 1 FROM paper_orders WHERE order_id = ?", (order.order_id,)).fetchone()
+            if existing is None:
+                raise ValueError(f"Cannot update order {order.order_id!r}: no such order exists.")
+            raise InvalidOrderTransitionError(order_id=order.order_id, attempted_status=order.status.value)
 
     def get_pending_order(self, symbol: str) -> PaperOrder | None:
         row = self._conn.execute(
             "SELECT data_json FROM paper_orders WHERE symbol = ? AND status = 'PENDING' ORDER BY created_at LIMIT 1",
             (symbol,),
         ).fetchone()
-        return PaperOrder.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(PaperOrder, row[0], row_identifier=f"symbol={symbol}") if row else None
 
     def list_pending_orders(self) -> list[PaperOrder]:
         """Every symbol's pending order, not just one -- needed to advance
@@ -219,7 +236,7 @@ class PaperStore:
         rows = self._conn.execute(
             "SELECT data_json FROM paper_orders WHERE status = 'PENDING' ORDER BY created_at"
         ).fetchall()
-        return [PaperOrder.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(PaperOrder, r[0], row_identifier="list_pending_orders") for r in rows]
 
     # --- fills -----------------------------------------------------------------
 
@@ -231,7 +248,7 @@ class PaperStore:
 
     def get_fill(self, fill_id: str) -> PaperFill | None:
         row = self._conn.execute("SELECT data_json FROM paper_fills WHERE fill_id = ?", (fill_id,)).fetchone()
-        return PaperFill.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(PaperFill, row[0], row_identifier=fill_id) if row else None
 
     # --- positions ---------------------------------------------------------------
 
@@ -269,15 +286,15 @@ class PaperStore:
             "SELECT data_json FROM positions WHERE symbol = ? AND status = 'OPEN' ORDER BY updated_at LIMIT 1",
             (symbol,),
         ).fetchone()
-        return Position.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(Position, row[0], row_identifier=f"symbol={symbol}") if row else None
 
     def get_position(self, position_id: str) -> Position | None:
         row = self._conn.execute("SELECT data_json FROM positions WHERE position_id = ?", (position_id,)).fetchone()
-        return Position.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(Position, row[0], row_identifier=position_id) if row else None
 
     def list_positions(self) -> list[Position]:
         rows = self._conn.execute("SELECT data_json FROM positions ORDER BY updated_at").fetchall()
-        return [Position.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(Position, r[0], row_identifier="list_positions") for r in rows]
 
     # --- trades ------------------------------------------------------------------
 
@@ -289,11 +306,11 @@ class PaperStore:
 
     def list_trades(self) -> list[Trade]:
         rows = self._conn.execute("SELECT data_json FROM trades ORDER BY created_at").fetchall()
-        return [Trade.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(Trade, r[0], row_identifier="list_trades") for r in rows]
 
     def sum_realized_trade_pnl(self) -> float:
         row = self._conn.execute("SELECT data_json FROM trades").fetchall()
-        return sum(Trade.model_validate_json(r[0]).net_pnl for r in row)
+        return sum(sqlite_util.parse_model_json(Trade, r[0], row_identifier="sum_realized_trade_pnl").net_pnl for r in row)
 
     # --- journal -----------------------------------------------------------------
 
@@ -314,17 +331,17 @@ class PaperStore:
         row = self._conn.execute(
             "SELECT data_json FROM journal_entries WHERE signal_id = ?", (signal_id,)
         ).fetchone()
-        return JournalEntry.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(JournalEntry, row[0], row_identifier=f"signal_id={signal_id}") if row else None
 
     def list_journal_entries(self) -> list[JournalEntry]:
         rows = self._conn.execute("SELECT data_json FROM journal_entries ORDER BY created_at").fetchall()
-        return [JournalEntry.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(JournalEntry, r[0], row_identifier="list_journal_entries") for r in rows]
 
     # --- account (single row, always id=1) ----------------------------------------
 
     def get_account(self) -> Account | None:
         row = self._conn.execute("SELECT data_json FROM account WHERE id = 1").fetchone()
-        return Account.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(Account, row[0], row_identifier="account") if row else None
 
     def save_account(self, account: Account) -> None:
         self._conn.execute(

@@ -190,3 +190,112 @@ def test_schema_version_is_set_on_a_fresh_database(tmp_path):
     store = PaperStore(tmp_path / "paper.db")
     assert store.schema_version() == PaperStore.CURRENT_SCHEMA_VERSION
     store.close()
+
+
+# --- autonomous hardening cycle: PaperOrder terminal-state guard -----------
+
+
+def _order(*, signal_id: str, **overrides):
+    from paper.models import OrderStatus, PaperOrder
+
+    base = dict(
+        order_id="o1", signal_id=signal_id, symbol="TEST", side=Side.LONG, quantity=1,
+        requested_price=100.0, status=OrderStatus.PENDING, created_at=datetime(2026, 1, 1),
+        stop_price=95.0, target_price=110.0,
+    )
+    base.update(overrides)
+    return PaperOrder(**base)
+
+
+def _store_with_a_saved_order():
+    """A PaperStore with one real signal + one PENDING order referencing
+    it -- paper_orders.signal_id is a real foreign key, so a bare
+    PaperOrder can't be saved without a matching signals row."""
+    store = PaperStore(":memory:")
+    signal = _signal()
+    store.save_signal(signal, strategy_version="1.0")
+    signal_id = signal.stable_id()
+    store.save_order(_order(signal_id=signal_id))
+    return store, signal_id
+
+
+def test_update_order_allows_a_normal_pending_to_filled_transition():
+    from paper.models import OrderStatus
+
+    store, signal_id = _store_with_a_saved_order()
+
+    store.update_order(_order(signal_id=signal_id, status=OrderStatus.FILLED))
+
+    row = store._conn.execute("SELECT status FROM paper_orders WHERE order_id = ?", ("o1",)).fetchone()
+    assert row[0] == "FILLED"
+
+
+def test_update_order_rejects_reverting_a_filled_order_to_pending():
+    from paper.errors import InvalidOrderTransitionError
+    from paper.models import OrderStatus
+
+    store, signal_id = _store_with_a_saved_order()
+    store.update_order(_order(signal_id=signal_id, status=OrderStatus.FILLED))
+
+    with pytest.raises(InvalidOrderTransitionError):
+        store.update_order(_order(signal_id=signal_id, status=OrderStatus.PENDING))
+
+
+def test_update_order_rejects_a_second_fill_of_an_already_filled_order():
+    from paper.errors import InvalidOrderTransitionError
+    from paper.models import OrderStatus
+
+    store, signal_id = _store_with_a_saved_order()
+    store.update_order(_order(signal_id=signal_id, status=OrderStatus.FILLED))
+
+    with pytest.raises(InvalidOrderTransitionError):
+        store.update_order(_order(signal_id=signal_id, status=OrderStatus.FILLED))
+
+
+def test_update_order_on_a_nonexistent_order_raises_value_error():
+    store = PaperStore(":memory:")
+
+    with pytest.raises(ValueError, match="no such order"):
+        store.update_order(_order(signal_id="does-not-exist", order_id="does-not-exist"))
+
+
+# --- autonomous hardening cycle: malformed data_json on read ----------------
+
+
+def test_a_malformed_position_row_raises_a_clear_error_not_a_raw_pydantic_traceback():
+    """Real, previously-unguarded gap found by an SQLite-adversarial-
+    resilience audit: every store's own list_*/get_* methods called the
+    Pydantic model's model_validate_json() directly, unwrapped -- a row
+    whose data_json fails validation (external tampering, low-level row
+    corruption, a genuine bug -- NOT a schema-evolution scenario, since
+    this project's own convention is additive-optional-fields, see this
+    file's own test_journal_entry_deserializes_an_old_pre_decision_id_json_blob)
+    would raise a raw, uncaught pydantic.ValidationError straight out of
+    the store. Simulates a real corrupted row by writing one directly,
+    bypassing save_position's own validated-model-in path entirely."""
+    from core.sqlite_util import MalformedRowError
+
+    store = PaperStore(":memory:")
+    store._conn.execute(
+        "INSERT INTO positions (position_id, symbol, status, signal_id, data_json, updated_at) VALUES (?,?,?,?,?,?)",
+        ("p1", "TEST", "OPEN", "s1", '{"position_id": "p1"}', "2026-01-01T00:00:00+00:00"),  # missing every other required field
+    )
+
+    with pytest.raises(MalformedRowError) as exc_info:
+        store.get_position("p1")
+
+    assert "Position" in str(exc_info.value)
+    assert "p1" in str(exc_info.value)
+
+
+def test_a_malformed_row_in_a_list_query_also_raises_the_clear_error():
+    from core.sqlite_util import MalformedRowError
+
+    store = PaperStore(":memory:")
+    store._conn.execute(
+        "INSERT INTO positions (position_id, symbol, status, signal_id, data_json, updated_at) VALUES (?,?,?,?,?,?)",
+        ("p1", "TEST", "OPEN", "s1", "not even valid json", "2026-01-01T00:00:00+00:00"),
+    )
+
+    with pytest.raises(MalformedRowError):
+        store.list_positions()
