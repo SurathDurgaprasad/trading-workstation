@@ -20,6 +20,13 @@ The only genuinely new logic here is SCHEDULING: given a chronological
 list of candidate signal events across many symbols, decide which are
 accepted into a capital- and concurrency-constrained portfolio, and
 compute the resulting realized-P&L/equity/concentration picture.
+
+H_MEANREV_012 (docs/research/H_MEANREV_012_SIGNAL_STRENGTH_SELECTION_
+PREREGISTRATION.md) extends this module with an injectable candidate-
+selection strategy (schedule_portfolio_ranked) rather than duplicating
+the simulator: schedule_portfolio's own chronological/alphabetical
+order remains the frozen control (Candidate A), reusing the identical
+accept/reject engine unchanged.
 """
 
 from dataclasses import dataclass, field
@@ -72,7 +79,7 @@ class PortfolioSchedulingResult:
     max_concurrent_positions_observed: int = 0
 
 
-def schedule_portfolio(
+def _run_schedule(
     datasets: dict[str, SymbolDataset],
     events: list[CandidateEntryEvent],
     *,
@@ -83,8 +90,13 @@ def schedule_portfolio(
     cost_model: CostModel,
 ) -> PortfolioSchedulingResult:
     """Pure function, deterministic given its inputs -- no randomness, no
-    I/O. Walks `events` in the chronological order collect_candidate_
-    events already produced. Before considering each candidate, any
+    I/O. Walks `events` in WHATEVER order the caller supplies (this is
+    the one piece of behavior H_MEANREV_012's own candidate-selection
+    strategies -- schedule_portfolio's chronological/alphabetical order,
+    schedule_portfolio_ranked's per-date signal-strength reordering --
+    each control by choosing that order before calling this shared
+    accept/reject engine; the engine itself does not choose or know
+    about any ranking). Before considering each candidate, any
     currently-open position whose own (already-computed, deterministic)
     exit_time has passed is released first -- capital and its
     concurrency slot returned to the pool. The ACCEPT/REJECT decision
@@ -139,6 +151,82 @@ def schedule_portfolio(
         result.max_concurrent_positions_observed = max(result.max_concurrent_positions_observed, len(open_positions))
 
     return result
+
+
+def schedule_portfolio(
+    datasets: dict[str, SymbolDataset],
+    events: list[CandidateEntryEvent],
+    *,
+    max_concurrent_positions: int,
+    capital_per_position: float,
+    initial_capital: float,
+    holding_bars: int,
+    cost_model: CostModel,
+) -> PortfolioSchedulingResult:
+    """H_MEANREV_011's own frozen control: processes `events` in exactly
+    the chronological/alphabetical order collect_candidate_events already
+    produced them in -- no ranking. Unmodified by H_MEANREV_012; kept as
+    a thin, behavior-preserving wrapper around _run_schedule so the
+    control stays byte-for-byte reproducible."""
+    return _run_schedule(
+        datasets, events, max_concurrent_positions=max_concurrent_positions, capital_per_position=capital_per_position,
+        initial_capital=initial_capital, holding_bars=holding_bars, cost_model=cost_model,
+    )
+
+
+def zscore_close_20_rank_key(event: CandidateEntryEvent, datasets: dict[str, SymbolDataset]) -> float:
+    """H_MEANREV_012's own frozen ranking key (docs/research/H_MEANREV_012_
+    SIGNAL_STRENGTH_SELECTION_PREREGISTRATION.md Sections 2 and 4): reads
+    zscore_close_20 at the candidate's OWN signal_idx -- the same already-
+    causal, rolling-window value the frozen entry predicate itself already
+    evaluated at that exact bar. Reads no bar after signal_idx, so it
+    carries no look-ahead. More negative = more oversold = higher
+    acceptance priority (ascending sort), per H_MEANREV_001's own already-
+    established semantic for this field -- not a newly invented scoring
+    formula."""
+    return datasets[event.symbol].frame.iloc[event.signal_idx]["zscore_close_20"]
+
+
+def schedule_portfolio_ranked(
+    datasets: dict[str, SymbolDataset],
+    events: list[CandidateEntryEvent],
+    *,
+    max_concurrent_positions: int,
+    capital_per_position: float,
+    initial_capital: float,
+    holding_bars: int,
+    cost_model: CostModel,
+    rank_key,
+) -> PortfolioSchedulingResult:
+    """H_MEANREV_012's own candidate-selection strategy: identical accept/
+    reject mechanics to schedule_portfolio (both delegate to the same
+    _run_schedule engine -- capital accounting, concurrency, one-position-
+    per-symbol, h10 exit timing, and costs are all byte-for-byte
+    unchanged), but events sharing the SAME signal_date are first
+    reordered by `rank_key` (ascending = higher priority; ties broken by
+    symbol name, the same deterministic convention collect_candidate_
+    events already uses) before being handed to _run_schedule in that
+    date's own group. Cross-date order is preserved exactly as collect_
+    candidate_events produced it -- only WITHIN a shared signal_date does
+    ranking change acceptance order, which is precisely where H_MEANREV_
+    011's own alphabetical tie-break was arbitrary. `rank_key` is
+    injectable rather than hardcoded so this function does not need to be
+    duplicated for a different candidate strategy; H_MEANREV_012 itself
+    supplies only zscore_close_20_rank_key, per its own frozen pre-
+    registration (no alternative or combined ranking is tried)."""
+    grouped: dict[pd.Timestamp, list[CandidateEntryEvent]] = {}
+    for event in events:
+        grouped.setdefault(event.signal_date, []).append(event)
+
+    reordered: list[CandidateEntryEvent] = []
+    for signal_date in sorted(grouped):
+        day_events = sorted(grouped[signal_date], key=lambda e: (rank_key(e, datasets), e.symbol))
+        reordered.extend(day_events)
+
+    return _run_schedule(
+        datasets, reordered, max_concurrent_positions=max_concurrent_positions, capital_per_position=capital_per_position,
+        initial_capital=initial_capital, holding_bars=holding_bars, cost_model=cost_model,
+    )
 
 
 @dataclass(frozen=True)

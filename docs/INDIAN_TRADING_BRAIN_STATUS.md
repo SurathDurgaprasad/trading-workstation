@@ -680,6 +680,34 @@ with confidence.** `H_MEANREV_009` and `H_MEANREV_010` remain
 unmodified, cited not rewritten. Full writeup in `docs/research/
 H_MEANREV_011_PORTFOLIO_CONSTRUCTION_PREREGISTRATION.md`.
 
+**Signal-strength candidate selection — `H_MEANREV_012`, REJECTED,
+answers the exact question `H_MEANREV_011` left open, cleanly.** Tests
+whether `H_MEANREV_011`'s own arbitrary chronological+alphabetical
+tie-break was the reason its accepted-trade sample lost the raw
+signal's own gross edge, by replacing ONLY the same-date
+candidate-selection rule with an already-existing, non-invented
+economic ranking (`zscore_close_20`, more negative/more oversold =
+higher priority) — entry, h10 exit, universe, and every portfolio
+constraint stay frozen and unchanged. Candidate A (the alphabetical
+control) was independently re-verified this entry to reproduce
+`H_MEANREV_011`'s own cited trade counts, gross P&L, and promotion
+verdict exactly, confirming the two entries are measured on identical
+footing. **The result is a clean, non-flattering answer: ranking does
+NOT restore the gross edge.** Development's gross P&L moved favorably
+(+₹43,461 → +₹66,732) but within overlapping, statistically
+indistinguishable confidence intervals; validation — the primary
+forward-looking confirmation split — got MATERIALLY WORSE under
+ranking (−₹7,852 → −₹22,474, net mean −0.51% → −1.13%); out-of-sample
+was essentially flat (−₹4,790 → −₹5,349). Win rate fell in every split
+under ranking. `PromotionVerdict.REJECTED` for both candidates,
+identically. **This demonstrates the arbitrary tie-break was NOT the
+dominant cause of `H_MEANREV_011`'s own weak validation/out-of-sample
+result** — replacing the selection mechanism alone, with everything
+else held frozen, does not turn this signal into a promotable
+multi-position strategy. `H_MEANREV_009`/`010`/`011` remain
+unmodified, cited not rewritten. Full writeup in `docs/research/
+H_MEANREV_012_SIGNAL_STRENGTH_SELECTION_PREREGISTRATION.md`.
+
 Nothing is promoted. Nothing should be traded. This remains
 **entirely paper-only research** — no signal in this whole thread has
 cleared this project's own promotion bar, and no live/broker execution
@@ -688,7 +716,7 @@ capability exists or was touched.
 ## PROMOTED HYPOTHESES
 
 **None.** Zero, across the entire history of this project's research
-(54 hypotheses tested to date).
+(55 hypotheses tested to date).
 
 ## PROMISING HYPOTHESES
 
@@ -811,7 +839,7 @@ with a serious extreme-tail-risk side effect; Candidate 3 is a
 diagnostic control only — see CURRENT ACTIVE EDGE STATUS above)**.
 Full evidence for each in `strategy/hypothesis_registry.py`.
 
-## REJECTED HYPOTHESES (31)
+## REJECTED HYPOTHESES (32)
 
 H_ENTRY_002, H_ENTRY_004, H_EXIT_001, H_EXIT_003, H_EXIT_004,
 H_MEANREV_001, H_RELSTRENGTH_001, H_BREAKOUT_001, H_CONTEXT_MARKET_001,
@@ -920,7 +948,20 @@ than H_MEANREV_009's own decisive NEGATIVE; portfolio-level tail risk
 genuinely improved (worst trade -9.68% of total capital vs
 H_MEANREV_010 Candidate 2's own -65%) but drawdown remains substantial
 and the result does not cleanly answer whether the signal survives
-diversification — see CURRENT ACTIVE EDGE STATUS above)**. Full
+diversification — see CURRENT ACTIVE EDGE STATUS above)**, and
+**H_MEANREV_012 (signal-strength candidate selection — replaces ONLY
+H_MEANREV_011's own arbitrary alphabetical tie-break with an
+already-existing, non-invented economic ranking (zscore_close_20, more
+negative = higher priority), everything else frozen; Candidate A
+control independently re-verified to reproduce H_MEANREV_011's own
+cited record exactly, confirming identical footing; ranking does NOT
+restore the raw signal's own gross edge — development moved favorably
+but within statistically overlapping CIs, validation got materially
+WORSE (net mean -0.51%->-1.13%), out-of-sample was essentially flat;
+win rate fell in every split under ranking; PromotionVerdict.REJECTED
+for both candidates, identically — demonstrating the arbitrary
+tie-break was NOT the dominant cause of H_MEANREV_011's own weak
+val/oos result — see CURRENT ACTIVE EDGE STATUS above)**. Full
 evidence for each in `strategy/hypothesis_registry.py`.
 
 (1 SUPPORTED entry, H_ENTRY_001, is itself a negative finding —
@@ -1364,6 +1405,18 @@ remain the "next candidate families not yet tested" list above
 (turn-of-month calendar effects, volume-price divergence), each
 requiring its own fresh registry/data-depth audit before
 pre-registration.
+
+**`H_MEANREV_012` (signal-strength candidate selection) has now
+answered the specific candidate-selection question `H_MEANREV_011`
+left open** — see CURRENT ACTIVE EDGE STATUS and REJECTED HYPOTHESES
+above for the full result (ranking by `zscore_close_20` does not
+restore the gross edge; validation got materially worse under
+ranking; the arbitrary alphabetical tie-break was not the dominant
+cause of `H_MEANREV_011`'s own weak out-of-sample result).
+**Per the user's own explicit instruction closing that mission: no
+further ranking variant, threshold, or portfolio-construction
+parameter is being tried in this thread — this is a deliberate stop,
+not an unexplored gap, and work is paused pending further direction.**
 
 **If the exit-architecture thread is ever resumed (not currently
 planned)**: regime-invalidation exit (exit when `TRENDING_UP` ends),

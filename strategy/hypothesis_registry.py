@@ -3421,4 +3421,92 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "H_MEANREV_011_PORTFOLIO_CONSTRUCTION_PREREGISTRATION.md."
             ),
         ),
+        HypothesisRecord(
+            hypothesis_id="H_MEANREV_012",
+            description=(
+                "A test of PORTFOLIO SIGNAL SELECTION, not a new alpha hypothesis: can simultaneous "
+                "H_MEANREV_006 signals be selected using a pre-existing, economically meaningful measure of "
+                "signal strength (zscore_close_20, more negative = higher priority) instead of H_MEANREV_011's "
+                "own arbitrary chronological+alphabetical tie-break, while every other frozen component "
+                "(entry, h10 exit, universe, MAX_CONCURRENT_POSITIONS=4, capital_per_position=25000, real "
+                "costs) stays unchanged? Pre-registered BEFORE any experiment ran: docs/research/"
+                "H_MEANREV_012_SIGNAL_STRENGTH_SELECTION_PREREGISTRATION.md, committed as its own commit prior "
+                "to any experiment code."
+            ),
+            rationale=(
+                "H_MEANREV_011 found only 7-10% of 9893 candidate signals accepted into its own 4-slot "
+                "portfolio, and its own arbitrary alphabetical tie-break under that heavy contention was a "
+                "disclosed, real selection-bias risk -- the accepted subset no longer cleanly reproduced the "
+                "raw signal's own positive gross edge. Audit (repeated, direct search, not assumed) confirmed "
+                "no independent third ranking mechanism exists beyond the two fields already inside the frozen "
+                "entry predicate itself; quant_research.cross_sectional.rank_cross_sectionally is a generic, "
+                "parameterized utility, not a distinct signal-strength field. zscore_close_20 was chosen "
+                "because it is H_MEANREV_001's own original, already-established field with an already-defined "
+                "semantic direction (more negative = more oversold = stronger), not invented or combined with "
+                "relative_strength_20."
+            ),
+            expected_effect="No prior assumption -- a candidate-selection-mechanism test, not a directional prediction.",
+            dataset_restrictions="COMBINED universe (206/208 symbols), identical to H_MEANREV_009/010/011. 10 years daily.",
+            experiment_design=(
+                "quant_research/mean_reversion_portfolio.py extended with schedule_portfolio_ranked (injectable "
+                "rank_key, not a duplicated simulator -- both schedule_portfolio and schedule_portfolio_ranked "
+                "delegate to the same shared _run_schedule accept/reject engine) and zscore_close_20_rank_key "
+                "(14 new targeted tests: deterministic ranking, simultaneous-signal ordering, ranking direction, "
+                "slot limitation, one-position-per-symbol, capital exhaustion, no-look-ahead at both the rank-key "
+                "and full-scheduler level, alphabetical control reproducibility, equal-strength tie-break, "
+                "accounting/h10/cost invariance). Candidates sharing a signal_date are reordered by the frozen "
+                "rank key before the identical accept/reject rule applies; cross-date order is unchanged. Each "
+                "split (development/validation/out_of_sample) scheduled independently with fresh initial_capital "
+                "(matching this family's own established per-split-independence convention), for BOTH Candidate "
+                "A (schedule_portfolio, cited AND independently re-verified to reproduce H_MEANREV_011's own "
+                "cited trade counts, gross P&L, and PromotionVerdict exactly) and Candidate B (schedule_portfolio_"
+                "ranked)."
+            ),
+            success_criteria="strategy.promotion_gate.evaluate_promotion PROMOTED -- all three splits confident POSITIVE_PERFORMANCE.",
+            failure_criteria="evaluate_promotion NEGATIVE or REJECTED, or ranking fails to restore the gross edge lost under H_MEANREV_011's own selection.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REAL PORTFOLIO SIMULATION (206/206 buildable symbols; frozen entry/exit/universe/portfolio-"
+                "constraints unchanged; only the same-date candidate-selection rule differs): Candidate A "
+                "(control) INDEPENDENTLY RE-VERIFIED to reproduce H_MEANREV_011's own cited record exactly -- "
+                "555/111/105 accepted trades, +43460.67/-7852.26/-4789.98 gross P&L, PromotionVerdict.REJECTED "
+                "(dev/val/oos) -- confirming this entry's own dataset-build and per-split-independent-scheduling "
+                "methodology matches that prior entry's own footing. "
+                "Candidate B (zscore_close_20-ranked): 567/101/104 accepted trades (7.8%/6.5%/9.8% accept "
+                "rate), gross P&L +66732.34/-22473.73/-5349.05, net mean return +0.26%/-1.13%/-0.46% (all three "
+                "STATISTICALLY_MEANINGLESS, CIs straddling zero). PromotionVerdict.REJECTED, IDENTICAL "
+                "mechanical classification to Candidate A. "
+                "CENTRAL DIAGNOSTIC: ranking does NOT cleanly restore the raw signal's own gross edge. "
+                "Development gross improved (+43460.67->+66732.34) but the two splits' own gross-return CIs "
+                "overlap substantially -- not a statistically distinguishable improvement. Validation gross got "
+                "MATERIALLY WORSE under ranking (-7852.26->-22473.73, nearly 3x more negative; net mean -0.51%->"
+                "-1.13%) -- the split this project's own dev/val/oos discipline treats as the primary "
+                "forward-looking confirmation sample. Out-of-sample was essentially flat, marginally worse "
+                "(-4789.98->-5349.05). INFERENCE: this is inconsistent with 'the alphabetical tie-break was the "
+                "dominant cause of H_MEANREV_011's own disappointing val/oos performance' -- replacing it with "
+                "an economically-motivated ranking made validation demonstrably worse, not better. "
+                "SECONDARY FINDINGS, all disclosed regardless of the primary verdict: win rate fell under "
+                "ranking in EVERY split (50.1%->49.0% dev, 42.3%->34.6% val, 48.6%->40.4% oos). Symbol breadth "
+                "WIDENED under ranking in development (163->178 distinct symbols, not a concentration into fewer "
+                "'usual suspects'). Mean |net_return| per trade rose modestly under ranking in development "
+                "(5.96%->6.19%), a small, real volatility-selection effect too small alone to explain the "
+                "validation deterioration. Portfolio-level drawdown moved in DIFFERENT directions by split under "
+                "ranking (39.3%->34.7% dev improved, 26.4%->34.0% val worsened, 26.9%->26.3% oos flat) -- no "
+                "consistent risk-profile pattern attributable to ranking. Both candidates remain substantially "
+                "dependent on 2020 (control: 2020 contributed +19707.01 of a total pooled net of -10846.91 "
+                "across all years/splits; ranked: +29528.87 of -2806.07) -- unchanged from H_MEANREV_006's own "
+                "already-established year-stability caveat, not a new finding, and not reduced by ranking. "
+                "No-look-ahead independently verified at both the rank-key level and the full-scheduler level "
+                "(tests/test_mean_reversion_portfolio.py). Liquidity: INCONCLUSIVE, as pre-registered -- no "
+                "average-daily-volume/free-float data exists anywhere in this repository. "
+                "VERDICT: REJECTED, matching evaluate_promotion's own unmodified verdict, IDENTICAL to Candidate "
+                "A's own verdict. This does NOT prove the ranking mechanism itself is harmful (several "
+                "diagnostics show no consistent degradation) -- it demonstrates the arbitrary alphabetical "
+                "tie-break was NOT the dominant explanation for H_MEANREV_011's own disappointing val/oos "
+                "result; replacing the selection mechanism alone does not turn this signal into a promotable "
+                "multi-position portfolio strategy. H_MEANREV_009 (REJECTED), H_MEANREV_010 (INCONCLUSIVE), and "
+                "H_MEANREV_011 (REJECTED) remain unmodified, cited as comparison points only. Full writeup in "
+                "docs/research/H_MEANREV_012_SIGNAL_STRENGTH_SELECTION_PREREGISTRATION.md."
+            ),
+        ),
     )
