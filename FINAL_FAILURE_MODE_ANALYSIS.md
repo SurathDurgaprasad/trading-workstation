@@ -57,12 +57,12 @@ for the component map this analysis is built against.
 
 ### 6. SQLite database corruption
 
-- **FAILURE**: disk error, power loss mid-write, filesystem issue.
-- **DETECTION**: `PRAGMA integrity_check`, now exposed via `core.sqlite_util.integrity_check()` on **all 12 stores** (release-gate pass extended this from the first pass's 3 of 12 -- scheduler, paper, live_state -- to every store).
-- **SAFE RESPONSE**: still not automatically invoked on every startup; an operator must run the check explicitly (no automatic startup self-diagnostic wired to it yet).
-- **RECOVERY**: manual -- restore from a backup or accept data loss on the affected store; no automated repair.
-- **USER VISIBILITY**: only if the operator runs the check; not yet surfaced through a single CLI command spanning all 12 stores.
-- **Evidence**: **[VERIFIED-CODE]** the capability exists and is tested on all 12 stores (`tests/test_core_sqlite_util.py` plus dedicated tests in each of the 12 stores' own test files, all passing). **Gap, disclosed**: not wired into automatic startup diagnostics; no unified command surfaces all 12 results together.
+- **FAILURE**: disk error, power loss mid-write, filesystem issue, or the file being overwritten by something else.
+- **DETECTION**: two layers now. (1) **Autonomous hardening cycle 1 addition**: `core.sqlite_util.connect()` -- the ONE place every store opens its connection -- detects a corrupt/non-SQLite file automatically on every single connection attempt (not just when an operator remembers to run a check), raising a clear `DatabaseCorruptedError` naming the file instead of a raw `sqlite3.DatabaseError`. (2) `PRAGMA integrity_check`, exposed via `core.sqlite_util.integrity_check()` on all 12 stores, for a deeper on-demand scan an operator can run explicitly (e.g. after long unattended operation).
+- **SAFE RESPONSE**: a corrupted file now fails LOUDLY and IMMEDIATELY at the first connection attempt (layer 1), rather than only being caught if/when an operator happens to run an explicit integrity check (layer 2). This closes what this document previously listed as a disclosed gap ("still not automatically invoked on every startup").
+- **RECOVERY**: manual -- restore from a backup or accept data loss on the affected store; no automated repair (unchanged).
+- **USER VISIBILITY**: the `DatabaseCorruptedError` message itself, at the moment any command tries to open the affected store -- documented in `TROUBLESHOOTING.md`. `integrity_check()` remains available for a proactive, deeper scan.
+- **Evidence**: **[VERIFIED-TEST]** `tests/test_core_sqlite_util.py::test_connect_against_a_corrupted_file_raises_a_clear_database_corrupted_error` and `test_connect_against_a_truncated_file_also_raises_the_clear_error` (autonomous hardening cycle 1); `PRAGMA integrity_check` coverage unchanged from the prior pass. **Residual, disclosed gap**: still no single CLI command surfacing all 12 stores' `integrity_check()` results together in one pass (`python main.py health --check-integrity`-style aggregation does not yet exist for every store, though `core.health.collect_system_health`'s database check does aggregate a `PRAGMA integrity_check` across every configured, existing store's path).
 
 ### 7. SQLite lock contention (scheduler + dashboard + CLI concurrent access)
 
@@ -124,8 +124,8 @@ for the component map this analysis is built against.
 - **DETECTION**: N/A -- the switch state itself is the thing being checked, freshly, on every call.
 - **SAFE RESPONSE**: `LiveStateStore`'s kill-switch read has zero caching -- it is read fresh from disk on every check, so a restart cannot silently "forget" an active kill switch.
 - **RECOVERY**: N/A -- nothing to recover, the state was never held only in memory.
-- **USER VISIBILITY**: kill-switch status is queryable at any time and reflects disk truth.
-- **Evidence**: **[VERIFIED-TEST]** `tests/test_live_state_store.py:131-140` (a real restart test, confirmed present and passing, per this session's own re-verification against the current file).
+- **USER VISIBILITY**: kill-switch status is queryable at any time and reflects disk truth. **Autonomous hardening cycle 4 addition**: activating or resetting the kill switch (from any caller -- CLI or dashboard) now also emits a `logger.warning`, so the event is visible in a `--log-file`-backed log stream, not only by actively polling status. Previously this state change left zero trace in application logs at all.
+- **Evidence**: **[VERIFIED-TEST]** `tests/test_live_state_store.py:131-140` (a real restart test, confirmed present and passing, per this session's own re-verification against the current file); `tests/test_live_state_store.py::test_activate_kill_switch_logs_a_warning_with_the_reason`/`test_reset_kill_switch_logs_a_warning` (autonomous hardening cycle 4).
 
 ### 14. Config file missing or malformed at startup
 
@@ -188,6 +188,24 @@ for the component map this analysis is built against.
 - **RECOVERY**: N/A.
 - **USER VISIBILITY**: the verdict is computed and reported, not silently acted on.
 - **Evidence**: **[VERIFIED-CODE]** confirmed via reading `strategy/promotion_gate.py` and `learning/profitability.py` in this and prior sessions; unmodified (except the datetime-normalization delegation, zero behavior change) this session.
+
+### 21. A single stored row's `data_json` is malformed or tampered with, independent of whole-file corruption
+
+- **FAILURE**: a specific row's JSON no longer matches the Pydantic model expected to read it back -- distinct from #6 (whole-FILE corruption): the file opens fine, `PRAGMA integrity_check` reports "ok," but one row's content is bad (external tampering, or corruption isolated to that row's page).
+- **DETECTION**: **autonomous hardening cycle 1/2 addition** -- every one of the 12 stores' `Model.model_validate_json(row)` read call sites now goes through `core.sqlite_util.parse_model_json()`, which raises a clear `MalformedRowError` naming the model and row identifier.
+- **SAFE RESPONSE**: previously, this raised a raw `pydantic.ValidationError` (or, for the one dataclass-based store, a raw `KeyError`/`TypeError`) straight out of the store -- functionally still fail-closed (the bad read still fails rather than silently returning wrong data) but with a traceback an operator has to interpret rather than a named, actionable error.
+- **RECOVERY**: manual -- the row's data is genuinely unreconstructable from what's stored; see `TROUBLESHOOTING.md`'s dedicated entry.
+- **USER VISIBILITY**: the error names the model and row identifier directly, rather than requiring the operator to decode a Pydantic traceback.
+- **Evidence**: **[VERIFIED-TEST]** one dedicated malformed-row test per store, all 12 stores (`tests/test_core_sqlite_util.py`, `tests/test_paper_store.py`, `tests/test_predictions_store.py`, `tests/test_scheduler_store.py`, `tests/test_decision_engine_store.py`, `tests/test_market_intelligence_regime_store.py`, and equivalents for the remaining 6 stores), all passing in the full regression (2142 passed at the time this coverage completed).
+
+### 22. A scheduled slot fails EVERY tick for a sustained period (e.g. a multi-hour provider outage)
+
+- **FAILURE**: `schedule loop` keeps retrying the next tick (as designed, since a single bad tick is normal), but every tick for one slot keeps failing with no success in between.
+- **DETECTION**: previously **undetected by `core.health.collect_system_health`** -- each failed tick correctly finishes with status=FAILED and releases its lock, so the old scheduler health check (active-lock-only) reported HEALTHY throughout an actual, ongoing production problem. **Autonomous hardening cycle 3 addition**: `SchedulerRunStore.consecutive_failures_for_slot()` + `core.health._check_scheduler` now report DEGRADED once any slot reaches 3 consecutive non-COMPLETED runs (FAILED or RECLAIMED), naming the slot, the streak length, and the last failure's actual reason.
+- **SAFE RESPONSE**: purely a visibility fix -- `schedule loop` itself already retried correctly; scheduler remains an OPTIONAL health component (this never escalates past overall DEGRADED, never blocks the startup gate).
+- **RECOVERY**: automatic -- the DEGRADED status clears itself the next time the slot completes successfully; no manual reset needed.
+- **USER VISIBILITY**: `python main.py health`, the dashboard `/health` route, and `schedule status`'s existing per-slot last-success/last-failure summary all surface it now.
+- **Evidence**: **[VERIFIED-TEST]** `tests/test_scheduler_store.py` (7 new tests for `consecutive_failures_for_slot`'s edge cases) and `tests/test_core_health.py` (3 new tests for the health-check integration), all passing in the full regression (2152 passed).
 
 ---
 
