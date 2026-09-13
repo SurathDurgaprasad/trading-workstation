@@ -125,6 +125,80 @@ def test_scheduler_check_reports_degraded_for_an_active_lock(tmp_path):
     assert health.get("scheduler").status == ComponentStatus.DEGRADED
 
 
+def test_scheduler_check_reports_healthy_for_a_single_failure(tmp_path):
+    """A single bad tick is normal, expected operation (schedule loop
+    already retries the next tick on its own) -- must not be flagged."""
+    from datetime import datetime, timezone
+
+    from scheduler.models import RunStatus
+    from scheduler.store import SchedulerRunStore
+
+    db_path = tmp_path / "runs.db"
+    store = SchedulerRunStore(db_path)
+    store.start_run(run_id="r1", slot_name="intraday", run_date="2026-01-01", started_at=datetime.now(timezone.utc))
+    store.finish_run(run_id="r1", status=RunStatus.FAILED, error="one transient Yahoo timeout")
+    store.close()
+
+    health = collect_system_health(db_paths={"scheduler": db_path}, probe_dir=tmp_path, check_ollama=False)
+
+    assert health.get("scheduler").status == ComponentStatus.HEALTHY
+
+
+def test_scheduler_check_reports_degraded_for_a_sustained_failure_streak(tmp_path):
+    """Autonomous hardening cycle 3: a real gap this cycle closed -- a
+    sustained provider outage (every tick correctly finishes FAILED and
+    releases its lock, so the old active-lock-only check saw nothing
+    wrong) previously left the scheduler component HEALTHY throughout.
+    Three consecutive failures with no success since must now surface as
+    DEGRADED, naming the slot and the last failure's reason, and must
+    roll up to overall DEGRADED (scheduler is an OPTIONAL component --
+    this must never escalate to FAILED or block startup)."""
+    from datetime import datetime, timezone
+
+    from scheduler.models import RunStatus
+    from scheduler.store import SchedulerRunStore
+
+    db_path = tmp_path / "runs.db"
+    store = SchedulerRunStore(db_path)
+    for i in range(3):
+        store.start_run(run_id=f"r{i}", slot_name="intraday", run_date="2026-01-01", started_at=datetime.now(timezone.utc))
+        store.finish_run(run_id=f"r{i}", status=RunStatus.FAILED, error="simulated sustained Yahoo outage")
+    store.close()
+
+    health = collect_system_health(db_paths={"scheduler": db_path}, probe_dir=tmp_path, check_ollama=False)
+
+    scheduler = health.get("scheduler")
+    assert scheduler.status == ComponentStatus.DEGRADED
+    assert "intraday" in scheduler.detail
+    assert "3 consecutive" in scheduler.detail
+    assert "simulated sustained Yahoo outage" in scheduler.detail
+    assert health.overall == OverallStatus.DEGRADED
+
+
+def test_scheduler_check_active_lock_takes_priority_over_failure_streak(tmp_path):
+    """If a run is currently in progress, that is reported first -- the
+    failure-streak check only looks at FINISHED runs, so a currently-
+    running (not yet failed) attempt must not itself be miscounted."""
+    from datetime import datetime, timezone
+
+    from scheduler.models import RunStatus
+    from scheduler.store import SchedulerRunStore
+
+    db_path = tmp_path / "runs.db"
+    store = SchedulerRunStore(db_path)
+    for i in range(3):
+        store.start_run(run_id=f"r{i}", slot_name="intraday", run_date="2026-01-01", started_at=datetime.now(timezone.utc))
+        store.finish_run(run_id=f"r{i}", status=RunStatus.FAILED, error="boom")
+    store.start_run(run_id="in-progress", slot_name="intraday", run_date="2026-01-02", started_at=datetime.now(timezone.utc))
+    store.close()
+
+    health = collect_system_health(db_paths={"scheduler": db_path}, probe_dir=tmp_path, check_ollama=False)
+
+    scheduler = health.get("scheduler")
+    assert scheduler.status == ComponentStatus.DEGRADED
+    assert "in progress or possibly orphaned" in scheduler.detail
+
+
 def test_risk_config_check_is_healthy_by_default(tmp_path):
     health = collect_system_health(db_paths={}, probe_dir=tmp_path, check_ollama=False)
     assert health.get("risk").status == ComponentStatus.HEALTHY

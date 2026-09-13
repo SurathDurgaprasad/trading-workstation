@@ -162,6 +162,18 @@ def _check_kill_switch(db_paths: dict[str, Path]) -> ComponentHealth:
     return ComponentHealth("kill_switch", ComponentStatus.HEALTHY, "Inactive.")
 
 
+_SUSTAINED_FAILURE_THRESHOLD = 3
+"""Autonomous hardening cycle 3: how many consecutive non-COMPLETED runs
+(FAILED or RECLAIMED) for a single slot, with no COMPLETED run since,
+before a sustained failure (e.g. a market-data provider outage lasting
+across several ticks) is surfaced as DEGRADED here -- see
+SchedulerRunStore.consecutive_failures_for_slot's docstring for why this
+check exists at all. 3 is deliberately low: a single bad tick is normal
+operation (provider hiccups happen and `schedule loop` already retries
+the next tick on its own), but three in a row with zero intervening
+success is a real, actionable pattern worth an operator's attention."""
+
+
 def _check_scheduler(db_paths: dict[str, Path]) -> ComponentHealth:
     path = db_paths.get("scheduler")
     if path is None or not Path(path).exists():
@@ -171,13 +183,22 @@ def _check_scheduler(db_paths: dict[str, Path]) -> ComponentHealth:
     store = SchedulerRunStore(path)
     try:
         active = store.active_lock()
+        if active is not None:
+            return ComponentHealth(
+                "scheduler", ComponentStatus.DEGRADED,
+                f"Run in progress or possibly orphaned (run_id={active.run_id[:12]}, slot={active.slot_name!r}, started {active.started_at.isoformat()}).",
+            )
+        for slot_name in store.distinct_slot_names():
+            streak = store.consecutive_failures_for_slot(slot_name)
+            if streak >= _SUSTAINED_FAILURE_THRESHOLD:
+                last_failure = store.last_failed_run_for_slot(slot_name)
+                reason = f" -- {last_failure.error or last_failure.detail}" if last_failure else ""
+                return ComponentHealth(
+                    "scheduler", ComponentStatus.DEGRADED,
+                    f"Slot {slot_name!r} has failed its last {streak} consecutive run(s) with no success since{reason}.",
+                )
     finally:
         store.close()
-    if active is not None:
-        return ComponentHealth(
-            "scheduler", ComponentStatus.DEGRADED,
-            f"Run in progress or possibly orphaned (run_id={active.run_id[:12]}, slot={active.slot_name!r}, started {active.started_at.isoformat()}).",
-        )
     return ComponentHealth("scheduler", ComponentStatus.HEALTHY, "No active run lock.")
 
 

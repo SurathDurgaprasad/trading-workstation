@@ -163,6 +163,30 @@ command, a config file edit, or a restart.
   rather than waiting for the staleness window, restart the scheduler
   process (the next tick's reclaim runs immediately on startup).
 
+### `python main.py health` reports the scheduler component DEGRADED with "has failed its last N consecutive run(s)"
+
+- **Cause**: a real, sustained problem with one scheduled slot — a
+  market-data provider outage, a persistent misconfiguration, or
+  anything else causing that slot's run to fail repeatedly with no
+  success since. `schedule loop` retries every tick on its own and each
+  failed tick correctly releases its lock, so this is the ONE place
+  that surfaces "this job has actually stopped working," as opposed to
+  "is a run currently stuck" (a separate, also-checked condition).
+- **Detection**: `python main.py health`, the dashboard's `/health`
+  route, or `python main.py schedule status` (per-slot last
+  success/failure summary) — the message names the slot, the streak
+  length, and the last failure's actual error/detail.
+- **Automatic recovery**: none needed for the loop itself — `schedule
+  loop` keeps retrying the next tick regardless; this is purely a
+  visibility signal, not a blocker (the scheduler is an OPTIONAL
+  component: this never escalates the overall status past DEGRADED,
+  and never blocks `paper-live`/`schedule tick`/`schedule loop` from
+  starting via the startup gate).
+- **Manual action**: investigate the named cause (check the same
+  provider-outage/config guidance elsewhere in this file); the DEGRADED
+  status clears on its own the next time that slot completes
+  successfully — no manual reset needed.
+
 ### Kill switch appears active but you don't remember activating it
 
 - **Cause**: it was activated in a prior session (by you, or by the

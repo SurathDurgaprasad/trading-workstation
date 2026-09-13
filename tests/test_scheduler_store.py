@@ -309,6 +309,76 @@ def test_distinct_slot_names_is_empty_when_nothing_has_run(store):
     assert store.distinct_slot_names() == []
 
 
+# --- autonomous hardening cycle 3: sustained-failure detection --------------
+
+
+def test_consecutive_failures_for_slot_is_zero_when_nothing_has_run(store):
+    assert store.consecutive_failures_for_slot("pre_market") == 0
+
+
+def test_consecutive_failures_for_slot_is_zero_after_a_success(store):
+    store.start_run(run_id="r1", slot_name="pre_market", run_date="2026-09-01", started_at=datetime.now(timezone.utc))
+    store.finish_run(run_id="r1", status=RunStatus.COMPLETED)
+    assert store.consecutive_failures_for_slot("pre_market") == 0
+
+
+def test_consecutive_failures_for_slot_counts_a_pure_failure_streak(store):
+    for i in range(3):
+        store.start_run(run_id=f"r{i}", slot_name="pre_market", run_date="2026-09-01", started_at=datetime.now(timezone.utc))
+        store.finish_run(run_id=f"r{i}", status=RunStatus.FAILED, error="simulated provider outage")
+    assert store.consecutive_failures_for_slot("pre_market") == 3
+
+
+def test_consecutive_failures_for_slot_stops_counting_at_the_most_recent_success(store):
+    """3 failures, then a success, then 2 more failures -- only the
+    trailing 2 (since the last success) count, matching what an operator
+    actually cares about: 'is this job broken RIGHT NOW.'"""
+    for i in range(3):
+        store.start_run(run_id=f"old-fail-{i}", slot_name="pre_market", run_date="2026-09-01", started_at=datetime.now(timezone.utc))
+        store.finish_run(run_id=f"old-fail-{i}", status=RunStatus.FAILED, error="boom")
+    store.start_run(run_id="success", slot_name="pre_market", run_date="2026-09-02", started_at=datetime.now(timezone.utc))
+    store.finish_run(run_id="success", status=RunStatus.COMPLETED)
+    for i in range(2):
+        store.start_run(run_id=f"new-fail-{i}", slot_name="pre_market", run_date="2026-09-03", started_at=datetime.now(timezone.utc))
+        store.finish_run(run_id=f"new-fail-{i}", status=RunStatus.FAILED, error="boom")
+
+    assert store.consecutive_failures_for_slot("pre_market") == 2
+
+
+def test_consecutive_failures_for_slot_treats_reclaimed_as_a_failure_too(store):
+    """A RECLAIMED run (the process that started it crashed) is not a
+    success either -- it must count toward the same sustained-failure
+    streak as an ordinary FAILED run, not reset it."""
+    started_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    store.start_run(run_id="r1", slot_name="pre_market", run_date="2026-09-01", started_at=started_at)
+    store.reclaim_stale_locks(staleness_seconds=1800, now=datetime.now(timezone.utc))
+    store.start_run(run_id="r2", slot_name="pre_market", run_date="2026-09-01", started_at=datetime.now(timezone.utc))
+    store.finish_run(run_id="r2", status=RunStatus.FAILED, error="boom")
+
+    assert store.consecutive_failures_for_slot("pre_market") == 2
+
+
+def test_consecutive_failures_for_slot_ignores_a_currently_running_run(store):
+    """The active (unfinished) run must not itself be counted as a
+    failure -- only terminal outcomes count."""
+    for i in range(3):
+        store.start_run(run_id=f"r{i}", slot_name="pre_market", run_date="2026-09-01", started_at=datetime.now(timezone.utc))
+        store.finish_run(run_id=f"r{i}", status=RunStatus.FAILED, error="boom")
+    store.start_run(run_id="in-progress", slot_name="pre_market", run_date="2026-09-02", started_at=datetime.now(timezone.utc))
+
+    assert store.consecutive_failures_for_slot("pre_market") == 3
+
+
+def test_consecutive_failures_for_slot_is_scoped_to_one_slot(store):
+    for i in range(3):
+        store.start_run(run_id=f"r{i}", slot_name="pre_market", run_date="2026-09-01", started_at=datetime.now(timezone.utc))
+        store.finish_run(run_id=f"r{i}", status=RunStatus.FAILED, error="boom")
+    store.start_run(run_id="other-slot-ok", slot_name="post_market", run_date="2026-09-01", started_at=datetime.now(timezone.utc))
+    store.finish_run(run_id="other-slot-ok", status=RunStatus.COMPLETED)
+
+    assert store.consecutive_failures_for_slot("post_market") == 0
+
+
 def test_schema_version_is_set_on_a_fresh_database(tmp_path):
     store = SchedulerRunStore(tmp_path / "runs.db")
     assert store.schema_version() == SchedulerRunStore.CURRENT_SCHEMA_VERSION

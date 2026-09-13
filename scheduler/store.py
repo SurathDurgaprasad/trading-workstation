@@ -210,6 +210,35 @@ class SchedulerRunStore:
         ).fetchone()
         return sqlite_util.parse_model_json(RunRecord, row[0], row_identifier=f"last_failure:{slot_name}") if row else None
 
+    def consecutive_failures_for_slot(self, slot_name: str, *, limit: int = 1000) -> int:
+        """Final-product-hardening (autonomous hardening cycle 3): how many
+        of this slot's most recent FINISHED runs, counting back from the
+        newest, are NOT a COMPLETED run -- i.e. FAILED or RECLAIMED,
+        stopping at the first COMPLETED (or at `limit` runs, whichever
+        comes first). A currently-RUNNING row is excluded, since
+        `active_lock()`/`_check_scheduler` already covers "is a run stuck
+        right now" separately from "has this job stopped succeeding."
+
+        This exists because a genuinely sustained failure (e.g. a market-
+        data provider outage lasting hours or days) previously left NO
+        trace in `core.health.collect_system_health` at all: every tick
+        correctly finishes with status=FAILED and releases its lock, so
+        `_check_scheduler`'s old "is there an active/orphaned lock" check
+        reported HEALTHY throughout -- the one place an operator is told
+        to look for trouble stayed silent while a real, recurring
+        production risk (a provider outage) went undetected for as long
+        as it lasted."""
+        rows = self._conn.execute(
+            "SELECT status FROM scheduler_runs WHERE slot_name = ? AND status != ? ORDER BY started_at DESC LIMIT ?",
+            (slot_name, RunStatus.RUNNING.value, limit),
+        ).fetchall()
+        streak = 0
+        for (status,) in rows:
+            if status == RunStatus.COMPLETED.value:
+                break
+            streak += 1
+        return streak
+
     def distinct_slot_names(self) -> list[str]:
         """Every slot name that has ever actually run, derived from run
         history rather than a schedule config file -- so a per-slot
