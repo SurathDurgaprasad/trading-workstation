@@ -100,7 +100,7 @@ class ExperimentRegistryStore:
         row = self._conn.execute(
             "SELECT data_json FROM experiment_log WHERE experiment_id = ?", (experiment_id,)
         ).fetchone()
-        return ExperimentRecord.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(ExperimentRecord, row[0], row_identifier=experiment_id) if row else None
 
     def history_for_hypothesis(self, hypothesis_id: str) -> list[ExperimentRecord]:
         """Every experiment ever recorded for this hypothesis, oldest
@@ -110,7 +110,7 @@ class ExperimentRegistryStore:
             "SELECT data_json FROM experiment_log WHERE hypothesis_id = ? ORDER BY recorded_at ASC",
             (hypothesis_id,),
         ).fetchall()
-        return [ExperimentRecord.model_validate_json(row[0]) for row in rows]
+        return [sqlite_util.parse_model_json(ExperimentRecord, row[0], row_identifier=f"hypothesis={hypothesis_id}") for row in rows]
 
     def history_for_manifest_hash(self, manifest_hash: str) -> list[ExperimentRecord]:
         """Every experiment ever recorded against this EXACT strategy
@@ -123,10 +123,10 @@ class ExperimentRegistryStore:
             "SELECT data_json FROM experiment_log WHERE manifest_hash = ? ORDER BY recorded_at ASC",
             (manifest_hash,),
         ).fetchall()
-        return [ExperimentRecord.model_validate_json(row[0]) for row in rows]
+        return [sqlite_util.parse_model_json(ExperimentRecord, row[0], row_identifier=f"manifest={manifest_hash}") for row in rows]
 
     def all_experiments(self) -> list[ExperimentRecord]:
         """Every experiment ever recorded, oldest first -- the full,
         immutable history this registry exists to preserve."""
         rows = self._conn.execute("SELECT data_json FROM experiment_log ORDER BY recorded_at ASC").fetchall()
-        return [ExperimentRecord.model_validate_json(row[0]) for row in rows]
+        return [sqlite_util.parse_model_json(ExperimentRecord, row[0], row_identifier="all_experiments") for row in rows]

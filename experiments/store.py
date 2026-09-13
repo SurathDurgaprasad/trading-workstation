@@ -90,11 +90,11 @@ class ExperimentStore:
 
     def get_experiment(self, experiment_id: str) -> Experiment | None:
         row = self._conn.execute("SELECT data_json FROM experiments WHERE experiment_id = ?", (experiment_id,)).fetchone()
-        return Experiment.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(Experiment, row[0], row_identifier=experiment_id) if row else None
 
     def list_experiments(self, limit: int = 200) -> list[Experiment]:
         rows = self._conn.execute("SELECT data_json FROM experiments ORDER BY started_at DESC LIMIT ?", (limit,)).fetchall()
-        return [Experiment.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(Experiment, r[0], row_identifier="list_experiments") for r in rows]
 
     # --- events ------------------------------------------------------------------
 
@@ -110,14 +110,14 @@ class ExperimentStore:
             "SELECT data_json FROM experiment_events WHERE experiment_id = ? ORDER BY occurred_at",
             (experiment_id,),
         ).fetchall()
-        return [ExperimentEvent.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(ExperimentEvent, r[0], row_identifier=f"experiment={experiment_id}") for r in rows]
 
     def latest_event_for_experiment(self, experiment_id: str) -> ExperimentEvent | None:
         row = self._conn.execute(
             "SELECT data_json FROM experiment_events WHERE experiment_id = ? ORDER BY occurred_at DESC LIMIT 1",
             (experiment_id,),
         ).fetchone()
-        return ExperimentEvent.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(ExperimentEvent, row[0], row_identifier=f"experiment={experiment_id}") if row else None
 
     def is_ended(self, experiment_id: str) -> bool:
         """Derived from the latest event -- never a stored mutable flag.

@@ -97,6 +97,43 @@ command, a config file edit, or a restart.
   against the same database file the scheduler is actively using at
   the same moment; retry the command.
 
+### `DatabaseCorruptedError: Database file '...' could not be opened`
+
+- **Cause**: the database file itself is corrupted, truncated, or not a
+  valid SQLite file (e.g. a process was killed mid-write at the
+  filesystem level, or the file was overwritten by something else).
+- **Detection**: this exact, clear error, naming the file — not a raw
+  `sqlite3.DatabaseError` traceback (every store's connection point
+  catches and wraps this).
+- **Automatic recovery**: none — a corrupted file cannot be repaired
+  automatically, and this project never attempts to guess at a repair.
+- **Manual action**: restore the named file from a backup (see "Backup"
+  in `OPERATIONS_GUIDE.md`). If you have no backup and are willing to
+  lose the file's contents, move it aside (do not delete it, in case
+  you change your mind) — the application will create a fresh, empty
+  one at that path the next time it runs.
+
+### `MalformedRowError: A stored ... row (...) failed to deserialize`
+
+- **Cause**: a specific row's stored data no longer matches what the
+  application expects to read back — genuinely rare under normal
+  operation (every row is written from an already-validated object;
+  this project's own convention is to add new fields as optional so a
+  schema change never breaks old rows). Realistic causes: external
+  tampering with the database file, or low-level disk corruption of
+  just that row (as opposed to the whole file, which raises
+  `DatabaseCorruptedError` instead).
+- **Detection**: this exact, clear error, naming the affected model and
+  row — not a raw `pydantic.ValidationError` traceback.
+- **Automatic recovery**: none — this row's data is genuinely
+  unreconstructable from what's stored.
+- **Manual action**: this is a real, if rare, finding worth
+  investigating rather than dismissing — if you did not tamper with the
+  database file yourself, treat this as a possible sign of disk-level
+  corruption and consider running `python main.py health` (which
+  includes a `PRAGMA integrity_check` across every store) to check
+  whether the corruption is isolated to this one row or wider.
+
 ### A prior run's paper order/position looks stuck or duplicated
 
 - **Cause**: this should not happen — `paper/store.py::update_position`

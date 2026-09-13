@@ -313,3 +313,21 @@ def test_schema_version_is_set_on_a_fresh_database(tmp_path):
     store = SchedulerRunStore(tmp_path / "runs.db")
     assert store.schema_version() == SchedulerRunStore.CURRENT_SCHEMA_VERSION
     store.close()
+
+
+# --- autonomous hardening cycle: malformed data_json on read ----------------
+
+
+def test_a_malformed_run_row_raises_a_clear_error_not_a_raw_pydantic_traceback(store):
+    from core.sqlite_util import MalformedRowError
+
+    store._conn.execute(
+        "INSERT INTO scheduler_runs (run_id, slot_name, run_date, started_at, status, data_json) VALUES (?,?,?,?,?,?)",
+        ("r1", "intraday", "2026-01-01", datetime.now(timezone.utc).isoformat(), "RUNNING", '{"run_id": "r1"}'),
+    )
+
+    with pytest.raises(MalformedRowError) as exc_info:
+        store.get_run("r1")
+
+    assert "RunRecord" in str(exc_info.value)
+    assert "r1" in str(exc_info.value)

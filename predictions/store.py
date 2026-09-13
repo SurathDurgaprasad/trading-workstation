@@ -158,11 +158,11 @@ class PredictionStore:
 
     def get_prediction(self, prediction_id: str) -> PredictionRecord | None:
         row = self._conn.execute("SELECT data_json FROM predictions WHERE prediction_id = ?", (prediction_id,)).fetchone()
-        return PredictionRecord.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(PredictionRecord, row[0], row_identifier=prediction_id) if row else None
 
     def list_predictions(self, limit: int = 200) -> list[PredictionRecord]:
         rows = self._conn.execute("SELECT data_json FROM predictions ORDER BY created_at LIMIT ?", (limit,)).fetchall()
-        return [PredictionRecord.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(PredictionRecord, r[0], row_identifier="list_predictions") for r in rows]
 
     def has_prediction_for_entry(self, symbol: str, entry_time: datetime) -> bool:
         """Phase 36 -- duplicate-prevention check: has a prediction
@@ -188,7 +188,7 @@ class PredictionStore:
             "SELECT data_json FROM predictions WHERE symbol = ? ORDER BY created_at DESC LIMIT ?",
             (symbol.strip().upper(), limit),
         ).fetchall()
-        return [PredictionRecord.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(PredictionRecord, r[0], row_identifier=f"symbol={symbol}") for r in rows]
 
     def list_predictions_needing_evaluation(self, limit: int = 200) -> list[PredictionRecord]:
         """A prediction needs evaluation if it has no evaluation yet, or its
@@ -218,15 +218,15 @@ class PredictionStore:
             "SELECT data_json FROM prediction_evaluations WHERE prediction_id = ? ORDER BY evaluated_at",
             (prediction_id,),
         ).fetchall()
-        return [PredictionEvaluation.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(PredictionEvaluation, r[0], row_identifier=f"prediction_id={prediction_id}") for r in rows]
 
     def latest_evaluation_for_prediction(self, prediction_id: str) -> PredictionEvaluation | None:
         row = self._conn.execute(
             "SELECT data_json FROM prediction_evaluations WHERE prediction_id = ? ORDER BY evaluated_at DESC LIMIT 1",
             (prediction_id,),
         ).fetchone()
-        return PredictionEvaluation.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(PredictionEvaluation, row[0], row_identifier=f"prediction_id={prediction_id}") if row else None
 
     def list_all_evaluations(self, limit: int = 2000) -> list[PredictionEvaluation]:
         rows = self._conn.execute("SELECT data_json FROM prediction_evaluations ORDER BY evaluated_at LIMIT ?", (limit,)).fetchall()
-        return [PredictionEvaluation.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(PredictionEvaluation, r[0], row_identifier="list_all_evaluations") for r in rows]

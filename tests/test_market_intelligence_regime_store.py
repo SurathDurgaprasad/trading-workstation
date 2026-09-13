@@ -121,3 +121,25 @@ def test_schema_version_is_set_on_a_fresh_database(tmp_path):
     store = MarketRegimeStore(tmp_path / "regime.db")
     assert store.schema_version() == MarketRegimeStore.CURRENT_SCHEMA_VERSION
     store.close()
+
+
+def test_a_malformed_regime_report_row_raises_a_clear_error_not_a_raw_keyerror():
+    """MarketRegimeReport is a plain dataclass, not pydantic -- this
+    store's own _safe_report_from_dict wraps the resulting
+    KeyError/TypeError into the SAME MalformedRowError every other
+    store now raises, for one consistent error regardless of which
+    store or serialization approach a caller happens to be reading
+    from."""
+    from core.sqlite_util import MalformedRowError
+
+    store = MarketRegimeStore(":memory:")
+    store._conn.execute(
+        "INSERT INTO market_regime_reports (scan_id, as_of, data_json, created_at) VALUES (?,?,?,?)",
+        ("s1", "2024-01-01T00:00:00+00:00", '{"scan_id": "s1"}', "2024-01-01T00:00:00+00:00"),  # missing every other required field
+    )
+
+    with pytest.raises(MalformedRowError) as exc_info:
+        store.get_report("s1")
+
+    assert "MarketRegimeReport" in str(exc_info.value)
+    assert "s1" in str(exc_info.value)

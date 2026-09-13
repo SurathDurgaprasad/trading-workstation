@@ -377,3 +377,22 @@ def test_schema_version_upgrades_a_preexisting_pre_versioning_database(tmp_path)
 
     assert migrated.schema_version() == PredictionStore.CURRENT_SCHEMA_VERSION
     migrated.close()
+
+
+# --- autonomous hardening cycle: malformed data_json on read ----------------
+
+
+def test_a_malformed_prediction_row_raises_a_clear_error_not_a_raw_pydantic_traceback():
+    from core.sqlite_util import MalformedRowError
+
+    store = PredictionStore(":memory:")
+    store._conn.execute(
+        "INSERT INTO predictions (prediction_id, decision_id, symbol, created_at, entry_time, data_json) VALUES (?,?,?,?,?,?)",
+        ("p1", "dec-1", "AAPL", "2024-01-01T00:00:00+00:00", "2024-01-02T00:00:00", '{"prediction_id": "p1"}'),
+    )
+
+    with pytest.raises(MalformedRowError) as exc_info:
+        store.get_prediction("p1")
+
+    assert "PredictionRecord" in str(exc_info.value)
+    assert "p1" in str(exc_info.value)

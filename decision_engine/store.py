@@ -87,18 +87,18 @@ class DecisionStore:
 
     def get_decision(self, decision_id: str) -> Decision | None:
         row = self._conn.execute("SELECT data_json FROM decisions WHERE decision_id = ?", (decision_id,)).fetchone()
-        return Decision.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(Decision, row[0], row_identifier=decision_id) if row else None
 
     def latest_decision_for_symbol(self, symbol: str) -> Decision | None:
         row = self._conn.execute(
             "SELECT data_json FROM decisions WHERE symbol = ? ORDER BY as_of DESC LIMIT 1",
             (symbol.strip().upper(),),
         ).fetchone()
-        return Decision.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(Decision, row[0], row_identifier=f"symbol={symbol}") if row else None
 
     def list_decisions_for_symbol(self, symbol: str, limit: int = 50) -> list[Decision]:
         rows = self._conn.execute(
             "SELECT data_json FROM decisions WHERE symbol = ? ORDER BY as_of DESC LIMIT ?",
             (symbol.strip().upper(), limit),
         ).fetchall()
-        return [Decision.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(Decision, r[0], row_identifier=f"symbol={symbol}") for r in rows]

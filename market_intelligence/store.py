@@ -87,14 +87,14 @@ class ScanHistoryStore:
 
     def get_report(self, scan_id: str) -> ScanReport | None:
         row = self._conn.execute("SELECT data_json FROM scan_reports WHERE scan_id = ?", (scan_id,)).fetchone()
-        return ScanReport.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(ScanReport, row[0], row_identifier=scan_id) if row else None
 
     def latest_report(self) -> ScanReport | None:
         row = self._conn.execute("SELECT data_json FROM scan_reports ORDER BY as_of DESC LIMIT 1").fetchone()
-        return ScanReport.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(ScanReport, row[0], row_identifier="latest_report") if row else None
 
     def list_reports(self, limit: int = 50) -> list[ScanReport]:
         rows = self._conn.execute(
             "SELECT data_json FROM scan_reports ORDER BY as_of DESC LIMIT ?", (limit,)
         ).fetchall()
-        return [ScanReport.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(ScanReport, r[0], row_identifier="list_reports") for r in rows]

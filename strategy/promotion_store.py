@@ -93,7 +93,7 @@ class PromotionGateStore:
         row = self._conn.execute(
             "SELECT data_json FROM promotion_log WHERE evaluation_id = ?", (evaluation_id,)
         ).fetchone()
-        return PromotionEvaluation.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(PromotionEvaluation, row[0], row_identifier=evaluation_id) if row else None
 
     def history_for_candidate(self, candidate_name: str) -> list[PromotionEvaluation]:
         """Every evaluation ever recorded for this candidate, oldest
@@ -103,7 +103,7 @@ class PromotionGateStore:
             "SELECT data_json FROM promotion_log WHERE candidate_name = ? ORDER BY evaluated_at ASC",
             (candidate_name,),
         ).fetchall()
-        return [PromotionEvaluation.model_validate_json(row[0]) for row in rows]
+        return [sqlite_util.parse_model_json(PromotionEvaluation, row[0], row_identifier=f"candidate={candidate_name}") for row in rows]
 
     def latest_for_candidate(self, candidate_name: str) -> PromotionEvaluation | None:
         history = self.history_for_candidate(candidate_name)

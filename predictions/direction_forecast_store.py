@@ -121,11 +121,11 @@ class DirectionForecastStore:
 
     def get_forecast(self, forecast_id: str) -> DirectionForecastRecord | None:
         row = self._conn.execute("SELECT data_json FROM forecasts WHERE forecast_id = ?", (forecast_id,)).fetchone()
-        return DirectionForecastRecord.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(DirectionForecastRecord, row[0], row_identifier=forecast_id) if row else None
 
     def list_forecasts(self, limit: int = 500) -> list[DirectionForecastRecord]:
         rows = self._conn.execute("SELECT data_json FROM forecasts ORDER BY created_at LIMIT ?", (limit,)).fetchall()
-        return [DirectionForecastRecord.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(DirectionForecastRecord, r[0], row_identifier="list_forecasts") for r in rows]
 
     def has_forecast_for_bar(self, symbol: str, as_of: datetime) -> bool:
         """Same duplicate-prevention convention as predictions.store.
@@ -139,7 +139,7 @@ class DirectionForecastStore:
             "SELECT data_json FROM forecasts WHERE symbol = ? ORDER BY created_at DESC LIMIT ?",
             (symbol.strip().upper(), limit),
         ).fetchall()
-        return [DirectionForecastRecord.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(DirectionForecastRecord, r[0], row_identifier=f"symbol={symbol}") for r in rows]
 
     def list_forecasts_needing_evaluation(self, limit: int = 500) -> list[DirectionForecastRecord]:
         all_forecasts = self.list_forecasts(limit=limit)
@@ -163,15 +163,15 @@ class DirectionForecastStore:
         rows = self._conn.execute(
             "SELECT data_json FROM forecast_evaluations WHERE forecast_id = ? ORDER BY evaluated_at", (forecast_id,)
         ).fetchall()
-        return [DirectionForecastEvaluation.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(DirectionForecastEvaluation, r[0], row_identifier=f"forecast_id={forecast_id}") for r in rows]
 
     def latest_evaluation_for_forecast(self, forecast_id: str) -> DirectionForecastEvaluation | None:
         row = self._conn.execute(
             "SELECT data_json FROM forecast_evaluations WHERE forecast_id = ? ORDER BY evaluated_at DESC LIMIT 1",
             (forecast_id,),
         ).fetchone()
-        return DirectionForecastEvaluation.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(DirectionForecastEvaluation, row[0], row_identifier=f"forecast_id={forecast_id}") if row else None
 
     def list_all_evaluations(self, limit: int = 5000) -> list[DirectionForecastEvaluation]:
         rows = self._conn.execute("SELECT data_json FROM forecast_evaluations ORDER BY evaluated_at LIMIT ?", (limit,)).fetchall()
-        return [DirectionForecastEvaluation.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(DirectionForecastEvaluation, r[0], row_identifier="list_all_evaluations") for r in rows]

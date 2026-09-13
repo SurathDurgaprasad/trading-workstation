@@ -273,7 +273,8 @@ class LiveStateStore:
         cols = [d[0] for d in self._conn.execute("SELECT * FROM pending_approvals LIMIT 0").description]
         d = dict(zip(cols, row))
         return PendingApprovalRecord(
-            signal_id=d["signal_id"], symbol=d["symbol"], signal=Signal.model_validate_json(d["signal_json"]),
+            signal_id=d["signal_id"], symbol=d["symbol"],
+            signal=sqlite_util.parse_model_json(Signal, d["signal_json"], row_identifier=d["signal_id"]),
             strategy_version=d["strategy_version"], risk_config_version=d["risk_config_version"],
             requested_quantity=d["requested_quantity"], state=d["state"], history=_deserialize_history(d["history_json"]),
             created_at=d["created_at"], expires_at=d["expires_at"], decided_at=d["decided_at"], decision=d["decision"],

@@ -60,6 +60,25 @@ def _report_to_dict(report: MarketRegimeReport) -> dict:
     return data
 
 
+def _safe_report_from_dict(data_json: str, *, row_identifier: str) -> MarketRegimeReport:
+    """Autonomous hardening cycle: this store's own equivalent of
+    `core.sqlite_util.parse_model_json` -- MarketRegimeReport is a plain
+    dataclass, not a pydantic BaseModel (see this module's own docstring
+    for why), so `parse_model_json` itself (which calls
+    `model_cls.model_validate_json`, a pydantic-only API) does not apply
+    here; a malformed row instead raises `KeyError`/`TypeError` from
+    `_report_from_dict`'s own dict-unpacking, or `json.JSONDecodeError`
+    from `json.loads`. Wrapped into the SAME `MalformedRowError` type
+    every other store now raises, for one consistent error a caller can
+    catch regardless of which store it came from."""
+    from core.sqlite_util import MalformedRowError
+
+    try:
+        return _report_from_dict(json.loads(data_json))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise MalformedRowError(model_name="MarketRegimeReport", row_identifier=row_identifier, cause=exc) from exc
+
+
 def _report_from_dict(data: dict) -> MarketRegimeReport:
     return MarketRegimeReport(
         as_of=datetime.fromisoformat(data["as_of"]),
@@ -120,14 +139,14 @@ class MarketRegimeStore:
 
     def get_report(self, scan_id: str) -> MarketRegimeReport | None:
         row = self._conn.execute("SELECT data_json FROM market_regime_reports WHERE scan_id = ?", (scan_id,)).fetchone()
-        return _report_from_dict(json.loads(row[0])) if row else None
+        return _safe_report_from_dict(row[0], row_identifier=scan_id) if row else None
 
     def latest_report(self) -> MarketRegimeReport | None:
         row = self._conn.execute("SELECT data_json FROM market_regime_reports ORDER BY as_of DESC LIMIT 1").fetchone()
-        return _report_from_dict(json.loads(row[0])) if row else None
+        return _safe_report_from_dict(row[0], row_identifier="latest_report") if row else None
 
     def list_reports(self, limit: int = 50) -> list[MarketRegimeReport]:
         rows = self._conn.execute(
             "SELECT data_json FROM market_regime_reports ORDER BY as_of DESC LIMIT ?", (limit,)
         ).fetchall()
-        return [_report_from_dict(json.loads(r[0])) for r in rows]
+        return [_safe_report_from_dict(r[0], row_identifier="list_reports") for r in rows]

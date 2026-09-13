@@ -125,7 +125,7 @@ class SchedulerRunStore:
 
     def get_run(self, run_id: str) -> RunRecord | None:
         row = self._conn.execute("SELECT data_json FROM scheduler_runs WHERE run_id = ?", (run_id,)).fetchone()
-        return RunRecord.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(RunRecord, row[0], row_identifier=run_id) if row else None
 
     def active_lock(self) -> RunRecord | None:
         """Any run still RUNNING (no finished_at) -- the overlap-prevention
@@ -138,7 +138,7 @@ class SchedulerRunStore:
         ).fetchall()
         if not rows:
             return None
-        return RunRecord.model_validate_json(rows[0][0])
+        return sqlite_util.parse_model_json(RunRecord, rows[0][0], row_identifier="active_lock")
 
     def reclaim_stale_locks(self, *, staleness_seconds: float, now: datetime | None = None) -> list[RunRecord]:
         """Restart recovery: a RUNNING row started more than
@@ -153,7 +153,7 @@ class SchedulerRunStore:
         ).fetchall()
         reclaimed = []
         for (data_json,) in rows:
-            record = RunRecord.model_validate_json(data_json)
+            record = sqlite_util.parse_model_json(RunRecord, data_json, row_identifier="reclaim_stale_locks")
             age_seconds = (now - record.started_at).total_seconds()
             if age_seconds >= staleness_seconds:
                 updated = self.finish_run(
@@ -176,13 +176,13 @@ class SchedulerRunStore:
             "AND status IN (?, ?) ORDER BY started_at DESC LIMIT 1",
             (slot_name, run_date, RunStatus.COMPLETED.value, RunStatus.FAILED.value),
         ).fetchone()
-        return RunRecord.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(RunRecord, row[0], row_identifier=f"slot_name={slot_name}") if row else None
 
     def list_runs(self, limit: int = 100) -> list[RunRecord]:
         rows = self._conn.execute(
             "SELECT data_json FROM scheduler_runs ORDER BY started_at DESC LIMIT ?", (limit,)
         ).fetchall()
-        return [RunRecord.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(RunRecord, r[0], row_identifier="list_runs") for r in rows]
 
     def last_successful_run_for_slot(self, slot_name: str) -> RunRecord | None:
         """Final-product-hardening: release-gate mission section 11 asks
@@ -197,7 +197,7 @@ class SchedulerRunStore:
             "SELECT data_json FROM scheduler_runs WHERE slot_name = ? AND status = ? ORDER BY started_at DESC LIMIT 1",
             (slot_name, RunStatus.COMPLETED.value),
         ).fetchone()
-        return RunRecord.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(RunRecord, row[0], row_identifier=f"last_success:{slot_name}") if row else None
 
     def last_failed_run_for_slot(self, slot_name: str) -> RunRecord | None:
         """Symmetric with last_successful_run_for_slot -- surfaces the
@@ -208,7 +208,7 @@ class SchedulerRunStore:
             "SELECT data_json FROM scheduler_runs WHERE slot_name = ? AND status = ? ORDER BY started_at DESC LIMIT 1",
             (slot_name, RunStatus.FAILED.value),
         ).fetchone()
-        return RunRecord.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(RunRecord, row[0], row_identifier=f"last_failure:{slot_name}") if row else None
 
     def distinct_slot_names(self) -> list[str]:
         """Every slot name that has ever actually run, derived from run

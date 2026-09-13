@@ -80,18 +80,18 @@ class ResearchStore:
 
     def get_report(self, report_id: str) -> ResearchReport | None:
         row = self._conn.execute("SELECT data_json FROM research_reports WHERE report_id = ?", (report_id,)).fetchone()
-        return ResearchReport.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(ResearchReport, row[0], row_identifier=report_id) if row else None
 
     def latest_report_for_symbol(self, symbol: str) -> ResearchReport | None:
         row = self._conn.execute(
             "SELECT data_json FROM research_reports WHERE symbol = ? ORDER BY as_of DESC LIMIT 1",
             (symbol.strip().upper(),),
         ).fetchone()
-        return ResearchReport.model_validate_json(row[0]) if row else None
+        return sqlite_util.parse_model_json(ResearchReport, row[0], row_identifier=f"symbol={symbol}") if row else None
 
     def list_reports_for_symbol(self, symbol: str, limit: int = 50) -> list[ResearchReport]:
         rows = self._conn.execute(
             "SELECT data_json FROM research_reports WHERE symbol = ? ORDER BY as_of DESC LIMIT ?",
             (symbol.strip().upper(), limit),
         ).fetchall()
-        return [ResearchReport.model_validate_json(r[0]) for r in rows]
+        return [sqlite_util.parse_model_json(ResearchReport, r[0], row_identifier=f"symbol={symbol}") for r in rows]

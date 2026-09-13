@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from decision_engine.models import Decision, DecisionLabel, RiskContext
 from decision_engine.store import DecisionStore
 from market_intelligence.models import CandidateScore
@@ -101,3 +103,19 @@ def test_schema_version_is_set_on_a_fresh_database(tmp_path):
     store = DecisionStore(tmp_path / "decisions.db")
     assert store.schema_version() == DecisionStore.CURRENT_SCHEMA_VERSION
     store.close()
+
+
+def test_a_malformed_decision_row_raises_a_clear_error_not_a_raw_pydantic_traceback():
+    from core.sqlite_util import MalformedRowError
+
+    store = DecisionStore(":memory:")
+    store._conn.execute(
+        "INSERT INTO decisions (decision_id, symbol, as_of, label, config_version, data_json, created_at) VALUES (?,?,?,?,?,?,?)",
+        ("d1", "AAPL", "2024-01-01T00:00:00+00:00", "BUY", "cfg1", '{"decision_id": "d1"}', "2024-01-01T00:00:00+00:00"),
+    )
+
+    with pytest.raises(MalformedRowError) as exc_info:
+        store.get_decision("d1")
+
+    assert "Decision" in str(exc_info.value)
+    assert "d1" in str(exc_info.value)
