@@ -31,6 +31,14 @@ A malformed schedule config (an inverted time window, a non-positive
 `SchedulerConfigurationError` at load time — not a slot that silently
 never runs.
 
+If a custom config defines two slots with overlapping eligibility
+windows, `due_slot()` is deterministic, not ambiguous: it always
+returns the *first* due slot in the order the slots are configured
+(`scheduler/config.py::ScheduleConfig.due_slot`), never more than one
+slot's worth of work per tick — a second due slot at the same tick is
+simply picked up on the next one. If you rely on overlapping windows,
+put the higher-priority slot first in your YAML.
+
 ## Checking on it
 
 ```bash
