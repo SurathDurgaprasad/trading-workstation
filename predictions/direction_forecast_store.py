@@ -44,12 +44,23 @@ def _now() -> str:
 
 
 class DirectionForecastStore:
+    CURRENT_SCHEMA_VERSION = 1
+    """Final-product-hardening: see core.sqlite_util.ensure_schema_version's
+    docstring, and predictions/store.py::PredictionStore's own identical
+    note -- this store's real schema evolution is tracked by
+    `duplicate_prevention_enforced_at_db_level`, more precise than a
+    version bump here."""
+
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
         self._conn = sqlite_util.connect(self.db_path)
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
         self.duplicate_prevention_enforced_at_db_level = self._migrate_as_of_column_and_unique_index()
+        sqlite_util.ensure_schema_version(self._conn, self.CURRENT_SCHEMA_VERSION)
+
+    def schema_version(self) -> int:
+        return sqlite_util.get_schema_version(self._conn)
 
     def _migrate_as_of_column_and_unique_index(self) -> bool:
         """Final-product-hardening: same migration as predictions/store.py's

@@ -48,12 +48,27 @@ def _now() -> str:
 
 
 class PredictionStore:
+    CURRENT_SCHEMA_VERSION = 1
+    """Final-product-hardening: see core.sqlite_util.ensure_schema_version's
+    docstring for why this is PRAGMA user_version, not a table. This
+    store's real schema evolution (the entry_time column + unique index)
+    is tracked by its own `duplicate_prevention_enforced_at_db_level`
+    flag, which is more precise than a version bump here (it captures
+    "did the migration actually succeed on THIS database," not just
+    "has this code run against it") -- CURRENT_SCHEMA_VERSION stays at
+    1, consistent with every other store, as a general schema-identity
+    marker for future changes."""
+
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
         self._conn = sqlite_util.connect(self.db_path)
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
         self.duplicate_prevention_enforced_at_db_level = self._migrate_entry_time_column_and_unique_index()
+        sqlite_util.ensure_schema_version(self._conn, self.CURRENT_SCHEMA_VERSION)
+
+    def schema_version(self) -> int:
+        return sqlite_util.get_schema_version(self._conn)
 
     def _migrate_entry_time_column_and_unique_index(self) -> bool:
         """Final-product-hardening: `has_prediction_for_entry` (below)

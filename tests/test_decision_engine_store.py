@@ -95,3 +95,9 @@ def test_db_size_bytes_reflects_a_real_file(tmp_path):
     store = DecisionStore(tmp_path / "decisions.db")
     assert store.db_size_bytes() > 0
     store.close()
+
+
+def test_schema_version_is_set_on_a_fresh_database(tmp_path):
+    store = DecisionStore(tmp_path / "decisions.db")
+    assert store.schema_version() == DecisionStore.CURRENT_SCHEMA_VERSION
+    store.close()

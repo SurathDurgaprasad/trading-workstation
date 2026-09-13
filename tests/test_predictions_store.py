@@ -349,3 +349,31 @@ def test_db_size_bytes_reflects_a_real_file(tmp_path):
     store = PredictionStore(tmp_path / "predictions.db")
     assert store.db_size_bytes() > 0
     store.close()
+
+
+def test_schema_version_is_set_on_a_fresh_database(tmp_path):
+    store = PredictionStore(tmp_path / "predictions.db")
+    assert store.schema_version() == PredictionStore.CURRENT_SCHEMA_VERSION
+    store.close()
+
+
+def test_schema_version_upgrades_a_preexisting_pre_versioning_database(tmp_path):
+    """A real, already-deployed predictions.db created before schema-
+    version tracking existed has version 0 (PRAGMA user_version's own
+    default, never having been set) -- opening it with current code
+    must stamp it with the current version, same as the entry_time
+    backfill migration already does for its own column."""
+    db_path = tmp_path / "predictions.db"
+    raw = sqlite3.connect(str(db_path))
+    raw.execute(
+        "CREATE TABLE predictions (prediction_id TEXT PRIMARY KEY, decision_id TEXT NOT NULL, "
+        "symbol TEXT NOT NULL, created_at TEXT NOT NULL, data_json TEXT NOT NULL)"
+    )
+    assert raw.execute("PRAGMA user_version").fetchone()[0] == 0
+    raw.commit()
+    raw.close()
+
+    migrated = PredictionStore(db_path)
+
+    assert migrated.schema_version() == PredictionStore.CURRENT_SCHEMA_VERSION
+    migrated.close()

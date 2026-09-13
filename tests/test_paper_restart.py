@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from paper.engine import Bar, PaperTradingEngine
+from paper.engine import Bar, BarOutcome, PaperTradingEngine
 from paper.reconciliation import reconcile
 from paper.replay import replay_historical
 from paper.store import PaperStore
@@ -165,6 +165,45 @@ def test_position_expiry_bars_held_survives_a_restart(tmp_path):
         f"uninterrupted={state_uninterrupted}\nrestarted={state_restarted}"
     )
     assert engine_b2.store.get_open_position("TEST") is None  # expired, same as the uninterrupted run
+
+    report = reconcile(store_b2)
+    assert report.ok, report.issues
+    store_b2.close()
+
+
+def test_replaying_an_already_processed_bar_after_a_restart_does_not_duplicate_state(tmp_path):
+    """Final-product-hardening restart-recovery gap: every existing
+    duplicate-bar test (tests/test_paper_bar_ordering.py) resubmits a bar
+    to the SAME engine/store instance within one process -- never proves
+    the duplicate-rejection survives a real restart. This matters
+    concretely: a live feed or an operator-triggered backfill redelivering
+    a bar that was already processed BEFORE a crash must not double-fill
+    the order or open a second position once the process comes back up,
+    since bar_cursor (get_last_bar_timestamp) is exactly what
+    process_bar's own idempotency check reads -- this proves that
+    persisted value, not just in-memory state, is what makes it safe."""
+    signal = _expiry_signal()
+    fill_bar = Bar(timestamp=datetime(2026, 1, 2), open=101.0, high=102.0, low=100.5, close=101.5)
+
+    db_path = _tmp_db_path(tmp_path)
+    store_b1 = PaperStore(db_path)
+    engine_b1 = PaperTradingEngine(store_b1, initial_capital=100_000.0)
+    engine_b1.submit_signal(signal)
+    outcome_before_restart = engine_b1.process_bar("TEST", fill_bar)  # fills the order, opens the position
+    assert outcome_before_restart == BarOutcome.PROCESSED
+    assert len(store_b1.list_positions()) == 1
+    assert len(store_b1._fetch_all_json("paper_fills")) == 1
+    store_b1.close()  # simulates process termination right after the fill was committed
+
+    store_b2 = PaperStore(db_path)  # fresh connection, fresh engine -- same file
+    engine_b2 = PaperTradingEngine(store_b2, initial_capital=100_000.0)
+    # The exact same bar, redelivered post-restart (a re-sent live tick, or
+    # an operator re-running a backfill over an overlapping window).
+    outcome_after_restart = engine_b2.process_bar("TEST", fill_bar)
+
+    assert outcome_after_restart == BarOutcome.DUPLICATE_SKIPPED
+    assert len(store_b2.list_positions()) == 1  # still exactly one, not two
+    assert len(store_b2._fetch_all_json("paper_fills")) == 1  # still exactly one, not two
 
     report = reconcile(store_b2)
     assert report.ok, report.issues

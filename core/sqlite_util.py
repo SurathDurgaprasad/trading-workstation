@@ -92,6 +92,42 @@ def ensure_column(conn: sqlite3.Connection, table: str, column: str, coltype: st
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
 
 
+def get_schema_version(conn: sqlite3.Connection) -> int:
+    """SQLite's own built-in per-database-file integer, `PRAGMA
+    user_version` -- zero cost (no extra table, no extra row), zero
+    migration of its own (every database, including ones created before
+    this function existed, already has it; it simply reads 0 for a file
+    that has never had it set). Chosen over a hand-rolled
+    `schema_version` table specifically because it needs no schema of
+    its own to bootstrap -- a version-tracking mechanism that itself
+    requires a successful migration to exist would be a contradiction."""
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def set_schema_version(conn: sqlite3.Connection, version: int) -> None:
+    """`version` is always this codebase's own hardcoded integer
+    constant, never user input -- PRAGMA does not support parameter
+    binding for its value, so this f-string is not a SQL-injection
+    risk despite not being parameterized (same reasoning as
+    `ensure_column`'s table/column names above)."""
+    conn.execute(f"PRAGMA user_version = {int(version)}")
+
+
+def ensure_schema_version(conn: sqlite3.Connection, version: int) -> None:
+    """Records `version` via `set_schema_version` if the database's
+    current version is lower -- idempotent (safe to call on every
+    connect, not just once at creation), and never LOWERS an existing
+    version (a newer on-disk schema opened by older code should not
+    silently regress its own version marker, though nothing in this
+    codebase does that today). Each store calls this once in its own
+    `__init__`, after its own `_SCHEMA`/`ensure_column` calls have run,
+    with its own store-specific `CURRENT_SCHEMA_VERSION` constant --
+    there is no single shared version number across all 12 stores,
+    since each has its own independent schema."""
+    if get_schema_version(conn) < version:
+        set_schema_version(conn, version)
+
+
 def try_create_unique_index(conn: sqlite3.Connection, *, index_name: str, table: str, columns: str) -> bool:
     """Attempts `CREATE UNIQUE INDEX IF NOT EXISTS` and reports whether it
     succeeded, rather than letting a real, already-deployed database that

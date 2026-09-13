@@ -81,6 +81,34 @@ def test_reclaim_stale_locks_frees_an_orphaned_lock_for_restart_recovery(store):
     assert store.active_lock() is None  # lock is free again -- a new run can start
 
 
+def test_reclaim_stale_locks_works_across_a_real_process_restart(tmp_path):
+    """Final-product-hardening restart-recovery gap: the test above
+    exercises reclaim_stale_locks on the SAME store instance that
+    started the run -- a real crash means the ORIGINAL process (and its
+    connection) is gone; recovery happens from a freshly-started process
+    opening a NEW SchedulerRunStore on the same db file. This is the
+    scenario that actually matters (a killed `schedule loop` process,
+    restarted later) -- proves the on-disk RUNNING row, not any
+    in-memory state, is what makes recovery real."""
+    db_path = tmp_path / "runs.db"
+    crashed = SchedulerRunStore(db_path)
+    started_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    crashed.start_run(run_id="r1", slot_name="intraday", run_date="2026-09-03", started_at=started_at)
+    # Simulate a crash: the process dies without ever calling finish_run.
+    # No explicit close() either -- a real kill -9 wouldn't get one.
+
+    restarted = SchedulerRunStore(db_path)
+    assert restarted.active_lock() is not None  # the orphaned lock is visible to the new process
+
+    reclaimed = restarted.reclaim_stale_locks(staleness_seconds=1800, now=datetime.now(timezone.utc))
+
+    assert len(reclaimed) == 1
+    assert reclaimed[0].run_id == "r1"
+    assert reclaimed[0].status == RunStatus.RECLAIMED
+    assert restarted.active_lock() is None  # a new run can now start
+    restarted.close()
+
+
 def test_has_completed_today_true_only_for_a_completed_run_on_that_date(store):
     store.start_run(run_id="r1", slot_name="pre_market", run_date="2026-09-03", started_at=datetime.now(timezone.utc))
     assert store.has_completed_today(slot_name="pre_market", run_date="2026-09-03") is False  # still RUNNING
@@ -279,3 +307,9 @@ def test_distinct_slot_names_lists_every_slot_that_has_ever_run(store):
 
 def test_distinct_slot_names_is_empty_when_nothing_has_run(store):
     assert store.distinct_slot_names() == []
+
+
+def test_schema_version_is_set_on_a_fresh_database(tmp_path):
+    store = SchedulerRunStore(tmp_path / "runs.db")
+    assert store.schema_version() == SchedulerRunStore.CURRENT_SCHEMA_VERSION
+    store.close()

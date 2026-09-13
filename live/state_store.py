@@ -176,6 +176,13 @@ class FeedStatusRecord:
 
 
 class LiveStateStore:
+    CURRENT_SCHEMA_VERSION = 1
+    """Final-product-hardening: see core.sqlite_util.ensure_schema_version's
+    docstring for why this is PRAGMA user_version, not a table. Bump this
+    (and add a real migration step in __init__) the next time this
+    store's own _SCHEMA changes in a way existing on-disk databases need
+    to catch up to."""
+
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
         self._conn = sqlite_util.connect(self.db_path)
@@ -186,9 +193,13 @@ class LiveStateStore:
         # that module's docstring (extracted from here, the same
         # treatment already given to integrity_check/db_size_bytes).
         sqlite_util.ensure_column(self._conn, "feed_status", "last_price", "REAL")
+        sqlite_util.ensure_schema_version(self._conn, self.CURRENT_SCHEMA_VERSION)
 
     def close(self) -> None:
         self._conn.close()
+
+    def schema_version(self) -> int:
+        return sqlite_util.get_schema_version(self._conn)
 
     def integrity_check(self) -> str:
         """Final-product-hardening phase: `PRAGMA integrity_check` for

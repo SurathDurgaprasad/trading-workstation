@@ -360,3 +360,9 @@ def test_wal_mode_is_enabled(tmp_path):
     mode = store._conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode.lower() == "wal"
     store.close()
+
+
+def test_schema_version_is_set_on_a_fresh_database(tmp_path):
+    store = LiveStateStore(tmp_path / "state.db")
+    assert store.schema_version() == LiveStateStore.CURRENT_SCHEMA_VERSION
+    store.close()

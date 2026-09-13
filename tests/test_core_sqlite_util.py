@@ -7,7 +7,15 @@ import threading
 
 import pytest
 
-from core.sqlite_util import DEFAULT_BUSY_TIMEOUT_SECONDS, connect, ensure_column, try_create_unique_index
+from core.sqlite_util import (
+    DEFAULT_BUSY_TIMEOUT_SECONDS,
+    connect,
+    ensure_column,
+    ensure_schema_version,
+    get_schema_version,
+    set_schema_version,
+    try_create_unique_index,
+)
 
 
 def test_connect_enables_wal_mode(tmp_path):
@@ -136,3 +144,71 @@ def test_try_create_unique_index_reports_false_instead_of_raising_on_preexisting
 
     assert created is False
     conn.close()
+
+
+def test_get_schema_version_is_zero_for_a_fresh_database(tmp_path):
+    conn = connect(tmp_path / "test.db")
+    assert get_schema_version(conn) == 0
+    conn.close()
+
+
+def test_set_schema_version_round_trips(tmp_path):
+    conn = connect(tmp_path / "test.db")
+    set_schema_version(conn, 3)
+    assert get_schema_version(conn) == 3
+    conn.close()
+
+
+def test_schema_version_persists_across_a_reconnect(tmp_path):
+    db_path = tmp_path / "test.db"
+    conn1 = connect(db_path)
+    set_schema_version(conn1, 2)
+    conn1.close()
+
+    conn2 = connect(db_path)
+    assert get_schema_version(conn2) == 2
+    conn2.close()
+
+
+def test_ensure_schema_version_sets_the_version_on_a_fresh_database(tmp_path):
+    conn = connect(tmp_path / "test.db")
+    ensure_schema_version(conn, 1)
+    assert get_schema_version(conn) == 1
+    conn.close()
+
+
+def test_ensure_schema_version_is_idempotent(tmp_path):
+    conn = connect(tmp_path / "test.db")
+    ensure_schema_version(conn, 1)
+    ensure_schema_version(conn, 1)  # calling again must not error or change anything
+    assert get_schema_version(conn) == 1
+    conn.close()
+
+
+def test_ensure_schema_version_never_lowers_an_existing_version(tmp_path):
+    """A newer on-disk schema opened by older code should not silently
+    regress its own version marker."""
+    conn = connect(tmp_path / "test.db")
+    set_schema_version(conn, 5)
+
+    ensure_schema_version(conn, 1)
+
+    assert get_schema_version(conn) == 5
+    conn.close()
+
+
+def test_ensure_schema_version_upgrades_an_old_preexisting_database(tmp_path):
+    """Simulates a real, already-deployed database created before schema-
+    version tracking existed -- its version is 0 (SQLite's own default
+    for PRAGMA user_version, never having been set), and connecting to
+    it with the current code should stamp it with the current version."""
+    db_path = tmp_path / "test.db"
+    raw = connect(db_path)  # simulates an old store's own connect(), version never set
+    raw.execute("CREATE TABLE t (x INTEGER)")
+    raw.close()
+
+    reopened = connect(db_path)
+    assert get_schema_version(reopened) == 0  # confirms the "old" starting state
+    ensure_schema_version(reopened, 1)
+    assert get_schema_version(reopened) == 1
+    reopened.close()

@@ -37,11 +37,19 @@ CREATE INDEX IF NOT EXISTS idx_experiment_events_experiment_id ON experiment_eve
 
 
 class ExperimentStore:
+    CURRENT_SCHEMA_VERSION = 1
+    """Final-product-hardening: see core.sqlite_util.ensure_schema_version's
+    docstring for why this is PRAGMA user_version, not a table. Bump this
+    (and add a real migration step in __init__) the next time this
+    store's own _SCHEMA changes in a way existing on-disk databases need
+    to catch up to."""
+
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
         self._conn = sqlite_util.connect(self.db_path)
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
+        sqlite_util.ensure_schema_version(self._conn, self.CURRENT_SCHEMA_VERSION)
 
     def close(self) -> None:
         self._conn.close()
@@ -53,6 +61,9 @@ class ExperimentStore:
 
     def db_size_bytes(self) -> int:
         return sqlite_util.db_size_bytes(self.db_path)
+
+    def schema_version(self) -> int:
+        return sqlite_util.get_schema_version(self._conn)
 
     @contextmanager
     def transaction(self):

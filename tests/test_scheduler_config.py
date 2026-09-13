@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from scheduler.config import ScheduleConfig, ScheduleSlot, _default_slots
+from scheduler.errors import SchedulerConfigurationError
 from scheduler.models import RunStatus, SlotAction
 from scheduler.store import SchedulerRunStore
 
@@ -136,3 +137,57 @@ def test_from_yaml_file_with_no_slots_key_falls_back_to_defaults():
 
     assert config.holidays == (date(2026, 10, 20),)
     assert [s.name for s in config.slots] == [s.name for s in _default_slots()]
+
+
+# --- final-product-hardening: slot logic validation -------------------------
+
+
+def test_default_slots_construct_without_error():
+    """Confirms __post_init__'s new validation doesn't reject the
+    project's own real, shipped default schedule."""
+    slots = _default_slots()
+    assert len(slots) == 5
+
+
+def test_slot_with_before_equal_to_after_is_rejected():
+    with pytest.raises(SchedulerConfigurationError, match="strictly after"):
+        ScheduleSlot(name="bad", after=time(10, 0), before=time(10, 0), frequency_minutes=None, action=SlotAction.SHADOW_RUN)
+
+
+def test_slot_with_before_earlier_than_after_is_rejected():
+    with pytest.raises(SchedulerConfigurationError, match="strictly after"):
+        ScheduleSlot(name="bad", after=time(15, 0), before=time(9, 0), frequency_minutes=None, action=SlotAction.SHADOW_RUN)
+
+
+def test_slot_with_no_before_is_allowed():
+    slot = ScheduleSlot(name="ok", after=time(15, 30), before=None, frequency_minutes=None, action=SlotAction.SHADOW_RUN)
+    assert slot.before is None
+
+
+def test_slot_with_zero_frequency_minutes_is_rejected():
+    with pytest.raises(SchedulerConfigurationError, match="positive integer"):
+        ScheduleSlot(name="bad", after=time(9, 30), before=time(15, 15), frequency_minutes=0, action=SlotAction.SHADOW_RUN)
+
+
+def test_slot_with_negative_frequency_minutes_is_rejected():
+    with pytest.raises(SchedulerConfigurationError, match="positive integer"):
+        ScheduleSlot(name="bad", after=time(9, 30), before=time(15, 15), frequency_minutes=-15, action=SlotAction.SHADOW_RUN)
+
+
+def test_slot_with_none_frequency_minutes_is_allowed():
+    slot = ScheduleSlot(name="ok", after=time(9, 30), before=time(15, 15), frequency_minutes=None, action=SlotAction.SHADOW_RUN)
+    assert slot.frequency_minutes is None
+
+
+def test_from_yaml_file_rejects_an_inverted_window_with_a_clear_error():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "schedule.yaml"
+        path.write_text(
+            "slots:\n"
+            "  - name: bad_slot\n"
+            "    after: '15:00'\n"
+            "    before: '09:00'\n"
+            "    action: shadow_run\n"
+        )
+        with pytest.raises(SchedulerConfigurationError, match="strictly after"):
+            ScheduleConfig.from_yaml_file(path)

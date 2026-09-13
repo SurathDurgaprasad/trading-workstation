@@ -119,3 +119,17 @@ def test_db_size_bytes_reflects_a_real_file(tmp_path):
     store = ExperimentStore(tmp_path / "experiments.db")
     assert store.db_size_bytes() > 0
     store.close()
+
+
+def test_schema_version_is_set_on_a_fresh_database(tmp_path):
+    store = ExperimentStore(tmp_path / "experiments.db")
+    assert store.schema_version() == ExperimentStore.CURRENT_SCHEMA_VERSION
+    store.close()
+
+
+def test_schema_version_persists_across_a_reconnect(tmp_path):
+    db_path = tmp_path / "experiments.db"
+    ExperimentStore(db_path).close()
+    reopened = ExperimentStore(db_path)
+    assert reopened.schema_version() == ExperimentStore.CURRENT_SCHEMA_VERSION
+    reopened.close()

@@ -184,3 +184,9 @@ def test_update_position_on_a_nonexistent_position_raises_value_error():
 
     with pytest.raises(ValueError, match="no such position"):
         store.update_position(_position(position_id="does-not-exist"))
+
+
+def test_schema_version_is_set_on_a_fresh_database(tmp_path):
+    store = PaperStore(tmp_path / "paper.db")
+    assert store.schema_version() == PaperStore.CURRENT_SCHEMA_VERSION
+    store.close()

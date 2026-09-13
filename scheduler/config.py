@@ -24,6 +24,7 @@ from pathlib import Path
 
 import yaml
 
+from scheduler.errors import SchedulerConfigurationError
 from scheduler.models import SlotAction
 from scheduler.store import SchedulerRunStore
 
@@ -56,6 +57,28 @@ class ScheduleSlot:
     slot re-triggering hourly during market hours."""
     action: SlotAction
     enabled: bool = True
+
+    def __post_init__(self) -> None:
+        """Final-product-hardening: a real config-validation gap found
+        via a fresh audit -- `from_yaml_file` (below) previously only
+        raised on malformed TYPES (an unparseable time string, an
+        unrecognized action) via `_parse_time`/`SlotAction`'s own
+        constructors, never on malformed LOGIC (an inverted or
+        zero-width [after, before) window, a non-positive
+        frequency_minutes) -- both would silently produce a slot that
+        can simply never become due, not a clear configuration error a
+        user could act on. Raised here, in `__post_init__`, so this is
+        caught for EVERY ScheduleSlot construction (both `_default_slots`
+        and `from_yaml_file`), not just the YAML path."""
+        if self.before is not None and self.before <= self.after:
+            raise SchedulerConfigurationError(
+                f"Slot {self.name!r}: `before` ({self.before}) must be strictly after `after` ({self.after}) -- "
+                "an inverted or zero-width eligibility window can never be due."
+            )
+        if self.frequency_minutes is not None and self.frequency_minutes <= 0:
+            raise SchedulerConfigurationError(
+                f"Slot {self.name!r}: frequency_minutes must be a positive integer if set, got {self.frequency_minutes!r}."
+            )
 
     def is_within_window(self, local_time: time) -> bool:
         if local_time < self.after:

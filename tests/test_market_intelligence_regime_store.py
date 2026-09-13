@@ -115,3 +115,9 @@ def test_db_size_bytes_reflects_a_real_file(tmp_path):
     store = MarketRegimeStore(tmp_path / "regime.db")
     assert store.db_size_bytes() > 0
     store.close()
+
+
+def test_schema_version_is_set_on_a_fresh_database(tmp_path):
+    store = MarketRegimeStore(tmp_path / "regime.db")
+    assert store.schema_version() == MarketRegimeStore.CURRENT_SCHEMA_VERSION
+    store.close()

@@ -934,3 +934,76 @@ def test_shadow_run_records_no_predictions_for_a_declining_universe(tmp_path, ca
     store = PredictionStore(tmp_path / "predictions.db")
     assert store.list_predictions() == []
     store.close()
+
+
+class _PerSymbolMarketDataProvider:
+    """Serves different bars per symbol -- unlike the shared fixture's
+    _FakeMarketDataProvider (same bars for every symbol), this is what a
+    real multi-symbol scan actually needs to exercise "one symbol's data
+    is bad, another's is fine" in the SAME run."""
+
+    def __init__(self, bars_by_symbol: dict):
+        self._bars_by_symbol = bars_by_symbol
+
+    def fetch_ohlcv(self, symbol, *, period="1y", interval="1d"):
+        return OHLCV(symbol=symbol, interval=interval, bars=self._bars_by_symbol[symbol])
+
+
+def test_shadow_run_invalid_market_data_never_reaches_decision_prediction_or_paper_order(tmp_path, capsys, monkeypatch):
+    """Final-product-hardening, end-to-end: the release-gate mission's own
+    hard rule -- INVALID DATA -> scanner -> decision -> risk -> paper
+    execution -> NO TRADE -- proven through the REAL production wiring
+    (run_shadow_run_command, market_intelligence.scanner.run_scan,
+    decision_engine.engine.make_decision, risk.sizing.build_signal_for_buy,
+    PaperTradingEngine), not a reimplementation of the pipeline. Only the
+    market data provider is faked (one symbol gets a duplicate-timestamp
+    series -- market_data.validation.validate_ohlcv's own INVALID
+    condition -- the other gets the fixture's normal uptrend series).
+    "GOOD" must proceed through the full pipeline exactly like the
+    existing single-symbol paper-execute test; "BADDATA" must produce
+    ZERO rows in decisions/predictions/paper stores -- it is excluded by
+    the scanner before make_decision is ever called for it (see
+    market_intelligence/scanner.py's own _screen_symbol), which is what
+    this test actually verifies end-to-end rather than assuming."""
+    good_bars = _uptrend_bars()
+    bad_bars = list(_uptrend_bars())
+    bad_bars[50] = bad_bars[49]  # duplicate timestamp -> INVALID per validate_ohlcv
+    monkeypatch.setattr(
+        "market.data_provider.get_market_data_provider",
+        lambda: _PerSymbolMarketDataProvider({"GOOD": good_bars, "BADDATA": bad_bars}),
+    )
+
+    args = parse_args([
+        "shadow-run", "--symbols", "GOOD,BADDATA", "--benchmark", "", "--skip-evaluate",
+        "--scanner-db", str(tmp_path / "scanner.db"), "--research-db", str(tmp_path / "research.db"),
+        "--decision-db", str(tmp_path / "decisions.db"), "--predictions-db", str(tmp_path / "predictions.db"),
+        "--initial-capital", "20000", "--paper-execute",
+        "--paper-db", str(tmp_path / "paper.db"), "--state-db", str(tmp_path / "state.db"),
+    ])
+    run_shadow_run_command(args)
+
+    output = capsys.readouterr().out
+    assert "[1/4] Scan complete: 1 candidates, 1 excluded" in output
+    assert "GOOD" in output and "decision=BUY" in output  # the valid symbol proceeded normally
+
+    from decision_engine.store import DecisionStore
+    from paper.store import PaperStore
+    from predictions.store import PredictionStore
+
+    decision_store = DecisionStore(tmp_path / "decisions.db")
+    assert decision_store.latest_decision_for_symbol("GOOD") is not None
+    assert decision_store.latest_decision_for_symbol("BADDATA") is None  # never reached decide -- excluded before it
+    decision_store.close()
+
+    prediction_store = PredictionStore(tmp_path / "predictions.db")
+    predictions = prediction_store.list_predictions()
+    assert len(predictions) == 1
+    assert predictions[0].symbol == "GOOD"  # no prediction was ever recorded for BADDATA
+    prediction_store.close()
+
+    paper_store = PaperStore(tmp_path / "paper.db")
+    journal = paper_store.list_journal_entries()
+    assert all(entry.symbol == "GOOD" for entry in journal)  # BADDATA produced NO paper order/position/fill at all
+    assert paper_store.get_open_position("BADDATA") is None
+    assert paper_store.get_pending_order("BADDATA") is None
+    paper_store.close()
