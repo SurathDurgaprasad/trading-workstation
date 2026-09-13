@@ -40,3 +40,14 @@ pyyaml==6.0.3
 
 # test-only
 pytest==9.1.1
+
+# Directly imported by ml_research/ (Phase 1 quantitative prediction
+# foundation, docs/research/ML_PHASE1_TRIPLE_BARRIER_BASELINE_
+# PREREGISTRATION.md) -- scikit-learn's LogisticRegression is the only
+# model in scope for this phase; pyarrow backs pandas' Parquet read/write
+# for the feature and label datasets. sklearn was already present in
+# venv/ (transitive); pyarrow was newly installed for this phase. Both
+# pinned to the versions in venv/ at install time, same convention as
+# the rest of this file.
+scikit-learn==1.9.0
+pyarrow==25.0.1

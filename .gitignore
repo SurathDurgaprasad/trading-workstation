@@ -15,6 +15,7 @@ data/*.db
 data/market/**/*.csv
 data/market/**/*.json
 data/dhan/
+data/ml_research/
 vectorstore/
 
 # Personal/reference documents not part of the published project
