@@ -1,0 +1,478 @@
+{
+  "audit_metadata": {
+    "generated_at": "2026-09-13",
+    "method": "Static, read-only code/doc/git audit. No application code was modified. Evidence gathered by direct file reads, ripgrep-based search, git history inspection, and five parallel read-only sub-audits (databases/queues/scheduler/websockets; agents/models/prompts; risk/backtesting/paper/live-execution; security/reliability/tech-debt; tests/integrations/decision-pipeline). No code was executed except read-only 'pytest --collect-only' and a prior full regression run performed for an unrelated task in this same session.",
+    "status_values": ["working", "partial", "mocked", "broken", "missing", "unknown"],
+    "confidence_values": ["high", "medium", "low"],
+    "primary_sources": [
+      "README.md", "PROJECT_GOAL_AND_ROADMAP.md", "docs/PHASE_HISTORY.md",
+      "docs/SECURITY_REVIEW.md", "docs/OBSERVABILITY.md", "docs/BRUTAL_SELF_CRITIC.md",
+      "docs/MARKET_DATA_SOURCES.md", "direct source reads", "git log/branch/history"
+    ]
+  },
+
+  "repository_metadata": {
+    "name": "TradingAgents (git remote name: trading-workstation)",
+    "root_path": "TradingAgents/",
+    "primary_language": "Python",
+    "description": "Single-user, local-first paper-trading research workstation and market-intelligence platform for Indian (NSE/BSE) and select US equities. Two largely separate pipelines: (1) a human-approval paper-trading execution path (live/, paper/, risk/, strategy/baseline.py), and (2) a market-intelligence/recommendation pipeline (market_data/, market_intelligence/, research/, decision_engine/, predictions/, learning/) that never touches execution. A third, independent layer (quant_research/, backtesting/, strategy/*) runs offline statistical hypothesis research and is not wired into either live pipeline.",
+    "dependency_manifest": "requirements.txt (42 lines) -- direct-dependency contract, not a full pip freeze",
+    "key_dependencies": [
+      "langgraph==1.2.4", "langchain==1.3.4", "langchain-ollama==1.1.0", "langchain-chroma==1.1.0",
+      "chromadb==1.5.9", "pydantic==2.13.4", "yfinance==1.4.1", "pandas==3.0.3", "numpy==2.4.6",
+      "ollama==0.6.2", "mcp==1.29.1", "requests==2.34.2", "websocket-client==1.9.0",
+      "starlette==1.6.0", "uvicorn==0.49.0", "pyyaml==6.0.3", "pytest==9.1.1"
+    ],
+    "documentation": {
+      "markdown_docs_in_docs_dir": 42,
+      "html_phase_reports_in_docs_phases_dir": 35,
+      "authoritative_intent_doc": "PROJECT_GOAL_AND_ROADMAP.md",
+      "authoritative_current_state_doc": "README.md",
+      "phase_index": "docs/PHASE_HISTORY.md",
+      "note": "Development proceeded in 45+ numbered phases (Phase 0 through post-Phase-42 bridge/critic work), each phase self-documented with an evidence-labeled report. Phases 1-7 (and one Phase-15-adjacent audit) exist only as externally-hosted Claude Artifacts, never committed to the repo -- a disclosed documentation gap."
+    }
+  },
+
+  "git_state": {
+    "current_branch": "main",
+    "head_sha": "982b7d4549e9a7fb1e558fe17435c1292eeeb6a9",
+    "head_committed_at": "2026-09-13T13:17:27+05:30",
+    "remote": "https://github.com/SurathDurgaprasad/trading-workstation.git",
+    "local_main_equals_origin_main": true,
+    "working_tree_clean": true,
+    "total_commits_on_main": 197,
+    "first_commit": {
+      "sha": "b7dcfb0f0299d98c9196ba276fde79e5472afb58",
+      "date": "2026-09-01T21:47:58+05:30",
+      "message": "Initial commit: human-operated paper-trading workstation (Phase 0-13)"
+    },
+    "contributors": ["SurathDurgaprasad <durgaprasadsurath@gmail.com>"],
+    "tags": [],
+    "branch_count_note": "150+ local/remote branches exist (one per phase and per feature/fix, e.g. phase-16-dhan-connectivity, feature-deterministic-critic-core, fix-stale-pending-order-bypasses-risk-halt), almost none deleted after merge -- see technical_debt entry 'stale-branch-accumulation'."
+  },
+
+  "services": [
+    {
+      "name": "CLI (main.py)",
+      "status": "working",
+      "confidence": "high",
+      "evidence": [
+        {"file": "main.py", "symbol": "add_parser(...)", "line": 3301, "description": "~30 argparse subcommands: analyze, backtest, backtest-universe, paper, live-sim, paper-live, dashboard, universe, cache-status, readiness-check, scan, regime, daily-report, research, decide, size, predict, evaluate, evaluate-forecasts, learn, experiment (start/end/list/compare/recommend), hypothesis-registry, review, shadow-run, schedule (tick/loop/status)."}
+      ],
+      "dependencies": [],
+      "risks": [],
+      "next_action": "None -- primary, well-exercised entry point."
+    },
+    {
+      "name": "Dashboard web server",
+      "status": "working",
+      "confidence": "high",
+      "evidence": [
+        {"file": "dashboard/app.py", "symbol": "app = Starlette(routes=[...])", "line": 994, "description": "Starlette app served via uvicorn (python main.py dashboard), 7 server-rendered HTML routes, no separate JS/React frontend (confirmed: no package.json/static/frontend dir anywhere in repo)."},
+        {"file": "dashboard/app.py", "symbol": "_page()", "line": 271, "description": "Hand-built HTML wrapper; every external/user-influenced interpolation passes through html.escape() (confirmed clean by docs/SECURITY_REVIEW.md section 2)."}
+      ],
+      "dependencies": ["paper trading store", "decision_engine store", "predictions store", "live state store"],
+      "risks": ["No CSRF protection on state-changing routes (/approve, /reject, /kill-switch/*) -- documented, accepted for the local-only threat model; a --host flag pointed off-loopback now prints an explicit warning rather than being silently exposed (docs/SECURITY_REVIEW.md section 5)."],
+      "next_action": "None required for current single-user, local threat model."
+    },
+    {
+      "name": "MCP server",
+      "status": "working",
+      "confidence": "high",
+      "evidence": [
+        {"file": "mcp_server/server.py", "symbol": "main()", "line": 625, "description": "23 @mcp.tool()-decorated functions exposing market context, strategy signal, risk evaluation, paper trading (submit/status/positions/journal), mock live simulation, live-workstation read state, approve/reject, and read-only Dhan account funds/positions -- no place_order tool exists anywhere (explicit comment, mcp_server/server.py:555-560)."}
+      ],
+      "dependencies": ["paper trading engine", "risk engine", "live workstation state"],
+      "risks": [],
+      "next_action": "None."
+    },
+    {
+      "name": "Scheduler (schedule tick / schedule loop)",
+      "status": "partial",
+      "confidence": "high",
+      "evidence": [
+        {"file": "scheduler/runner.py", "symbol": "run_tick()", "line": 139, "description": "Runs at most one due slot then exits -- designed to be invoked by an EXTERNAL scheduler (cron/Task Scheduler), which this repo does not itself configure."},
+        {"file": "main.py", "symbol": "schedule loop", "line": 3245, "description": "A plain Python while-loop with time.sleep(interval) between ticks -- not an OS-level daemon/cron; only runs as long as this one foreground/background process stays alive."},
+        {"file": "scheduler/store.py", "symbol": "try_start_run()", "line": 64, "description": "BEGIN IMMEDIATE-based atomic lock preventing overlapping runs; reclaim_stale_locks() (line 130) recovers from a crashed process."}
+      ],
+      "dependencies": ["shadow-run pipeline", "evaluate/learn commands"],
+      "risks": ["No OS-level scheduling exists anywhere in the repo -- 'continuous operation' depends entirely on an operator (or an external supervisor not present in this repo) keeping 'schedule loop' running.", "Currently NOT running in this environment -- see project_scheduler memory / data/scheduler_runs.db, last activity stale, root cause previously diagnosed as missing Dhan credentials in this environment."],
+      "next_action": "If continuous unattended operation is required, wire 'schedule loop' (or repeated 'schedule tick') into an OS-level process supervisor -- none exists today."
+    }
+  ],
+
+  "integrations": [
+    {
+      "name": "Dhan (broker + real-time market data)",
+      "status": "partial",
+      "confidence": "high",
+      "evidence": [
+        {"file": "live/dhan/rest_client.py", "symbol": "DhanRestClient._get()", "line": 111, "description": "Only HTTP verb implemented anywhere in the client is GET; exactly 3 endpoints exist: /fundlimit (line 117), /positions (line 120), /holdings (line 123) -- all read-only account data."},
+        {"file": "live/dhan/market_data_source.py", "symbol": "DhanMarketDataSource / _WebsocketClientTransport", "line": 128, "description": "Real WebSocket client on websocket-client==1.9.0, connects to wss://api-feed.dhan.co -- verified against the live service per README (real REST calls, real WS handshake, real OHLCV bars observed, Phase 16)."},
+        {"file": "live/dhan/broker_adapter.py", "symbol": "DisabledDhanOrderExecutor.place_order/modify_order/cancel_order", "line": 66, "description": "All three order-mutating methods raise RealOrderPlacementDisabledError unconditionally -- no branch precedes the raise in any of the three. Independently re-verified by a dedicated subagent read of the full file plus tests/test_dhan_no_real_orders.py."}
+      ],
+      "dependencies": ["DHAN_CLIENT_ID / DHAN_ACCESS_TOKEN environment variables"],
+      "risks": ["Real order placement/modification/cancellation is structurally impossible (by design, not a gap) -- this is the single most safety-critical, and most independently verified, finding in this audit.", "No credentials are configured in this environment -- live Dhan connectivity is currently unusable here (scheduler CREDENTIAL_FAILURE, previously diagnosed)."],
+      "next_action": "None for safety. Populating .env with real credentials is the user's own action item if live market-data connectivity is desired."
+    },
+    {
+      "name": "yfinance (Yahoo Finance)",
+      "status": "working",
+      "confidence": "high",
+      "evidence": [
+        {"file": "market/data_provider.py", "symbol": "YahooFinanceProvider.fetch_ohlcv", "line": 158, "description": "yf.Ticker(symbol).history(period=..., interval=..., auto_adjust=False) -- the sole real OHLCV data source used across backtesting/paper/decision pipelines."},
+        {"file": "research/news.py", "symbol": "fetch_news", "line": 29, "description": "yf.Ticker(symbol).news -- real news headlines for the research pipeline."},
+        {"file": "research/sector.py", "symbol": "fetch_sector", "line": 28, "description": "yf.Ticker(symbol).info -- sector/industry classification."}
+      ],
+      "dependencies": [],
+      "risks": ["Sole real market-data/news/sector source in the whole codebase -- a single point of failure for every non-Dhan pipeline. No NSE/BSE/SEBI official API integration exists anywhere (confirmed by repo-wide grep for nseindia/bseindia/NSE_API/BSE_API -- zero matches)."],
+      "next_action": "None -- consistent with prior established finding that NSE/BSE/SEBI have no official public API."
+    },
+    {
+      "name": "Ollama (local LLM)",
+      "status": "partial",
+      "confidence": "high",
+      "evidence": [
+        {"file": "core/config.py", "symbol": "Settings.chat_model / ollama_base_url", "line": 30, "description": "chat_model='qwen2.5-coder:7b', embedding_model='nomic-embed-text', ollama_base_url='http://localhost:11434' -- plain pydantic BaseModel fields, no env-var or .env auto-loading anywhere in core/config.py."},
+        {"file": "llm/provider.py", "symbol": "check_ollama_availability()", "line": 98, "description": "Fail-fast liveness probe via the ollama python client; every non-AI CLI command works with Ollama absent (per README and this function's callers)."}
+      ],
+      "dependencies": ["A locally running Ollama server with qwen2.5-coder:7b and nomic-embed-text pulled"],
+      "risks": ["ollama_base_url has NO environment-variable or CLI override in normal operation -- only overridable by editing code or passing a Python kwarg/constructing Settings(...) directly (corrected finding; an earlier assumption that it was CLI-configurable was wrong).", "NIM and OPENAI provider branches in llm/provider.py:30-38 raise NotImplementedError unconditionally -- Ollama is the only functional LLM provider despite an LLMProvider enum suggesting otherwise."],
+      "next_action": "If a non-Ollama LLM provider is ever wanted, llm/provider.py's NIM/OPENAI branches need real implementations -- currently pure stubs."
+    },
+    {
+      "name": "ChromaDB (via langchain_chroma)",
+      "status": "partial",
+      "confidence": "high",
+      "evidence": [
+        {"file": "rag/vector_store.py", "symbol": "create_vector_store()", "line": 19, "description": "Chroma.from_documents(...) -- real, populated vector store (vectorstore/chroma.sqlite3 + HNSW index files confirmed present on disk)."},
+        {"file": "main.py", "symbol": "run() [backs the 'analyze' command]", "line": 85, "description": "from rag.retriever import get_context -- the ONLY call site anywhere in the repo (besides tests) that reads from the vector store."}
+      ],
+      "dependencies": ["Ollama embeddings (nomic-embed-text)"],
+      "risks": ["Architecturally isolated: RAG/ChromaDB is wired only into the legacy 'analyze' (graph.py/agents/) pipeline, never into decision_engine/, research/, market_intelligence/, predictions/, or any Phase-18-onward command. Not a broken feature, but a real, disclosed integration gap between the original and current pipelines."],
+      "next_action": "None planned; disclosed architectural boundary, not a defect."
+    }
+  ],
+
+  "data_sources": [
+    {"name": "yfinance OHLCV (historical + delayed)", "status": "working", "confidence": "high", "evidence": [{"file": "market/data_provider.py", "symbol": "YahooFinanceProvider", "line": 158, "description": "Primary market-data source for backtesting, paper trading, and decision pipeline."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Dhan real-time WebSocket market data", "status": "partial", "confidence": "high", "evidence": [{"file": "live/dhan/market_data_source.py", "symbol": "DhanMarketDataSource", "line": 128, "description": "Real-time tick/quote feed, verified live once (Phase 16); requires credentials not present in this environment."}], "dependencies": ["Dhan credentials"], "risks": ["Currently unusable in this environment (no credentials)."], "next_action": "User to supply DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN if live data is desired."},
+    {"name": "yfinance news", "status": "working", "confidence": "medium", "evidence": [{"file": "research/news.py", "symbol": "fetch_news", "line": 29, "description": "yf.Ticker(symbol).news, real headlines."}], "dependencies": [], "risks": ["Coverage/quality entirely dependent on Yahoo's own news aggregation for a given symbol -- no independent verification of completeness."], "next_action": "None."},
+    {"name": "yfinance sector/company info", "status": "working", "confidence": "medium", "evidence": [{"file": "research/sector.py", "symbol": "fetch_sector", "line": 28, "description": "yf.Ticker(symbol).info."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Static NSE sector map", "status": "working", "confidence": "medium", "evidence": [{"file": "market_intelligence/nse_sector_map.py", "symbol": "module-level lookup table", "line": 1, "description": "A hand-curated static symbol-to-sector mapping, not a live API (confirmed via tests/test_nse_sector_map.py)."}], "dependencies": [], "risks": ["Coverage is partial (21/32 of the original universe per earlier project memory) and requires manual maintenance as the universe grows."], "next_action": "None planned."},
+    {"name": "NSE/BSE/SEBI official data API", "status": "missing", "confidence": "high", "evidence": [{"file": "(repo-wide grep)", "symbol": "nseindia / bseindia / NSE_API / BSE_API", "line": 0, "description": "Zero matches anywhere in *.py -- no official exchange API integration exists."}], "dependencies": [], "risks": ["Roadmap (PROJECT_GOAL_AND_ROADMAP.md section 10) lists NSE/BSE official information as an intended source category; not implemented, and no public official API is known to exist for individual consumers."], "next_action": "None -- an already-understood, likely-permanent constraint (see project_market_intelligence_sources memory)."}
+  ],
+
+  "apis": [
+    {
+      "name": "REST/JSON API",
+      "status": "missing",
+      "confidence": "high",
+      "evidence": [{"file": "(repo-wide grep)", "symbol": "@app.get / @app.post / FastAPI(", "line": 0, "description": "Zero matches anywhere in the repository -- no FastAPI or Flask-style JSON API exists."}],
+      "dependencies": [],
+      "risks": [],
+      "next_action": "Not planned; CLI + dashboard HTML + MCP tools are the complete API surface today."
+    },
+    {
+      "name": "MCP tool surface",
+      "status": "working",
+      "confidence": "high",
+      "evidence": [{"file": "mcp_server/server.py", "symbol": "23 @mcp.tool() functions", "line": 79, "description": "The closest thing to a programmatic API -- covers market context, signals, risk, paper trading, live-workstation read state, approve/reject, and read-only Dhan account data."}],
+      "dependencies": [],
+      "risks": [],
+      "next_action": "None."
+    },
+    {
+      "name": "CLI subcommand surface (main.py)",
+      "status": "working",
+      "confidence": "high",
+      "evidence": [{"file": "main.py", "symbol": "~30 argparse subcommands", "line": 3301, "description": "The primary, most-exercised interface to every capability in the system."}],
+      "dependencies": [],
+      "risks": [],
+      "next_action": "None."
+    }
+  ],
+
+  "frontend_routes": [
+    {"name": "GET /", "status": "working", "confidence": "high", "evidence": [{"file": "dashboard/app.py", "symbol": "index()", "line": 369, "description": "Main dashboard page -- market status, account, positions, pending approvals, kill switch."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "POST /approve", "status": "working", "confidence": "high", "evidence": [{"file": "dashboard/app.py", "symbol": "approve()", "line": 529, "description": "Approves a pending signal; routes to the same live/workstation.py function the CLI and MCP tools use (per tests/test_dashboard.py docstring)."}], "dependencies": ["live workstation state"], "risks": ["No CSRF protection (documented, accepted for local-only use)."], "next_action": "None."},
+    {"name": "POST /reject", "status": "working", "confidence": "high", "evidence": [{"file": "dashboard/app.py", "symbol": "reject()", "line": 537, "description": "Rejects a pending signal."}], "dependencies": ["live workstation state"], "risks": ["No CSRF protection."], "next_action": "None."},
+    {"name": "POST /kill-switch/activate", "status": "working", "confidence": "high", "evidence": [{"file": "dashboard/app.py", "symbol": "kill_switch_activate()", "line": 545, "description": "Activates the persistent local kill switch."}], "dependencies": ["live state store"], "risks": ["No CSRF protection."], "next_action": "None."},
+    {"name": "POST /kill-switch/reset", "status": "working", "confidence": "high", "evidence": [{"file": "dashboard/app.py", "symbol": "kill_switch_reset()", "line": 552, "description": "Resets the kill switch."}], "dependencies": ["live state store"], "risks": ["No CSRF protection."], "next_action": "None."},
+    {"name": "GET /intelligence", "status": "working", "confidence": "high", "evidence": [{"file": "dashboard/app.py", "symbol": "intelligence_page()", "line": 557, "description": "Latest scan's ranked candidates + decision labels + prediction performance, read-only, no fetch/LLM call on page load (Phase 26)."}], "dependencies": ["scanner store", "decision store", "predictions store"], "risks": [], "next_action": "None."},
+    {"name": "GET /intelligence/{symbol}", "status": "working", "confidence": "high", "evidence": [{"file": "dashboard/app.py", "symbol": "decision_detail_page()", "line": 830, "description": "Full per-symbol picture: decision history, scanner/research evidence, prediction history (Phase 35)."}], "dependencies": ["decision store", "research store", "predictions store"], "risks": [], "next_action": "None."}
+  ],
+
+  "backend_routes": [
+    {"name": "analyze", "status": "working", "confidence": "medium", "evidence": [{"file": "main.py", "symbol": "analyze subcommand", "line": 3301, "description": "The original LangGraph multi-agent pipeline (technical/risk/critic/debate/supervisor) + RAG context; requires Ollama."}], "dependencies": ["Ollama", "ChromaDB/RAG"], "risks": ["No direct unit tests found for the 5 LangGraph node agent functions (analyst/technical/risk/debate/supervisor) -- may be exercised only indirectly via tests/test_graph.py."], "next_action": "Consider adding direct unit tests for the 5 uncovered agents/*.py functions."},
+    {"name": "backtest / backtest-universe", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "backtest / backtest_universe subcommands", "line": 3316, "description": "Single-symbol and universe-pooled deterministic strategy backtests."}], "dependencies": ["backtesting/ package"], "risks": [], "next_action": "None."},
+    {"name": "paper / paper status / trades / journal", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "paper subcommand family", "line": 3536, "description": "Replays a symbol's cached history through the paper engine; status/trades/journal are read-only reports."}], "dependencies": ["paper/ package", "risk engine"], "risks": [], "next_action": "None."},
+    {"name": "live-sim / paper-live", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "live_sim_parser / paper_live_parser", "line": 3569, "description": "Simulated or real-Dhan-fed intraday pipeline through strategy -> risk -> (AI explain) -> approval -> paper execution."}], "dependencies": ["risk engine", "paper engine", "optionally Dhan credentials"], "risks": [], "next_action": "None."},
+    {"name": "dashboard", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "dashboard subcommand", "line": 3650, "description": "Launches the Starlette dashboard via uvicorn."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "universe / cache-status / readiness-check", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "universe/cache_status/readiness_check subcommands", "line": 3663, "description": "Symbol validation + exchange derivation, market-data cache freshness report, and a pre-flight readiness probe (credentials, cache, DB reachability)."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "scan", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "scan subcommand", "line": 3713, "description": "Ranks a watchlist by trend/momentum/breakout/relative-strength/sector-strength; persists to scanner.db."}], "dependencies": ["market_intelligence/scanner.py"], "risks": [], "next_action": "None."},
+    {"name": "regime", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "regime subcommand", "line": 3729, "description": "Market breadth + benchmark trend/volatility regime + optional sector strength."}], "dependencies": ["market_intelligence/regime.py"], "risks": [], "next_action": "None."},
+    {"name": "daily-report", "status": "partial", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "run_daily_report_command", "line": 3745, "description": "Scan -> regime -> direction forecast -> data-staleness-gated reporting."}], "dependencies": ["scanner store", "regime store", "forecasts store"], "risks": ["3 tests currently fail due to the local market-data cache being exactly 5 calendar days stale -- an environmental condition, not a code defect (confirmed same-session)."], "next_action": "Refresh data/market/ cache (or wait for the scheduler/credentials issue to resolve) to clear the 3 stale-data test failures."},
+    {"name": "research", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "research subcommand", "line": 3768, "description": "Real news + sector classification, optional never-blocking AI summary."}], "dependencies": ["yfinance", "optionally Ollama"], "risks": [], "next_action": "None."},
+    {"name": "decide", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "decide subcommand -> decision_engine.engine.make_decision", "line": 3780, "description": "Deterministic BUY/WATCH/AVOID/EXIT/NO_ACTION label from scanner+research+risk-context evidence; label is structurally immutable once set (narrative is a plain string, never touches .label)."}], "dependencies": ["scanner store", "research store", "decision_engine/rules.py"], "risks": [], "next_action": "None."},
+    {"name": "size", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "size subcommand", "line": 3795, "description": "Previews RiskEngine sizing for a BUY decision against user-supplied capital -- no order placed."}], "dependencies": ["risk/engine.py"], "risks": [], "next_action": "None."},
+    {"name": "predict / evaluate / evaluate-forecasts", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "predict/evaluate subcommands", "line": 3817, "description": "Records immutable shadow predictions and scores them against real subsequent market data."}], "dependencies": ["predictions/ package"], "risks": [], "next_action": "None."},
+    {"name": "learn", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "learn subcommand", "line": 3856, "description": "Read-only performance report: strategy comparison, regime performance, calibration, profitability evidence."}], "dependencies": ["learning/ package"], "risks": [], "next_action": "None."},
+    {"name": "experiment start/end/list/compare/recommend", "status": "partial", "confidence": "medium", "evidence": [{"file": "main.py", "symbol": "experiment_subparsers", "line": 3867, "description": "Registers/compares experiments over DecisionConfig/ScannerConfig/RiskConfig version IDs."}], "dependencies": ["experiments/store.py"], "risks": ["Default DB path data/experiments.db does not exist on disk -- these commands appear never to have been run against their own default path in this checkout (found by sub-audit)."], "next_action": "Run 'experiment list' against the default DB (or confirm intended custom --db usage) to verify this pipeline works end-to-end in practice."},
+    {"name": "hypothesis-registry", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "hypothesis_registry_parser", "line": 3910, "description": "Read-only report over strategy/hypothesis_registry.py (55 hypotheses as of this session: 32 REJECTED, 22 INCONCLUSIVE, 1 SUPPORTED)."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "review", "status": "working", "confidence": "medium", "evidence": [{"file": "main.py", "symbol": "review subcommand -> agents/decision_reviewer.py", "line": 3922, "description": "Independent adversarial AI second opinion on a decision; fails loudly (no silent fallback) if Ollama unreachable."}], "dependencies": ["Ollama"], "risks": [], "next_action": "None."},
+    {"name": "shadow-run", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "shadow_run_parser", "line": 3932, "description": "One-pass scan->research->decide->predict->evaluate->learn orchestration; --paper-execute opt-in bridges to real paper order submission via the deterministic critic gate."}], "dependencies": ["all of the above stages", "paper engine (opt-in)"], "risks": [], "next_action": "None."},
+    {"name": "schedule tick/loop/status", "status": "partial", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "schedule_subparsers", "line": 3999, "description": "Unattended operation of shadow-run/evaluate/learn on a configurable schedule."}], "dependencies": ["scheduler/ package"], "risks": ["Not an OS-level daemon (see services.Scheduler entry). Not currently running in this environment."], "next_action": "None from this audit; operational deployment is a separate concern."}
+  ],
+
+  "agents": [
+    {"name": "market_context_agent", "status": "working", "confidence": "high", "evidence": [{"file": "agents/market_context_agent.py", "symbol": "market_context_agent()", "line": 6, "description": "Pure deterministic -- fetches real market data/indicators, no LLM call at all despite living in agents/."}], "dependencies": ["market/context.py"], "risks": ["No direct unit test file found (only indirect exercise possible via tests/test_graph.py)."], "next_action": "Add a direct unit test if this function's own logic needs isolated coverage."},
+    {"name": "technical_agent", "status": "working", "confidence": "high", "evidence": [{"file": "agents/technical_agent.py", "symbol": "technical_agent()", "line": 7, "description": "LLM call (role=technical) producing a structured TechnicalAnalysis from observed data + RAG context."}], "dependencies": ["Ollama", "agents/analyst.py:invoke_structured"], "risks": ["No direct unit test file found."], "next_action": "Add direct unit test."},
+    {"name": "risk_agent", "status": "working", "confidence": "high", "evidence": [{"file": "agents/risk_agent.py", "symbol": "risk_agent()", "line": 7, "description": "LLM call (role=risk) producing narrative RiskAssessment, explicitly barred from inventing capital figures."}], "dependencies": ["Ollama"], "risks": ["No direct unit test file found."], "next_action": "Add direct unit test."},
+    {"name": "critic_agent", "status": "working", "confidence": "high", "evidence": [{"file": "agents/critic_agent.py", "symbol": "critic_agent()", "line": 7, "description": "LLM adversarial devil's-advocate narrative in the legacy analyze pipeline -- distinct from the deterministic critic/ package."}], "dependencies": ["Ollama"], "risks": ["No direct unit test file found.", "Easily confused with critic/engine.py (deterministic, unrelated) -- naming risk, not a functional bug."], "next_action": "Add direct unit test; consider renaming to reduce confusion with critic/."},
+    {"name": "debate_agent", "status": "working", "confidence": "high", "evidence": [{"file": "agents/debate_agent.py", "symbol": "debate_agent()", "line": 10, "description": "LLM synthesis of technical/risk/critic outputs into a DebateSummary."}], "dependencies": ["Ollama"], "risks": ["No direct unit test file found."], "next_action": "Add direct unit test."},
+    {"name": "supervisor_agent", "status": "working", "confidence": "high", "evidence": [{"file": "agents/supervisor_agent.py", "symbol": "supervisor_agent()", "line": 8, "description": "LLM 'Chief Investment Officer' producing the final analyze-pipeline TradingDecision from debate consensus."}], "dependencies": ["Ollama"], "risks": ["No direct unit test file found.", "This is the one place an LLM output resembles a trading decision -- confirmed narrative/legacy-pipeline-only, never reaching paper/live execution (analyze never imports paper/ or a broker)."], "next_action": "Add direct unit test; keep the existing architectural isolation from execution."},
+    {"name": "signal_explainer (explain_signal)", "status": "working", "confidence": "high", "evidence": [{"file": "agents/signal_explainer.py", "symbol": "explain_signal()", "line": 21, "description": "Narrates an already-computed deterministic Signal/RiskDecision; type system prevents it from returning a revised price/qty."}], "dependencies": ["Ollama"], "risks": [], "next_action": "None."},
+    {"name": "decision_reviewer (review_decision)", "status": "working", "confidence": "high", "evidence": [{"file": "agents/decision_reviewer.py", "symbol": "review_decision()", "line": 22, "description": "Independent adversarial second opinion on a fixed decision_engine label; cannot change the label (backs 'review' CLI command)."}], "dependencies": ["Ollama"], "risks": [], "next_action": "None."},
+    {"name": "decision_narrator (narrate_decision)", "status": "working", "confidence": "high", "evidence": [{"file": "decision_engine/engine.py", "symbol": "narrate_decision()", "line": 32, "description": "Narrates the already-fixed decide-label; structurally cannot alter it (Decision.label set before this is called; result only feeds model_copy(update={'narrative': ...}))."}], "dependencies": ["Ollama"], "risks": [], "next_action": "None."},
+    {"name": "research_summarizer (summarize_research)", "status": "working", "confidence": "high", "evidence": [{"file": "research/summarizer.py", "symbol": "summarize_research()", "line": 29, "description": "Synthesizes collected news/sector/scanner evidence into plain-language summary; explicitly barred from recommending buy/sell/hold."}], "dependencies": ["Ollama"], "risks": [], "next_action": "None."},
+    {"name": "critic/ package (13-check deterministic critic)", "status": "working", "confidence": "high", "evidence": [{"file": "critic/engine.py", "symbol": "evaluate()", "line": 32, "description": "13 named checks (KILL_SWITCH, FUTURE_TIMESTAMP, DATA_FRESHNESS, TRADE_STRUCTURE, DUPLICATE_EXPOSURE, 3x EVIDENCE_COMPLETENESS, VOLUME_CONFIRMATION, INDICATOR_CONTRADICTION, REGIME_CONFLICT, RISK_REWARD, CONFIDENCE_INTEGRITY), confirmed NO LLM import anywhere in the package, genuinely wired into shadow-run --paper-execute and paper-live."}], "dependencies": ["market_intelligence/regime.py", "decision_engine/models.py"], "risks": ["Dashboard's Critic column is synthetic-fixture-tested only so far; real-market critic validation pending NSE reopening (per README)."], "next_action": "Real-market critic validation once markets are open and credentials are configured."}
+  ],
+
+  "models": [
+    {"name": "qwen2.5-coder:7b (Ollama chat model)", "status": "working", "confidence": "high", "evidence": [{"file": "core/config.py", "symbol": "Settings.chat_model", "line": 30, "description": "Default chat model for every AI-narration/explanation/critique role; substituted from the originally-intended llama3.1:8b because that isn't pulled locally (per inline comment)."}], "dependencies": ["local Ollama server"], "risks": ["Not verified to be pulled/running in every environment -- AI-dependent commands (analyze, review) fail loudly if unreachable, by design."], "next_action": "None -- graceful-failure behavior already correct."},
+    {"name": "nomic-embed-text (Ollama embedding model)", "status": "working", "confidence": "high", "evidence": [{"file": "core/config.py", "symbol": "Settings.embedding_model", "line": 31, "description": "Used solely by the RAG/ChromaDB subsystem."}], "dependencies": ["local Ollama server"], "risks": [], "next_action": "None."},
+    {"name": "NIM / OpenAI LLM providers", "status": "missing", "confidence": "high", "evidence": [{"file": "llm/provider.py", "symbol": "get_chat_model() NIM/OPENAI branches", "line": 30, "description": "Both raise NotImplementedError unconditionally despite an LLMProvider enum listing them."}], "dependencies": [], "risks": ["Enum suggests optionality that does not exist in practice."], "next_action": "Implement if a non-Ollama provider is ever required; otherwise consider removing the enum options to avoid false affordance."},
+    {"name": "Statistical/ML prediction models (scikit-learn/PyTorch/TensorFlow)", "status": "missing", "confidence": "high", "evidence": [{"file": "(repo-wide grep)", "symbol": "sklearn / torch / tensorflow imports", "line": 0, "description": "Zero matches anywhere in project code -- every 'model' in this system is either the Ollama LLM (narration only) or deterministic rule-based logic."}], "dependencies": [], "risks": [], "next_action": "None planned; roadmap's 'Level 5 -- Controlled Model Improvement' (feature importance, model comparison) remains unimplemented."}
+  ],
+
+  "prompts": [
+    {"name": "technical_agent prompt", "status": "working", "confidence": "high", "evidence": [{"file": "agents/technical_agent.py", "symbol": "prompt f-string", "line": 11, "description": "Directs trend/S-R/VWAP/entry/exit analysis strictly from observed data, flags unknowns."}], "dependencies": [], "risks": ["No prompt versioning anywhere in the codebase -- no PROMPT_VERSION field, no model_version recorded alongside any AI output schema (confirmed by direct read of all 4 AI-output schemas)."], "next_action": "None planned; disclosed gap vs. roadmap's stated auditability intent."},
+    {"name": "risk_agent prompt", "status": "working", "confidence": "high", "evidence": [{"file": "agents/risk_agent.py", "symbol": "prompt f-string", "line": 11, "description": "Position sizing/R:R commentary, barred from inventing a capital figure."}], "dependencies": [], "risks": ["Unversioned (see technical_agent prompt entry)."], "next_action": "None planned."},
+    {"name": "critic_agent prompt", "status": "working", "confidence": "high", "evidence": [{"file": "agents/critic_agent.py", "symbol": "prompt f-string", "line": 11, "description": "Adversarial devil's-advocate prompt for the legacy analyze pipeline."}], "dependencies": [], "risks": ["Unversioned."], "next_action": "None planned."},
+    {"name": "debate_agent prompt", "status": "working", "confidence": "high", "evidence": [{"file": "agents/debate_agent.py", "symbol": "prompt f-string", "line": 15, "description": "Synthesizes technical/risk/critic into agreements/disagreements/consensus."}], "dependencies": [], "risks": ["Unversioned."], "next_action": "None planned."},
+    {"name": "supervisor_agent prompt", "status": "working", "confidence": "high", "evidence": [{"file": "agents/supervisor_agent.py", "symbol": "prompt f-string", "line": 13, "description": "Final legacy-pipeline TradingDecision narrative."}], "dependencies": [], "risks": ["Unversioned."], "next_action": "None planned."},
+    {"name": "signal_explainer prompt", "status": "working", "confidence": "high", "evidence": [{"file": "agents/signal_explainer.py", "symbol": "prompt f-string", "line": 29, "description": "Explains an already-fixed Signal/RiskDecision; explicitly forbidden from changing entry/stop/target/qty."}], "dependencies": [], "risks": ["Unversioned."], "next_action": "None planned."},
+    {"name": "decision_reviewer prompt", "status": "working", "confidence": "high", "evidence": [{"file": "agents/decision_reviewer.py", "symbol": "prompt f-string", "line": 35, "description": "Adversarial second opinion, cannot change the label."}], "dependencies": [], "risks": ["Unversioned."], "next_action": "None planned."},
+    {"name": "decision_narrator prompt", "status": "working", "confidence": "high", "evidence": [{"file": "decision_engine/engine.py", "symbol": "prompt f-string", "line": 46, "description": "Explicitly tells the LLM 'you are NOT deciding anything -- the label is fixed'."}], "dependencies": [], "risks": ["Unversioned."], "next_action": "None planned."},
+    {"name": "research_summarizer prompt", "status": "working", "confidence": "high", "evidence": [{"file": "research/summarizer.py", "symbol": "prompt f-string", "line": 55, "description": "Synthesizes evidence, barred from recommending buy/sell/hold."}], "dependencies": [], "risks": ["Unversioned."], "next_action": "None planned."}
+  ],
+
+  "databases": [
+    {"name": "data/scheduler_runs.db (SchedulerRunStore)", "status": "working", "confidence": "high", "evidence": [{"file": "scheduler/store.py", "symbol": "CREATE TABLE scheduler_runs", "line": 21, "description": "Run-history audit trail with an atomic BEGIN IMMEDIATE lock for overlap prevention."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "data/paper_trading.db (PaperStore)", "status": "working", "confidence": "high", "evidence": [{"file": "paper/store.py", "symbol": "9 tables (signals, risk_decisions, paper_orders, paper_fills, positions, trades, journal_entries, account, bar_cursor)", "line": 26, "description": "Full paper-trading persistence with restart recovery via bar_cursor."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "data/predictions.db (PredictionStore)", "status": "working", "confidence": "high", "evidence": [{"file": "predictions/store.py", "symbol": "predictions, prediction_evaluations", "line": 22, "description": "Shadow-prediction records and their evaluated outcomes."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "data/decisions.db (DecisionStore)", "status": "working", "confidence": "high", "evidence": [{"file": "decision_engine/store.py", "symbol": "decisions", "line": 18, "description": "Every BUY/WATCH/AVOID/EXIT/NO_ACTION decision with evidence."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "data/research.db (ResearchStore)", "status": "working", "confidence": "high", "evidence": [{"file": "research/store.py", "symbol": "research_reports", "line": 17, "description": "News/sector research reports."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "data/scanner.db (ScanHistoryStore)", "status": "working", "confidence": "high", "evidence": [{"file": "market_intelligence/store.py", "symbol": "scan_reports", "line": 22, "description": "Every market scan's ranked output."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "data/market_regime.db (MarketRegimeStore)", "status": "working", "confidence": "high", "evidence": [{"file": "market_intelligence/regime_store.py", "symbol": "market_regime_reports", "line": 36, "description": "Breadth/trend/volatility regime reports."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "data/direction_forecasts.db (DirectionForecastStore)", "status": "working", "confidence": "high", "evidence": [{"file": "predictions/direction_forecast_store.py", "symbol": "forecasts, forecast_evaluations", "line": 19, "description": "UP/DOWN/NO_EDGE forecast records and outcomes."}], "dependencies": [], "risks": ["Real calibration data remains INSUFFICIENT (10 predictions, 0 resolved as of an earlier project checkpoint -- see project_nse_prediction_engine memory)."], "next_action": "Continue accumulating resolved forecasts."},
+    {"name": "data/live_state.db (LiveStateStore)", "status": "working", "confidence": "high", "evidence": [{"file": "live/state_store.py", "symbol": "pending_approvals, kill_switch, feed_status, clock_skew, critic_rejections", "line": 53, "description": "Live-pipeline operational state (approvals, kill switch, feed health)."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "data/promotion_gate.db (PromotionGateStore)", "status": "working", "confidence": "medium", "evidence": [{"file": "strategy/promotion_store.py", "symbol": "promotion_log", "line": 24, "description": "Log of promotion-gate evaluations."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "data/experiment_registry.db (ExperimentRegistryStore)", "status": "broken", "confidence": "high", "evidence": [{"file": "strategy/experiment_store.py", "symbol": "ExperimentRegistryStore", "line": 24, "description": "Fully implemented and tested (tests/test_strategy_experiment_store.py) but never wired into any main.py CLI command -- orphaned production code. The on-disk 32KB file's provenance cannot be traced to any committed code path."}], "dependencies": [], "risks": ["Dead/orphaned code path; the existing data/experiment_registry.db file was populated by something outside this repo's committed CLI surface."], "next_action": "Either wire ExperimentRegistryStore into a CLI command, or remove it and document data/experiment_registry.db's origin, or delete the stray file if it's confirmed obsolete."},
+    {"name": "data/experiments.db (ExperimentStore, default path)", "status": "unknown", "confidence": "medium", "evidence": [{"file": "main.py", "symbol": "DEFAULT_EXPERIMENTS_DB_PATH", "line": 2238, "description": "Wired into 'experiment start/end/list/compare/recommend' CLI commands, but the default-path file does not exist on disk -- these commands have apparently never been run against their default path in this checkout."}], "dependencies": [], "risks": [], "next_action": "Run 'experiment list' once to confirm the pipeline actually works end-to-end against its own default path."},
+    {"name": "data/paper_trading_20k.db", "status": "working", "confidence": "medium", "evidence": [{"file": "docs/MARKET_DATA_SOURCES.md", "symbol": "line 33", "line": 33, "description": "A real, accumulated ~Rs 20,000 paper account from manual --paper-execute sessions -- not a stray artifact."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "data/live_market_validation_*.db (20 files)", "status": "unknown", "confidence": "medium", "evidence": [{"file": "(repo-wide grep)", "symbol": "\"live_market_validation\"", "line": 0, "description": "Zero references anywhere in code or docs by these exact filenames -- confirmed one-off artifacts of manual CLI runs with custom --db/--state-db/--run-db overrides during ad hoc live-validation sessions (docs/LIVE_MARKET_VALIDATION_REPORT.md, docs/LIVE_SYSTEM_HARDENING_FINAL_REPORT.md narrate this work)."}], "dependencies": [], "risks": ["Data-hygiene clutter: 20 one-off validation DB files sitting in data/ with no code reference."], "next_action": "Consider archiving or removing these one-off files if the validation work they represent is concluded and documented."},
+    {"name": "data/live_sim_trading.db", "status": "working", "confidence": "medium", "evidence": [{"file": "main.py", "symbol": "DEFAULT_LIVE_SIM_DB_PATH, raw sqlite3.connect probe", "line": 725, "description": "Used by 'live-sim' command and a raw sqlite3 reachability probe in readiness-check (not via a *_store.py class)."}], "dependencies": [], "risks": [], "next_action": "None."}
+  ],
+
+  "tables": [
+    {"database": "data/paper_trading.db", "tables": ["signals", "risk_decisions", "paper_orders", "paper_fills", "positions", "trades", "journal_entries", "account", "bar_cursor"]},
+    {"database": "data/scheduler_runs.db", "tables": ["scheduler_runs"]},
+    {"database": "data/predictions.db", "tables": ["predictions", "prediction_evaluations"]},
+    {"database": "data/decisions.db", "tables": ["decisions"]},
+    {"database": "data/research.db", "tables": ["research_reports"]},
+    {"database": "data/scanner.db", "tables": ["scan_reports"]},
+    {"database": "data/market_regime.db", "tables": ["market_regime_reports"]},
+    {"database": "data/direction_forecasts.db", "tables": ["forecasts", "forecast_evaluations"]},
+    {"database": "data/live_state.db", "tables": ["pending_approvals", "kill_switch", "feed_status", "clock_skew", "critic_rejections"]},
+    {"database": "data/promotion_gate.db", "tables": ["promotion_log"]},
+    {"database": "data/experiment_registry.db (orphaned store)", "tables": ["experiment_log"]},
+    {"database": "data/experiments.db (default path, file absent)", "tables": ["experiments", "experiment_events"]}
+  ],
+
+  "queues": [
+    {
+      "name": "Dhan WebSocket bar queue",
+      "status": "working",
+      "confidence": "high",
+      "evidence": [{"file": "live/dhan/market_data_source.py", "symbol": "self._bar_queue: queue.Queue[MarketBarEvent]", "line": 157, "description": "In-process, thread-safe hand-off between the WebSocket callback thread and the synchronous next_bar() consumer."}],
+      "dependencies": [],
+      "risks": [],
+      "next_action": "None."
+    },
+    {
+      "name": "Resilience-wrapper timeout queue",
+      "status": "working",
+      "confidence": "high",
+      "evidence": [{"file": "market_data/resilience.py", "symbol": "result_queue: queue.Queue = queue.Queue(maxsize=1)", "line": 151, "description": "Single-shot worker/result hand-off implementing a synchronous-call timeout via a daemon thread."}],
+      "dependencies": [],
+      "risks": [],
+      "next_action": "None."
+    },
+    {
+      "name": "External message broker (Redis/RabbitMQ/Celery)",
+      "status": "missing",
+      "confidence": "high",
+      "evidence": [{"file": "(repo-wide grep)", "symbol": "celery / redis / kombu / pika", "line": 0, "description": "Zero matches anywhere in project code -- no external queue/broker infrastructure exists; both queue usages above are stdlib in-process buffers."}],
+      "dependencies": [],
+      "risks": [],
+      "next_action": "None -- appropriate for a single-user, local, single-process tool."
+    }
+  ],
+
+  "scheduled_jobs": [
+    {"name": "pre_market", "status": "working", "confidence": "high", "evidence": [{"file": "scheduler/config.py", "symbol": "_default_slots()", "line": 82, "description": "08:45-09:15 IST window, once/day, runs SHADOW_RUN."}], "dependencies": ["shadow-run pipeline"], "risks": [], "next_action": "None."},
+    {"name": "market_open", "status": "working", "confidence": "high", "evidence": [{"file": "scheduler/config.py", "symbol": "_default_slots()", "line": 82, "description": "09:15-09:30 IST window, once/day, runs SHADOW_RUN."}], "dependencies": ["shadow-run pipeline"], "risks": ["Last recorded runs in data/scheduler_runs.db are FAILED, stale (see 'services.Scheduler' risks) -- root cause: missing Dhan credentials in this environment."], "next_action": "None from this audit -- user's own action item to supply credentials."},
+    {"name": "intraday", "status": "working", "confidence": "high", "evidence": [{"file": "scheduler/config.py", "symbol": "_default_slots()", "line": 82, "description": "09:30-15:15 IST window, every 60 minutes, runs SHADOW_RUN."}], "dependencies": ["shadow-run pipeline"], "risks": [], "next_action": "None."},
+    {"name": "pre_close", "status": "working", "confidence": "high", "evidence": [{"file": "scheduler/config.py", "symbol": "_default_slots()", "line": 82, "description": "15:15-15:30 IST window, once/day, runs SHADOW_RUN."}], "dependencies": ["shadow-run pipeline"], "risks": [], "next_action": "None."},
+    {"name": "post_market", "status": "working", "confidence": "high", "evidence": [{"file": "scheduler/config.py", "symbol": "_default_slots()", "line": 82, "description": "15:30-onward, once/day, runs EVALUATE_AND_LEARN (evaluate then learn, in-process)."}], "dependencies": ["evaluate/learn commands"], "risks": [], "next_action": "None."}
+  ],
+
+  "websockets": [
+    {
+      "name": "Dhan market-data WebSocket client (outbound)",
+      "status": "working",
+      "confidence": "high",
+      "evidence": [{"file": "live/dhan/market_data_source.py", "symbol": "_WebsocketClientTransport", "line": 85, "description": "Real client on websocket-client==1.9.0, wss://api-feed.dhan.co, inbound market-data only (subscribe/unsubscribe control messages, no order-sending capability anywhere in the module). Verified live once against the real service (Phase 16)."}],
+      "dependencies": ["Dhan credentials"],
+      "risks": ["Secret-in-URL: build_feed_url() embeds the raw access token in the connection URL per Dhan's own protocol; a _redact_secret() helper strips it before any logging call today, but any FUTURE logging call that skips this helper would leak it -- a residual, currently-mitigated risk, not an active leak."],
+      "next_action": "None required now; keep _redact_secret() usage disciplined if this module is extended."
+    },
+    {
+      "name": "Server-side WebSocket (dashboard live push)",
+      "status": "missing",
+      "confidence": "high",
+      "evidence": [{"file": "dashboard/app.py", "symbol": "app = Starlette(routes=[...])", "line": 994, "description": "Every route is an HTTP Route, no WebSocketRoute anywhere; repo-wide grep for WebSocketRoute/app.websocket/@app.websocket returns zero matches outside live/dhan/."}],
+      "dependencies": [],
+      "risks": ["Dashboard requires a manual page reload to see updated state; no live push exists."],
+      "next_action": "Not currently planned; would be a genuine new feature, not a bug fix."
+    }
+  ],
+
+  "trading_capabilities": [
+    {"name": "Deterministic strategy signal generation (strategy/baseline.py)", "status": "working", "confidence": "high", "evidence": [{"file": "strategy/baseline.py", "symbol": "TrendMomentumBaseline", "line": 1, "description": "Frozen, versioned entry/exit rules (STOP_ATR_MULTIPLIER, TARGET_RISK_REWARD hardcoded, never tuned to validation/OOS data)."}], "dependencies": ["market/indicators.py"], "risks": ["No demonstrated statistical edge (see missing_capabilities)."], "next_action": "None -- frozen, historical baseline."},
+    {"name": "Market scanning / candidate ranking", "status": "working", "confidence": "high", "evidence": [{"file": "market_intelligence/scanner.py", "symbol": "run_scan()", "line": 1, "description": "Ranks a watchlist by trend/momentum/breakout/relative-strength/sector-strength."}], "dependencies": ["market_data/", "market/"], "risks": ["Liquidity/price/volume/volatility screening gates default to no-ops until given real evidence-based thresholds (per README)."], "next_action": "Derive evidence-based screening thresholds if/when liquidity data becomes available."},
+    {"name": "Decision engine (BUY/WATCH/AVOID/EXIT/NO_ACTION)", "status": "working", "confidence": "high", "evidence": [{"file": "decision_engine/rules.py", "symbol": "classify()", "line": 22, "description": "Pure deterministic function, no fabricated threshold, structurally requires recorded evidence."}], "dependencies": ["scanner", "research"], "risks": [], "next_action": "None."},
+    {"name": "Dynamic position sizing", "status": "working", "confidence": "high", "evidence": [{"file": "risk/engine.py", "symbol": "RiskEngine.evaluate()", "line": 44, "description": "floor(risk_budget/risk_per_unit) against live, never-hardcoded account.equity; --initial-capital threads end-to-end into RiskConfig/Account (independently re-verified)."}], "dependencies": ["risk/config.py", "risk/account.py"], "risks": [], "next_action": "None."},
+    {"name": "Shadow prediction & outcome tracking", "status": "working", "confidence": "high", "evidence": [{"file": "predictions/tracker.py", "symbol": "evaluate_prediction()", "line": 1, "description": "TARGET_HIT/STOP_HIT/EXPIRED/ACTIVE outcome classification against real subsequent data."}], "dependencies": ["predictions/store.py"], "risks": ["INVALIDATED/PARTIAL_SUCCESS/MISSED_ENTRY/CANCELLED states declared but never produced -- deliberately deferred (see missing_capabilities)."], "next_action": "None planned until an evidence-based rule exists for the deferred states."},
+    {"name": "Performance learning / calibration report", "status": "working", "confidence": "high", "evidence": [{"file": "learning/analysis.py", "symbol": "compare strategies / regime performance", "line": 1, "description": "Read-only strategy comparison, regime performance, composite-score calibration check."}], "dependencies": ["predictions/store.py"], "risks": [], "next_action": "None."},
+    {"name": "Profitability evidence framework", "status": "working", "confidence": "high", "evidence": [{"file": "learning/profitability.py", "symbol": "compute_profitability_report_from_returns()", "line": 1, "description": "Win rate w/ 95% Wilson CI, expectancy, profit factor, max drawdown, 95% CI on mean return, honest verdict enum."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Real order execution", "status": "missing", "confidence": "high", "evidence": [{"file": "live/dhan/broker_adapter.py", "symbol": "DisabledDhanOrderExecutor", "line": 28, "description": "Deliberately, structurally disabled -- see live_execution_paths and integrations.Dhan for exhaustive verification."}], "dependencies": [], "risks": [], "next_action": "By design, not planned without a separate future architectural review (explicit non-goal in PROJECT_GOAL_AND_ROADMAP.md section 27)."}
+  ],
+
+  "risk_controls": [
+    {"name": "Position sizing formula", "status": "working", "confidence": "high", "evidence": [{"file": "risk/engine.py", "symbol": "RiskEngine.evaluate()", "line": 74, "description": "risk_per_unit = reference_price - stop_price; risk_budget = equity * risk_per_trade_pct/100; quantity = floor(risk_budget/risk_per_unit), then cash-clamped."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Configurable risk parameters", "status": "working", "confidence": "high", "evidence": [{"file": "risk/config.py", "symbol": "RiskConfig (frozen pydantic model)", "line": 13, "description": "risk_per_trade_pct=0.5, max_daily_loss_pct=3.0, max_drawdown_pct=10.0, max_exposure_pct=25.0, max_consecutive_losses=3, consecutive_loss_risk_multiplier=0.5, consecutive_loss_hard_limit=6, min_risk_reward=1.5 -- each with a deterministic version_id() (SHA-256) for audit traceability."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Veto conditions (fail-closed)", "status": "working", "confidence": "high", "evidence": [{"file": "risk/engine.py", "symbol": "evaluate() -- 10 VetoReason branches", "line": 44, "description": "INVALID_SIGNAL, INVALID_STOP, INVALID_RISK_REWARD, POSITION_ALREADY_OPEN, MAX_DAILY_LOSS, MAX_DRAWDOWN, CONSECUTIVE_LOSS_LIMIT, ZERO_POSITION_SIZE, INSUFFICIENT_CAPITAL, MAX_EXPOSURE -- ALL applicable vetoes collected, never short-circuited; approved only if none fire."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Account-level halt check on stale pending orders", "status": "working", "confidence": "high", "evidence": [{"file": "risk/engine.py", "symbol": "account_level_halt_reasons()", "line": 129, "description": "Called from paper/advance.py:180 before filling a long-outstanding PENDING order, closing a documented real bug (an account that crossed a circuit breaker could otherwise fill a stale, previously-approved order)."}], "dependencies": ["paper/advance.py"], "risks": [], "next_action": "None -- already fixed and tested."},
+    {"name": "Capital never hardcoded (roadmap principle 3.4)", "status": "working", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "_risk_config_from_args() / _size_if_requested()", "line": 1845, "description": "Every risk parameter and --initial-capital threads from CLI args into a real RiskConfig/Account; no literal capital figure found hardcoded into any RiskEngine/Account call in production code (argparse defaults are overridable, not fixed)."}], "dependencies": [], "risks": [], "next_action": "None."}
+  ],
+
+  "backtesting_capabilities": [
+    {"name": "Single-symbol backtest engine", "status": "working", "confidence": "high", "evidence": [{"file": "backtesting/engine.py", "symbol": "run_backtest()", "line": 36, "description": "Core chronological backtest loop producing trades/equity/risk summary."}], "dependencies": ["backtesting/execution.py"], "risks": [], "next_action": "None."},
+    {"name": "Universe-pooled backtest", "status": "working", "confidence": "high", "evidence": [{"file": "backtesting/universe.py", "symbol": "run_universe_backtest() / run_universe_backtest_by_period()", "line": 74, "description": "Pools per-trade returns across a symbol universe for statistically meaningful verdicts."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Walk-forward validation", "status": "working", "confidence": "high", "evidence": [{"file": "backtesting/walk_forward.py", "symbol": "run_walk_forward_validation()", "line": 77, "description": "Sequential rolling-fold validation of edge stability."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Monte Carlo robustness / random-entry baseline", "status": "working", "confidence": "high", "evidence": [{"file": "backtesting/execution_robustness.py", "symbol": "run_execution_robustness_monte_carlo()", "line": 206, "description": "Randomizes fill/slippage assumptions to test verdict robustness."}, {"file": "backtesting/random_baseline.py", "symbol": "run_random_baseline_monte_carlo()", "line": 126, "description": "Isolates whether entry timing itself carries edge."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Cost model", "status": "working", "confidence": "high", "evidence": [{"file": "backtesting/costs.py", "symbol": "CostModel.india_nse_intraday_2026()", "line": 25, "description": "Flat brokerage + bps slippage + fees/taxes preset for real NSE intraday costs."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Promotion gate", "status": "working", "confidence": "high", "evidence": [{"file": "strategy/promotion_gate.py", "symbol": "evaluate_promotion()", "line": 68, "description": "Mechanical PROMOTED/NEGATIVE/INCONCLUSIVE/REJECTED/INSUFFICIENT_DATA verdict from dev/val/oos returns; unmodified across the entire hypothesis registry."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Data leakage / look-ahead guards", "status": "working", "confidence": "high", "evidence": [{"file": "tests/test_backtest_lookahead.py", "symbol": "general look-ahead pattern test", "line": 1, "description": "Dedicated tests at every layer (regime classification, walk-forward folds) confirmed genuinely failing-before-fix per project discipline, not aspirational."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "quant_research/ (offline hypothesis-testing layer)", "status": "working", "confidence": "high", "evidence": [{"file": "quant_research/alpha_features.py", "symbol": "module docstring", "line": 1, "description": "Deliberately research-only, never imported by strategy/, risk/, paper/, or backtesting/ -- confirmed one-directional dependency (research imports shared backtesting utilities, never the reverse)."}], "dependencies": ["backtesting/ shared utilities"], "risks": ["55 hypotheses tested as of this session: 32 REJECTED, 22 INCONCLUSIVE, 1 SUPPORTED (itself a negative finding -- 'entry timing underperforms random'). No demonstrated durable edge anywhere in this research thread."], "next_action": "See missing_capabilities: 'proven trading edge'."}
+  ],
+
+  "paper_trading": [
+    {"name": "Order lifecycle (PENDING -> FILLED)", "status": "working", "confidence": "high", "evidence": [{"file": "paper/models.py", "symbol": "OrderStatus enum", "line": 36, "description": "PENDING/FILLED; positions OPEN/CLOSED; journal outcomes REJECTED/SKIPPED_ALREADY_ACTIVE/APPROVED_PENDING/APPROVED_FILLED_OPEN/APPROVED_FILLED_CLOSED."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "No-look-ahead fill simulation", "status": "working", "confidence": "high", "evidence": [{"file": "paper/engine.py", "symbol": "_fill_pending_order()", "line": 276, "description": "Orders created PENDING never fill in the same call -- filled at the NEXT bar's slippage-adjusted open. paper/advance.py:15-32 documents and enforces 'NO LOOK-AHEAD BIAS BY CONSTRUCTION', filtering every bar to strictly newer than a per-symbol safe baseline."}], "dependencies": ["backtesting/execution.py"], "risks": [], "next_action": "None."},
+    {"name": "SQLite persistence & restart recovery", "status": "working", "confidence": "high", "evidence": [{"file": "paper/store.py", "symbol": "PaperStore.transaction()", "line": 122, "description": "Explicit BEGIN/COMMIT/ROLLBACK, no ORM; PaperTradingEngine.__init__ reconstructs fully from the DB on next construction (no in-memory-only state survives a crash)."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Reconciliation (detect-only, never auto-repair)", "status": "working", "confidence": "high", "evidence": [{"file": "paper/reconciliation.py", "symbol": "reconcile()", "line": 27, "description": "Independently re-derives expected_equity, verifies realized_pnl sums, checks for orphan fills/orders/positions/trades and duplicate signal execution. Explicitly 'FAIL LOUDLY, do NOT silently repair financial state.'"}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Deterministic BUY -> paper-execution bridge (--paper-execute)", "status": "working", "confidence": "high", "evidence": [{"file": "README.md", "symbol": "post-Phase-42 bridge description", "line": 73, "description": "shadow-run/schedule --paper-execute submits a real, idempotent PENDING order for a risk-approved, critic-approved BUY via the same submit_signal() mechanism -- never a second execution path."}], "dependencies": ["critic/", "risk/engine.py"], "risks": [], "next_action": "None."},
+    {"name": "Position expiry (--max-holding-bars)", "status": "working", "confidence": "medium", "evidence": [{"file": "README.md", "symbol": "post-Phase-42 description", "line": 73, "description": "Force-closes a position after N bars with neither stop nor target hit (ExitReason.EXPIRED)."}], "dependencies": [], "risks": [], "next_action": "None."}
+  ],
+
+  "live_execution_paths": [
+    {"name": "Real order placement/modification/cancellation", "status": "missing", "confidence": "high", "evidence": [{"file": "live/dhan/broker_adapter.py", "symbol": "DisabledDhanOrderExecutor.place_order/modify_order/cancel_order", "line": 66, "description": "Unconditional raise in all 3 methods, no branch precedes the raise. Independently confirmed via: (a) direct source read, (b) tests/test_dhan_no_real_orders.py (runtime + static grep for order-endpoint URL fragments + static check that live/pipeline.py never references the disabled classes), (c) a repo-wide grep for requests.post/put/delete returning zero matches anywhere in the entire repository."}], "dependencies": [], "risks": [], "next_action": "None -- deliberate, by design (see PROJECT_GOAL_AND_ROADMAP.md section 27, non-goals)."},
+    {"name": "Dhan REST read-only account access", "status": "working", "confidence": "high", "evidence": [{"file": "live/dhan/rest_client.py", "symbol": "get_fund_limit()/get_positions()/get_holdings()", "line": 117, "description": "Exactly 3 GET-only endpoints (/fundlimit, /positions, /holdings); no other HTTP verb implemented anywhere in the class."}], "dependencies": ["Dhan credentials"], "risks": [], "next_action": "None."},
+    {"name": "LiveSimPipeline execution target", "status": "working", "confidence": "high", "evidence": [{"file": "live/pipeline.py", "symbol": "self.engine.submit_signal(signal)", "line": 320, "description": "The ONLY execution target for every approved signal is PaperTradingEngine -- no Dhan symbol or DisabledDhanOrderExecutor/DhanAccountReader import exists anywhere in this file (confirmed by grep)."}], "dependencies": ["paper/engine.py"], "risks": [], "next_action": "None."},
+    {"name": "Human-approval state machine", "status": "working", "confidence": "high", "evidence": [{"file": "live/approval.py", "symbol": "SignalLifecycleState / legal_transitions()", "line": 30, "description": "EXECUTED is only reachable after RISK_APPROVED/AI_EXPLAINED or HUMAN_APPROVED, and the only code performing that transition does so immediately after PaperTradingEngine.submit_signal succeeds -- 'EXECUTED' always means 'accepted by the paper engine,' never a real fill."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Deterministic critic gate (pre-risk filter)", "status": "working", "confidence": "high", "evidence": [{"file": "live/critic_gate.py", "symbol": "module", "line": 36, "description": "Fail-closed, deterministic, no LLM, no broker reference anywhere in the file; can only block a signal, never place an order."}], "dependencies": ["critic/engine.py"], "risks": [], "next_action": "None."},
+    {"name": "Kill switch", "status": "working", "confidence": "high", "evidence": [{"file": "live/state_store.py", "symbol": "kill_switch table", "line": 72, "description": "Persistent local kill switch, checked by critic KILL_SWITCH check and dashboard kill-switch routes."}], "dependencies": [], "risks": [], "next_action": "None."}
+  ],
+
+  "tests": [
+    {
+      "name": "Full pytest suite",
+      "status": "working",
+      "confidence": "high",
+      "evidence": [
+        {"file": "tests/", "symbol": "166 test files", "line": 0, "description": "1948 tests collected; last full run this session: 1945 passed, 3 failed."},
+        {"file": "tests/test_daily_report.py", "symbol": "3 currently-failing tests", "line": 1, "description": "Failures are environmental (local data/market/RELIANCE.NS cache turned exactly 5 calendar days stale during this long session), not a code regression -- confirmed unrelated to any change made this session by diff scope."}
+      ],
+      "dependencies": [],
+      "risks": ["3 known-failing tests need a fresh market-data cache fetch to pass again -- not a code defect."],
+      "next_action": "Refresh data/market/ cache (or wait for scheduler/credential resolution) to clear the 3 stale-data failures."
+    },
+    {"name": "Test coverage gap: 5 LangGraph node agents", "status": "partial", "confidence": "medium", "evidence": [{"file": "agents/{analyst,debate_agent,risk_agent,supervisor_agent,technical_agent}.py", "symbol": "no direct import found in tests/", "line": 0, "description": "Zero test files directly import these 5 modules; they may be exercised only indirectly via tests/test_graph.py, which was not traced line-by-line to confirm."}], "dependencies": [], "risks": ["Unverified whether the legacy analyze pipeline's core LLM-calling logic has direct unit coverage."], "next_action": "Either add direct unit tests for these 5 modules, or confirm and document that tests/test_graph.py exercises them end-to-end."},
+    {"name": "Safety-critical test: no real orders", "status": "working", "confidence": "high", "evidence": [{"file": "tests/test_dhan_no_real_orders.py", "symbol": "module", "line": 1, "description": "Explicitly titled 'THE CRITICAL SAFETY TEST'; runtime + 2 static-grep checks proving the disabled order path can never be reached."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Credential-security structural test", "status": "working", "confidence": "high", "evidence": [{"file": "tests/test_dhan_credential_security.py", "symbol": "module", "line": 1, "description": "Asserts no tracked file contains a plausible Dhan access-token pattern."}], "dependencies": [], "risks": [], "next_action": "None."}
+  ],
+
+  "security_findings": [
+    {"name": "SQL injection surface", "status": "working", "confidence": "high", "evidence": [{"file": "docs/SECURITY_REVIEW.md", "symbol": "section 1", "line": 7, "description": "CLEAN -- every value-bearing query across all store modules uses ? parameterized placeholders."}, {"file": "paper/store.py", "symbol": "_fetch_all_json()", "line": 309, "description": "One f-string-built query with an internal-only, never-user-controllable table name, self-documented with a noqa comment."}, {"file": "live/state_store.py", "symbol": "_ensure_column()", "line": 193, "description": "A second, equally benign internal-only f-string for DDL (SQLite cannot parameterize identifiers) -- found independently by this audit, one more instance than docs/SECURITY_REVIEW.md's own count."}], "dependencies": [], "risks": [], "next_action": "None -- both f-string sites are internal-only identifiers, never user input."},
+    {"name": "XSS in the dashboard", "status": "working", "confidence": "high", "evidence": [{"file": "docs/SECURITY_REVIEW.md", "symbol": "section 2", "line": 19, "description": "CLEAN -- every interpolation of external/user-influenced data (kill-switch reason, URL path param, news headlines, AI narrative text, signal IDs in HTML attributes) passes through html.escape()."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Path traversal in market-data cache", "status": "working", "confidence": "high", "evidence": [{"file": "docs/SECURITY_REVIEW.md", "symbol": "section 3", "line": 30, "description": "REAL GAP, FOUND AND FIXED (Phase 17): backtesting/cache.py's _csv_path joined a symbol string into a filesystem path with no path-separator/.. validation; fixed via _validate_symbol_for_path(), an allowlist covering this project's own real symbol shapes, wired into both fetch_ohlcv() and report_cache_staleness(). 16 new tests including 8 malicious payloads rejected."}], "dependencies": [], "risks": [], "next_action": "None -- already fixed, tested, and verified by this audit's own read of docs/SECURITY_REVIEW.md."},
+    {"name": "Secrets in git history", "status": "working", "confidence": "high", "evidence": [{"file": "docs/SECURITY_REVIEW.md", "symbol": "section 4", "line": 68, "description": "CLEAN -- full 91+/197-commit history searched; independently re-verified this session (git log --all -p -- .env returned empty; only .env.example, containing no real values, was ever committed)."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Credential handling (DHAN_CLIENT_ID / DHAN_ACCESS_TOKEN)", "status": "working", "confidence": "high", "evidence": [{"file": "live/dhan/config.py", "symbol": "load_dhan_credentials()", "line": 39, "description": "Read from os.environ only, at call time, never hardcoded; DhanCredentials.__repr__ always prints '***'; no dotenv/.env auto-loading anywhere in the repo."}], "dependencies": [], "risks": ["Secret-in-URL for the WebSocket feed (build_feed_url embeds the raw token in the connection string per Dhan's own protocol) -- mitigated today by a _redact_secret() helper applied at every current logging call site, but not structurally impossible to reintroduce in future code."], "next_action": "Keep _redact_secret() discipline if live/dhan/market_data_source.py's logging is ever extended."},
+    {"name": "No eval/exec/pickle/shell=True/os.system", "status": "working", "confidence": "high", "evidence": [{"file": "(repo-wide grep)", "symbol": "eval(/exec(/pickle.loads/shell=True/os.system(", "line": 0, "description": "Zero real matches anywhere in project code (only false-positive identifier substrings in tests)."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "CSRF protection on dashboard state-changing routes", "status": "missing", "confidence": "high", "evidence": [{"file": "docs/SECURITY_REVIEW.md", "symbol": "section 5", "line": 85, "description": "No CSRF protection on /approve, /reject, /kill-switch/*. Mitigated (not fixed): run_dashboard_command prints an explicit warning whenever --host isn't loopback, never silently exposed."}], "dependencies": [], "risks": ["Acceptable for the documented local-only, single-user threat model; would become a real risk if ever exposed beyond loopback without additional auth."], "next_action": "Add real CSRF tokens / auth only if the dashboard is ever intentionally exposed off-loopback."}
+  ],
+
+  "reliability_findings": [
+    {"name": "No silently-swallowed exceptions", "status": "working", "confidence": "high", "evidence": [{"file": "(repo-wide review of 43 except-Exception/bare-except sites)", "symbol": "various", "line": 0, "description": "Every instance either re-raises (12 identical ROLLBACK-then-raise store-transaction patterns), wraps into a domain-specific exception, logs via log_event before re-raising, or carries a noqa explaining the deliberate broad catch. Only one narrow except X: pass exists (market_data/universe.py:159, a typed InstrumentNotFoundError with documented None-fallback behavior)."}], "dependencies": [], "risks": [], "next_action": "None -- a genuine positive finding, worth preserving as a coding-standard going forward."},
+    {"name": "Provider resilience (timeout/retry/circuit-breaker)", "status": "partial", "confidence": "high", "evidence": [{"file": "market_data/resilience.py", "symbol": "ResilientMarketDataProvider", "line": 1, "description": "Timeout (daemon-thread-based, deliberately not ThreadPoolExecutor, to avoid a hang-at-exit bug caught pre-ship), exponential backoff+jitter retry, circuit breaker, optional rate limiter, metrics."}, {"file": "main.py", "symbol": "--resilient flag", "line": 1187, "description": "Opt-in only, default off, on scan/regime/daily-report/evaluate/evaluate-forecasts/learn/shadow-run/schedule tick|loop. No equivalent wrapper exists for the Dhan REST client, Dhan WebSocket feed, or Ollama (each has its own bespoke handling instead)."}], "dependencies": [], "risks": ["Without --resilient, a transient Yahoo/network hiccup is not automatically retried on the default path."], "next_action": "Consider making --resilient the default once its behavior is well-proven, or explicitly document why opt-in is the permanent design choice."},
+    {"name": "Module-level singletons with lazy check-then-set race windows", "status": "partial", "confidence": "medium", "evidence": [{"file": "mcp_server/server.py", "symbol": "_paper_engine / _get_paper_engine()", "line": 228, "description": "Lazy-init module-level singleton, no lock -- a narrow race window under concurrent MCP tool invocations."}, {"file": "live/workstation.py", "symbol": "_live_engine / get_live_engine()", "line": 31, "description": "Identical pattern."}], "dependencies": [], "risks": ["Concurrent first-call race could theoretically construct two engine instances briefly; low real-world likelihood for a single-user local tool, but not structurally impossible."], "next_action": "Add a lock around the lazy-init check-then-set if the MCP server is ever expected to handle genuinely concurrent tool calls."},
+    {"name": "Scheduler overlap-prevention and stale-lock recovery", "status": "working", "confidence": "high", "evidence": [{"file": "scheduler/store.py", "symbol": "try_start_run() / reclaim_stale_locks()", "line": 64, "description": "Atomic BEGIN IMMEDIATE lock; 30-minute staleness reclaim on restart; a broad except (Exception, SystemExit) around slot execution guarantees the lock is always released, fixing a real historical bug (an uncaught SystemExit had left a lock stuck RUNNING)."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Observability / logging configuration", "status": "working", "confidence": "high", "evidence": [{"file": "docs/OBSERVABILITY.md", "symbol": "setup_logging()", "line": 1, "description": "Called unconditionally at the top of main(), before any command dispatch; RotatingFileHandler available via --log-file for long-running unattended operation."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Candle-builder tick-rejection counters", "status": "working", "confidence": "high", "evidence": [{"file": "docs/OBSERVABILITY.md", "symbol": "CandleBuilder.rejected_tick_counts", "line": 1, "description": "Running per-reason counts of rejected ticks (non-positive price, negative volume, implausible deviation, late/out-of-order), queryable, not just logged."}], "dependencies": [], "risks": [], "next_action": "None."}
+  ],
+
+  "technical_debt": [
+    {"name": "market_data/ built at Phase 18, unused until Phase 31", "status": "partial", "confidence": "high", "evidence": [{"file": "docs/PHASE_HISTORY.md", "symbol": "Phase 31 entry", "line": 68, "description": "market_data/provider.py/contracts.py/adapters/ sat as dead infrastructure for 13 phases before anything downstream consumed it -- now wired in, but the naming overlap between market/ (original), market_data/ (Phase 18 unified layer), and market_intelligence/ (Phase 19 scanner, built on both) remains a real source-of-confusion risk for future contributors."}], "dependencies": [], "risks": ["Similarly-named modules (market.data_provider vs market_data.provider) increase misattribution risk in future changes."], "next_action": "Consider a docstring/README cross-reference table clarifying the 3-layer relationship (already partially done in module docstrings, per sub-audit) or a rename if ever undertaken as a deliberate refactor."},
+    {"name": "Orphaned ExperimentRegistryStore", "status": "broken", "confidence": "high", "evidence": [{"file": "strategy/experiment_store.py", "symbol": "ExperimentRegistryStore", "line": 24, "description": "Fully implemented, fully tested, but never wired into any main.py command -- dead production code."}], "dependencies": [], "risks": [], "next_action": "Wire into a CLI command, or remove; investigate data/experiment_registry.db's actual origin first."},
+    {"name": "experiments.db default path never exercised", "status": "unknown", "confidence": "medium", "evidence": [{"file": "main.py", "symbol": "DEFAULT_EXPERIMENTS_DB_PATH", "line": 2238, "description": "CLI-wired but the default-path DB file doesn't exist on disk in this checkout."}], "dependencies": [], "risks": [], "next_action": "Run 'experiment list' once against the default path to confirm end-to-end correctness."},
+    {"name": "No prompt/model versioning despite roadmap requirement", "status": "missing", "confidence": "high", "evidence": [{"file": "PROJECT_GOAL_AND_ROADMAP.md", "symbol": "section 9 (Decision Auditability) / section 25 (Evidence Classification)", "line": 845, "description": "Roadmap requires 'Model Version' as part of every decision record; no AI-output schema anywhere (DecisionNarrative, DecisionReview, SignalExplanation, ResearchSummary) carries a model_version/prompt_version field. Only deterministic config (RiskConfig/DecisionConfig/CriticConfig version_id()) is versioned."}], "dependencies": [], "risks": ["A future change to the chat_model default or a prompt's own wording would be invisible in historical decision records."], "next_action": "Add a model_version/prompt_version field to the 4 AI-output schemas if full decision-auditability (as the roadmap defines it) is ever required."},
+    {"name": "RAG/ChromaDB isolated to the legacy analyze pipeline", "status": "partial", "confidence": "high", "evidence": [{"file": "main.py", "symbol": "run() [analyze command]", "line": 85, "description": "The only call site for rag.retriever.get_context anywhere outside tests -- decision_engine/, research/, and every Phase-18-onward command never import rag/ at all."}], "dependencies": [], "risks": [], "next_action": "Disclosed architectural boundary, not a defect; revisit only if the newer research/decision pipeline is deliberately extended to use RAG."},
+    {"name": "Stale-branch accumulation", "status": "partial", "confidence": "medium", "evidence": [{"file": "(git branch -a)", "symbol": "150+ local/remote branches", "line": 0, "description": "Almost every phase/feature/fix branch was never deleted after merge into main."}], "dependencies": [], "risks": ["Repository navigation/clarity cost; no functional risk."], "next_action": "Consider a branch-cleanup pass (delete merged branches) as routine hygiene -- not urgent."},
+    {"name": "Artifact-only historical phase reports (Phases 1-7)", "status": "missing", "confidence": "high", "evidence": [{"file": "docs/PHASE_HISTORY.md", "symbol": "'Artifact-only reports' section", "line": 84, "description": "Phases 1-7 and one Phase-15-adjacent audit exist only as externally-hosted Claude Artifacts, never committed to this repository."}], "dependencies": [], "risks": ["Historical provenance for the earliest phases is not self-contained in this repo."], "next_action": "Optionally retrieve and commit those artifacts for full self-containment; not required for current operation."},
+    {"name": "One-off validation DB clutter (data/live_market_validation_*.db)", "status": "partial", "confidence": "medium", "evidence": [{"file": "data/", "symbol": "20 files", "line": 0, "description": "No code references these filenames anywhere; confirmed manual, ad hoc CLI-flag-override artifacts."}], "dependencies": [], "risks": [], "next_action": "Archive or remove if the corresponding validation work (documented in docs/LIVE_MARKET_VALIDATION_REPORT.md / docs/LIVE_SYSTEM_HARDENING_FINAL_REPORT.md) is considered concluded."}
+  ],
+
+  "todos": [
+    {"name": "TODO/FIXME/XXX/HACK comments", "status": "missing", "confidence": "high", "evidence": [{"file": "(repo-wide grep across all *.py)", "symbol": "TODO|FIXME|XXX|HACK:", "line": 0, "description": "Zero matches anywhere in the codebase -- only NotImplementedError usages exist, all in deliberate abstract-interface or structurally-disabled contexts (llm/provider.py NIM/OPENAI stubs, live/broker.py MockBrokerAdapter.cancel_order, live/dhan/broker_adapter.py's disabled order methods, backtesting/costs.py Side.SHORT stub)."}], "dependencies": [], "risks": [], "next_action": "None -- a genuinely clean result, not a gap."}
+  ],
+
+  "known_bugs": [
+    {"name": "Dhan reconnect storm (rate-limited account)", "status": "working", "confidence": "high", "evidence": [{"file": "docs/PHASE_HISTORY.md", "symbol": "Phase 16", "line": 53, "description": "FIXED. Bounded exponential backoff added; documented in live/dhan/market_data_source.py:384-399."}], "dependencies": [], "risks": [], "next_action": "None -- historical, resolved."},
+    {"name": "Dhan timestamp/timezone decoding bug", "status": "working", "confidence": "high", "evidence": [{"file": "docs/PHASE_HISTORY.md", "symbol": "Phase 16", "line": 53, "description": "FIXED, real bug found via live-service verification."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "market.data_provider._to_timestamp dead tzinfo-stripping branch", "status": "working", "confidence": "high", "evidence": [{"file": "docs/PHASE_HISTORY.md", "symbol": "Phase 33", "line": 70, "description": "FIXED -- pd.Timestamp is a datetime subclass so the isinstance check always matched, causing a real crash scanning ^NSEI."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "learning.profitability naive/UTC-aware datetime mix crash", "status": "working", "confidence": "high", "evidence": [{"file": "docs/PHASE_HISTORY.md", "symbol": "Phase 42", "line": 79, "description": "FIXED -- same bug class recurring for the 3rd time (Phase 33, 37, 42), each fixed the same way."}], "dependencies": [], "risks": ["Recurring bug CLASS across 3 phases suggests a systemic datetime-handling convention gap, not fully closed by point fixes."], "next_action": "Consider a project-wide datetime-normalization utility/lint rule to prevent a 4th recurrence."},
+    {"name": "Expectancy-formula bug (breakeven trades misattributed)", "status": "working", "confidence": "high", "evidence": [{"file": "docs/PHASE_HISTORY.md", "symbol": "Phase 41", "line": 78, "description": "FIXED -- win_rate*avg_win + loss_rate*avg_loss silently dropped 0.0-return trades; now computed as the exact mean directly."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "paper/advance.py under-reporting bars_processed on mid-loop failure", "status": "working", "confidence": "high", "evidence": [{"file": "docs/PHASE_HISTORY.md", "symbol": "Phase 44", "line": 81, "description": "FIXED -- an audit-trail accuracy defect, not a safety one."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "Critic verdict-priority order could mask a HARD failure", "status": "working", "confidence": "high", "evidence": [{"file": "docs/PHASE_HISTORY.md", "symbol": "Phase 45", "line": 82, "description": "FIXED -- an active kill switch could previously be reported as a vaguer INSUFFICIENT_EVIDENCE verdict."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "schedule loop uncaught exception could kill the whole unattended process", "status": "working", "confidence": "high", "evidence": [{"file": "docs/PHASE_HISTORY.md", "symbol": "Phase 39", "line": 76, "description": "FIXED -- now logs, prints, and continues to the next tick."}], "dependencies": [], "risks": [], "next_action": "None."},
+    {"name": "evaluate/shadow-run batch abort on single prediction failure", "status": "working", "confidence": "high", "evidence": [{"file": "docs/PHASE_HISTORY.md", "symbol": "Phase 40", "line": 77, "description": "FIXED -- per-prediction isolation added, matching decide's existing per-symbol isolation."}], "dependencies": [], "risks": [], "next_action": "None."}
+  ],
+
+  "missing_capabilities": [
+    {"name": "Real order execution", "status": "missing", "confidence": "high", "evidence": [{"file": "live/dhan/broker_adapter.py", "symbol": "DisabledDhanOrderExecutor", "line": 28, "description": "Deliberate, structural non-goal (PROJECT_GOAL_AND_ROADMAP.md section 27)."}], "dependencies": [], "risks": [], "next_action": "Not planned without a separate future architectural review, per the roadmap's own explicit non-goal."},
+    {"name": "Demonstrated trading edge", "status": "missing", "confidence": "high", "evidence": [{"file": "README.md", "symbol": "line 11", "line": 11, "description": "'The trading strategy is unproven ... found no evidence of a durable edge.' Confirmed by strategy/hypothesis_registry.py: 55 hypotheses, 32 REJECTED, 22 INCONCLUSIVE, 1 SUPPORTED (itself a negative finding)."}], "dependencies": [], "risks": [], "next_action": "Continue the existing hypothesis-driven research discipline; no shortcut exists."},
+    {"name": "NIFTY 50/100/200/500 index-membership universe modes", "status": "missing", "confidence": "high", "evidence": [{"file": "market_data/universe.py", "symbol": "_KNOWN_FUTURE_MODES, UnsupportedUniverseModeError", "line": 29, "description": "Recognized-but-rejected; module docstring states no live/verifiable index-membership source exists -- a deliberate, disclosed deferral, not a bug."}], "dependencies": [], "risks": [], "next_action": "Implement only if a reliable, licensable index-constituent data source is found."},
+    {"name": "Prediction outcome states: INVALIDATED / PARTIAL_SUCCESS / MISSED_ENTRY / CANCELLED", "status": "missing", "confidence": "high", "evidence": [{"file": "predictions/models.py", "symbol": "PredictionOutcomeState enum", "line": 38, "description": "Declared but never produced by evaluation logic; docstring explains each requires a judgment call with no evidence-based rule yet."}], "dependencies": [], "risks": [], "next_action": "Define evidence-based rules for these states if finer-grained outcome tracking is ever prioritized."},
+    {"name": "Paper order CANCELLED state", "status": "missing", "confidence": "medium", "evidence": [{"file": "live/broker.py", "symbol": "PaperOrder (no CANCELLED state)", "line": 13, "description": "Explicitly noted as a deliberate Phase 6 scope decision."}], "dependencies": [], "risks": [], "next_action": "Add if a future workflow needs to cancel a still-pending paper order before it fills."},
+    {"name": "Confidence calibration auto-adjustment (roadmap Level 4/5)", "status": "partial", "confidence": "low", "evidence": [{"file": "learning/profitability.py / decision_engine/confidence.py", "symbol": "calibration report", "line": 1, "description": "Confidence is measured and reported (fixed LOW/MEDIUM/HIGH bands vs. real outcomes), but no automated confidence-estimation adjustment loop was confirmed by this audit -- roadmap Level 4 ('the system should adjust confidence estimation over time') appears to stop at measurement, not closed-loop adjustment."}], "dependencies": [], "risks": ["Unverified with high confidence -- would need a deeper read of learning/adaptation.py to confirm definitively."], "next_action": "Read learning/adaptation.py in full to confirm whether any auto-adjustment exists beyond the advisory-only PromotionRecommendation (Phase 38, which never edits config automatically)."},
+    {"name": "Server-side WebSocket / live dashboard push", "status": "missing", "confidence": "high", "evidence": [{"file": "dashboard/app.py", "symbol": "Starlette routes, no WebSocketRoute", "line": 994, "description": "Dashboard is read-on-load only; requires manual refresh for updated state."}], "dependencies": [], "risks": [], "next_action": "Not currently planned; a genuine future feature, not a defect."},
+    {"name": "REST/JSON API", "status": "missing", "confidence": "high", "evidence": [{"file": "(repo-wide grep)", "symbol": "no FastAPI/Flask decorators anywhere", "line": 0, "description": "CLI + dashboard HTML + MCP tools are the complete API surface."}], "dependencies": [], "risks": [], "next_action": "Not planned."},
+    {"name": "Real end-to-end signal-to-paper-execution validation against live data", "status": "missing", "confidence": "high", "evidence": [{"file": "README.md", "symbol": "line 9", "line": 9, "description": "'What has not been observed: a natural trading signal from real market data -- the risk engine, human-approval gate, and paper execution have not yet been exercised end-to-end by a real signal (only by the deterministic test suite).'"}], "dependencies": ["Dhan credentials", "NSE market hours"], "risks": [], "next_action": "Requires credentials (currently absent in this environment) and a naturally-occurring signal during live market hours -- not something this audit can produce."},
+    {"name": "Portfolio intelligence / multi-timeframe strategies / options analysis / mobile dashboard / alerts", "status": "missing", "confidence": "high", "evidence": [{"file": "PROJECT_GOAL_AND_ROADMAP.md", "symbol": "'Phase 28+ Future Expansion' list", "line": 1810, "description": "Explicitly listed as possible future work, 'not automatically approved,' requiring separate architecture review."}], "dependencies": [], "risks": [], "next_action": "None -- explicitly out of current scope."},
+    {"name": "Real portfolio-selection edge for the mean-reversion research family", "status": "missing", "confidence": "high", "evidence": [{"file": "docs/INDIAN_TRADING_BRAIN_STATUS.md", "symbol": "H_MEANREV_012 verdict", "line": 1, "description": "Most recent research entry (this session): ranking-based candidate selection does not restore the gross edge lost under portfolio contention -- REJECTED, same as the preceding H_MEANREV_009/011 entries in this thread."}], "dependencies": [], "risks": [], "next_action": "Per explicit standing instruction, this research thread is paused pending further user direction -- not a gap to be filled by this audit."}
+  ]
+}
