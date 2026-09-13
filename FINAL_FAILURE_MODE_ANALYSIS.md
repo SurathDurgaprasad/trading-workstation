@@ -76,11 +76,11 @@ for the component map this analysis is built against.
 ### 8. Disk full / write failure
 
 - **FAILURE**: host disk fills up (market data cache, DB growth, logs).
-- **DETECTION**: none dedicated -- would surface as a raw `OSError`/`sqlite3.OperationalError` at the point of write.
-- **SAFE RESPONSE**: undefined; no disk-space health check exists.
-- **RECOVERY**: manual (operator frees space).
-- **USER VISIBILITY**: only via the raw exception in logs.
-- **Evidence**: **[ASSUMED]** gap, disclosed. Not addressed this session; a real, open item under "resource-safety monitoring" from the mission.
+- **DETECTION**: **autonomous hardening cycle 6 addition** -- `core.health._check_disk` now checks real free space (`shutil.disk_usage`) on the volume holding the data directory, in addition to its pre-existing real write-probe. Previously this would only ever surface as a raw `OSError`/`sqlite3.OperationalError` at the point of write, with zero advance warning.
+- **SAFE RESPONSE**: DEGRADED below 500MB free (advance warning, does not block startup); FAILED below 50MB free (disk is a CRITICAL health component, so this correctly escalates overall status to FAILED and blocks the startup gate -- the same fail-closed posture a genuine write failure already gets). A `disk_usage`-specific lookup failure (distinct from an actual write failure, which the write-probe already proved works) degrades gracefully to HEALTHY-with-a-caveat rather than a false FAILED.
+- **RECOVERY**: manual (operator frees space) -- unchanged; this closes the DETECTION gap, not the recovery mechanism, which was never automatable here.
+- **USER VISIBILITY**: `python main.py health` and the dashboard `/health` route now report free space directly, before a write ever actually fails.
+- **Evidence**: **[VERIFIED-TEST]** 4 new tests in `tests/test_core_health.py` (`test_disk_check_reports_healthy_with_ample_free_space`, `test_disk_check_reports_degraded_when_free_space_is_low`, `test_disk_check_reports_failed_when_free_space_is_critically_low`, `test_disk_check_survives_a_disk_usage_lookup_failure`).
 
 ### 9. Scheduler job raises an unexpected exception mid-slot
 

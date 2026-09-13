@@ -37,6 +37,72 @@ def test_disk_check_fails_on_a_nonwritable_directory(tmp_path):
     assert health.overall == OverallStatus.FAILED
 
 
+def test_disk_check_reports_healthy_with_ample_free_space(tmp_path, monkeypatch):
+    import shutil
+    import types
+
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: types.SimpleNamespace(total=10**12, used=0, free=10 * 1024 * 1024 * 1024))
+
+    health = collect_system_health(db_paths={}, probe_dir=tmp_path, check_ollama=False)
+
+    assert health.get("disk").status == ComponentStatus.HEALTHY
+    assert "10240MB free" in health.get("disk").detail
+
+
+def test_disk_check_reports_degraded_when_free_space_is_low(tmp_path, monkeypatch):
+    """Autonomous hardening cycle 6: closes a real, previously-disclosed
+    gap (FINAL_FAILURE_MODE_ANALYSIS.md entry #8) -- a nearly-full disk
+    previously gave zero advance warning anywhere; the first sign of
+    trouble would have been a raw OSError/sqlite3.OperationalError at
+    the point of write, with no lead time to act."""
+    import shutil
+    import types
+
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: types.SimpleNamespace(total=10**12, used=0, free=200 * 1024 * 1024))
+
+    health = collect_system_health(db_paths={}, probe_dir=tmp_path, check_ollama=False)
+
+    disk = health.get("disk")
+    assert disk.status == ComponentStatus.DEGRADED
+    assert "200MB free" in disk.detail
+    assert health.overall == OverallStatus.DEGRADED
+
+
+def test_disk_check_reports_failed_when_free_space_is_critically_low(tmp_path, monkeypatch):
+    """disk is a CRITICAL component -- a critically low free-space
+    reading must escalate all the way to overall FAILED (blocking the
+    startup gate), the same fail-closed posture a genuine write failure
+    already gets."""
+    import shutil
+    import types
+
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: types.SimpleNamespace(total=10**12, used=0, free=10 * 1024 * 1024))
+
+    health = collect_system_health(db_paths={}, probe_dir=tmp_path, check_ollama=False)
+
+    assert health.get("disk").status == ComponentStatus.FAILED
+    assert health.overall == OverallStatus.FAILED
+
+
+def test_disk_check_survives_a_disk_usage_lookup_failure(tmp_path, monkeypatch):
+    """A disk_usage-specific failure (e.g. an unusual filesystem) must
+    not be conflated with an actual write failure -- the write probe
+    already proved the path works, so this degrades gracefully to
+    HEALTHY-with-a-caveat rather than a false FAILED."""
+    import shutil
+
+    def _raise(path):
+        raise OSError("disk_usage not supported on this filesystem")
+
+    monkeypatch.setattr(shutil, "disk_usage", _raise)
+
+    health = collect_system_health(db_paths={}, probe_dir=tmp_path, check_ollama=False)
+
+    disk = health.get("disk")
+    assert disk.status == ComponentStatus.HEALTHY
+    assert "Free-space check unavailable" in disk.detail
+
+
 def test_database_check_reports_healthy_for_a_real_clean_store(tmp_path):
     from paper.store import PaperStore
 

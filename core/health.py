@@ -114,16 +114,46 @@ def _check_database(db_paths: dict[str, Path]) -> ComponentHealth:
     return ComponentHealth("database", ComponentStatus.HEALTHY, f"{checked_count} store(s) checked (of {len(db_paths)} configured), all ok.")
 
 
+_DISK_FREE_BYTES_DEGRADED = 500 * 1024 * 1024
+"""Autonomous hardening cycle 6: below this much free space on the
+volume holding the data directory, report DEGRADED -- entry #8 of
+FINAL_FAILURE_MODE_ANALYSIS.md previously disclosed this as a real,
+unaddressed gap ("no disk-space health check exists"; a full disk would
+only ever surface as a raw OSError/sqlite3.OperationalError at the
+point of write, with no advance warning anywhere). 500MB is deliberately
+generous headroom for a local, single-operator SQLite-backed system
+whose total data footprint is small -- this is a warning to act before
+things break, not a claim that writes are about to fail."""
+
+_DISK_FREE_BYTES_FAILED = 50 * 1024 * 1024
+"""Below this, report FAILED -- disk is already a CRITICAL component
+(see _derive_overall_status), so this correctly escalates overall
+status to FAILED and blocks the startup gate, the same fail-closed
+posture a genuine write failure already gets from the write-probe
+check below."""
+
+
 def _check_disk(probe_dir: Path) -> ComponentHealth:
-    import tempfile
+    import shutil
 
     try:
         probe = Path(probe_dir) / "tradingagents_health_write_probe.tmp"
         probe.write_text("ok")
         probe.unlink()
-        return ComponentHealth("disk", ComponentStatus.HEALTHY, "Write probe succeeded.")
     except OSError as exc:
         return ComponentHealth("disk", ComponentStatus.FAILED, f"Write probe failed: {exc}")
+
+    try:
+        free_bytes = shutil.disk_usage(probe_dir).free
+    except OSError as exc:  # noqa: BLE001 -- the write probe above already proved the path itself works; a disk_usage-specific failure here is a separate, non-fatal reporting gap, not a write failure
+        return ComponentHealth("disk", ComponentStatus.HEALTHY, f"Write probe succeeded. Free-space check unavailable: {exc}")
+
+    free_mb = free_bytes / (1024 * 1024)
+    if free_bytes < _DISK_FREE_BYTES_FAILED:
+        return ComponentHealth("disk", ComponentStatus.FAILED, f"Only {free_mb:.0f}MB free -- writes may fail imminently.")
+    if free_bytes < _DISK_FREE_BYTES_DEGRADED:
+        return ComponentHealth("disk", ComponentStatus.DEGRADED, f"Only {free_mb:.0f}MB free -- consider freeing space soon.")
+    return ComponentHealth("disk", ComponentStatus.HEALTHY, f"Write probe succeeded. {free_mb:.0f}MB free.")
 
 
 def _check_ollama() -> ComponentHealth:
