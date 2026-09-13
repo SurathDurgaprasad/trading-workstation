@@ -45,7 +45,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "evaluate-forecasts", "learn", "review", "shadow-run", "schedule", "universe", "regime", "daily-report", "experiment", "hypothesis-registry", "cache-status", "readiness-check")
+_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "evaluate-forecasts", "learn", "review", "shadow-run", "schedule", "universe", "regime", "daily-report", "experiment", "hypothesis-registry", "cache-status", "readiness-check", "health")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -3088,6 +3088,47 @@ def run_readiness_check_command(args: argparse.Namespace) -> None:
         sys.exit(exit_code)
 
 
+def _health_db_paths() -> dict:
+    """The same 12-store default-path mapping `core.health.collect_
+    system_health` expects, keyed by the names in its own
+    `_STORE_REGISTRY` -- built here (not hardcoded a second time inside
+    core/health.py) so it stays a single source of truth with every
+    other DEFAULT_*_DB_PATH constant already defined in this file."""
+    return {
+        "experiments": DEFAULT_EXPERIMENTS_DB_PATH,
+        "decision_engine": DEFAULT_DECISION_DB_PATH,
+        "live_state": DEFAULT_LIVE_STATE_DB_PATH,
+        "promotion_gate": DEFAULT_PROMOTION_GATE_DB_PATH,
+        "paper": DEFAULT_PAPER_DB_PATH,
+        "scheduler": DEFAULT_SCHEDULER_DB_PATH,
+        "predictions": DEFAULT_PREDICTIONS_DB_PATH,
+        "direction_forecasts": DEFAULT_FORECASTS_DB_PATH,
+        "research": DEFAULT_RESEARCH_DB_PATH,
+        "scanner": DEFAULT_SCANNER_DB_PATH,
+        "regime": DEFAULT_REGIME_DB_PATH,
+    }
+
+
+def run_health_command(args: argparse.Namespace) -> None:
+    from core.health import ComponentStatus, OverallStatus, collect_system_health
+
+    health = collect_system_health(db_paths=_health_db_paths(), probe_dir=PROJECT_ROOT, check_ollama=not args.no_ollama)
+
+    print("=" * 70)
+    print("UNIFIED HEALTH CHECK (core/health.py -- same source the dashboard's /health route reads)")
+    print("=" * 70)
+    marker = {
+        ComponentStatus.HEALTHY: "[PASS]", ComponentStatus.DEGRADED: "[WARN]",
+        ComponentStatus.FAILED: "[FAIL]", ComponentStatus.DISABLED: "[INFO]", ComponentStatus.UNKNOWN: "[INFO]",
+    }
+    for component in health.components:
+        print(f"{marker[component.status]} {component.name:20s} {component.status.value:10s} {component.detail}")
+    print()
+    print(f"OVERALL STATUS: {health.overall.value}")
+    if health.overall == OverallStatus.FAILED:
+        sys.exit(1)
+
+
 def _run_deep_readiness_checks(*, deep_timeout_seconds: float, deep_symbol: str) -> None:
     """LIVE SYSTEM HARDENING mission: the REAL, network-touching half of
     readiness-check --deep. Read-only Dhan calls only (REST GET,
@@ -3742,6 +3783,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     readiness_check_parser.add_argument("--deep-timeout-seconds", type=float, default=20.0, help="Bound for the --deep WebSocket/tick-reception check (default: 20s).")
     readiness_check_parser.add_argument("--deep-symbol", type=str, default="RELIANCE.NS", help="Symbol to use for the --deep WebSocket check (default: RELIANCE.NS).")
 
+    health_parser = subparsers.add_parser(
+        "health",
+        help=(
+            "Final-product-hardening: the ONE unified health model (core/health.py), also consumed by the "
+            "dashboard's /health route -- PRAGMA integrity_check across all 12 stores, Ollama reachability, "
+            "kill switch, scheduler lock state, disk write probe, risk config validity, and a single overall "
+            "HEALTHY/DEGRADED/SAFE_STOP/FAILED status. Complements, does not replace, readiness-check."
+        ),
+    )
+    health_parser.add_argument("--no-ollama", action="store_true", help="Skip the Ollama reachability check (the one real network call this command makes, to localhost).")
+
     scan_parser = subparsers.add_parser(
         "scan",
         help=(
@@ -4152,6 +4204,8 @@ def main() -> None:
             run_cache_status_command(args)
         elif args.command == "readiness-check":
             run_readiness_check_command(args)
+        elif args.command == "health":
+            run_health_command(args)
         elif args.command == "regime":
             run_regime_command(args)
         elif args.command == "daily-report":

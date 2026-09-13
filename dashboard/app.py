@@ -36,6 +36,7 @@ from starlette.responses import HTMLResponse, RedirectResponse
 from starlette.routing import Route
 
 import live.workstation as workstation
+from core.config import PROJECT_ROOT
 from core.timeutil import as_utc_aware
 from dashboard import intelligence
 
@@ -990,6 +991,57 @@ async def decision_detail_page(request: Request) -> HTMLResponse:
     return HTMLResponse(_page(body))
 
 
+async def health_page(request: Request) -> HTMLResponse:
+    """Final-product-hardening: the SAME `core.health.collect_system_health`
+    `main.py health` calls -- the mission's own explicit requirement that
+    the dashboard and CLI consume one shared health source, not two
+    independently-drifting implementations. Zero write, same
+    zero-I/O-beyond-disk-and-localhost-Ollama posture as every other
+    check this function runs -- no market-data fetch happens here either."""
+    from core.health import ComponentStatus, OverallStatus, collect_system_health
+
+    db_paths = {
+        "experiments": PROJECT_ROOT / "data" / "experiments.db",
+        "decision_engine": intelligence.DECISIONS_DB_PATH,
+        "live_state": intelligence.STATE_DB_PATH,
+        "promotion_gate": PROJECT_ROOT / "data" / "promotion_gate.db",
+        "paper": intelligence.PAPER_DB_PATH,
+        "scheduler": intelligence.SCHEDULER_DB_PATH,
+        "predictions": intelligence.PREDICTIONS_DB_PATH,
+        "research": intelligence.RESEARCH_DB_PATH,
+        "scanner": intelligence.SCANNER_DB_PATH,
+        "regime": PROJECT_ROOT / "data" / "market_regime.db",
+    }
+    health = collect_system_health(db_paths=db_paths, probe_dir=PROJECT_ROOT, check_ollama=True)
+
+    tag_class = {
+        ComponentStatus.HEALTHY: "tag-long", ComponentStatus.DEGRADED: "tag-warn",
+        ComponentStatus.FAILED: "tag-short", ComponentStatus.DISABLED: "tag-sim", ComponentStatus.UNKNOWN: "tag-sim",
+    }
+    overall_class = {
+        OverallStatus.HEALTHY: "tag-long", OverallStatus.DEGRADED: "tag-warn",
+        OverallStatus.SAFE_STOP: "tag-warn", OverallStatus.FAILED: "tag-short",
+    }[health.overall]
+
+    rows = "".join(
+        f'<tr><td>{html.escape(c.name)}</td>'
+        f'<td><span class="tag {tag_class[c.status]}">{html.escape(c.status.value)}</span></td>'
+        f'<td>{html.escape(c.detail)}</td></tr>'
+        for c in health.components
+    )
+    body = f"""
+<h2>SYSTEM HEALTH</h2>
+<p>Overall status: <span class="tag {overall_class}">{html.escape(health.overall.value)}</span></p>
+<table>
+<tr><th>Component</th><th>Status</th><th>Detail</th></tr>
+{rows}
+</table>
+<p class="muted">Same source as <code>python main.py health</code> (core/health.py). Read-only; the one network
+call this page can make is to a local Ollama daemon, never a market-data provider.</p>
+"""
+    return HTMLResponse(_page(body))
+
+
 app = Starlette(routes=[
     Route("/", index, methods=["GET"]),
     Route("/approve", approve, methods=["POST"]),
@@ -998,4 +1050,5 @@ app = Starlette(routes=[
     Route("/kill-switch/reset", kill_switch_reset, methods=["POST"]),
     Route("/intelligence", intelligence_page, methods=["GET"]),
     Route("/intelligence/{symbol}", decision_detail_page, methods=["GET"]),
+    Route("/health", health_page, methods=["GET"]),
 ])

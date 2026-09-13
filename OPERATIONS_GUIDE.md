@@ -35,7 +35,17 @@ never runs.
 
 ```bash
 python main.py schedule status
+python main.py health
 ```
+
+`health` gives a single, unified HEALTHY/DEGRADED/SAFE_STOP/FAILED
+verdict across application/database/disk/dhan/kill-switch/scheduler/
+risk/ollama — the same underlying check (`core/health.py`) the
+dashboard's `/health` page renders, so a script and a human looking at
+the dashboard always see the same picture. `SAFE_STOP` specifically
+means the kill switch is active (a deliberate halt, not a malfunction);
+`FAILED` means a critical component (database corruption, a disk-write
+failure, or an invalid risk config) — treat that as urgent.
 
 Shows a per-slot summary (last success timestamp, last failure
 timestamp + its error) followed by the recent run history. Add

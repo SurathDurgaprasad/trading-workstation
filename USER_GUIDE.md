@@ -13,13 +13,19 @@ them — this guide covers what each is *for*, not every flag.
 
 ```bash
 python main.py readiness-check
+python main.py health
 ```
 
-Checks: Dhan credentials configured (informational — not required for
-anything below), kill switch state, leftover pending approvals from a
-prior session, historical cache freshness, and a disk-write probe.
-Run this after any long gap since you last used the system, and before
-starting an unattended `schedule loop`.
+`readiness-check` checks: Dhan credentials configured (informational —
+not required for anything below), kill switch state, leftover pending
+approvals from a prior session, historical cache freshness, and a
+disk-write probe. `health` is the newer, complementary check — the
+same source the dashboard's `/health` page reads — and additionally
+covers `PRAGMA integrity_check` across every SQLite store, Ollama
+reachability, scheduler lock state, and a single overall
+HEALTHY/DEGRADED/SAFE_STOP/FAILED status (exits non-zero on FAILED, so
+it's script-friendly). Run either after any long gap since you last
+used the system, and before starting an unattended `schedule loop`.
 
 ## The market-intelligence pipeline (no order ever placed)
 

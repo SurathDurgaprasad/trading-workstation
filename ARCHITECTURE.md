@@ -79,6 +79,7 @@ commands use. There is no second, parallel order-submission path.
 | `mcp_server/` | Optional MCP tool server (23 read-only/paper-only tools) for AI-assistant observability | `paper/`, `live/workstation.py` — opt-in, not imported by `main.py`'s core command set |
 | `core/timeutil.py` | The one place naive-vs-aware datetime normalization is decided (two documented conventions: market/bar data stays naive, record/system metadata is UTC-aware) | stdlib `datetime`, `pandas` |
 | `core/sqlite_util.py` | The one place every SQLite connection is opened (WAL mode, busy timeout), plus shared migration primitives (`ensure_column`, `ensure_schema_version`, `try_create_unique_index`) and health primitives (`integrity_check`, `db_size_bytes`) | stdlib `sqlite3` |
+| `core/health.py` | The one unified health model — `collect_system_health()` returns a `SystemHealth` (per-component status + one overall HEALTHY/DEGRADED/SAFE_STOP/FAILED verdict), consumed identically by `main.py health` and the dashboard's `/health` route | `core/sqlite_util.py`-backed store `integrity_check()`, `llm/provider.py`, `live/state_store.py`, `risk/config.py` |
 
 ## Persistence
 
