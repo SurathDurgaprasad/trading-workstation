@@ -16,6 +16,32 @@ def test_ollama_unavailable_raises_clear_error_not_a_stack_trace():
     assert "localhost:1" in str(excinfo.value)
 
 
+def test_ollama_request_timeout_is_wrapped_the_same_way_as_connection_refused(monkeypatch):
+    """Final-product-hardening: a provider-failure-matrix survey found
+    this specific scenario (a slow/hanging Ollama daemon, as opposed to
+    one that refuses the connection outright) had no dedicated test --
+    check_ollama_availability's bare `except Exception` already handles
+    it correctly by code inspection, but nothing proved it with a
+    timeout-SHAPED exception specifically rather than a real connection
+    refusal. Uses a genuine TimeoutError, the same exception class a
+    real HTTP client timeout would raise."""
+    class _TimingOutClient:
+        def __init__(self, host):
+            pass
+
+        def list(self):
+            raise TimeoutError("Ollama request timed out after 30s")
+
+    import ollama
+
+    monkeypatch.setattr(ollama, "Client", _TimingOutClient)
+
+    with pytest.raises(OllamaUnavailableError) as excinfo:
+        check_ollama_availability(base_url="http://localhost:11434", required_models=("x",))
+
+    assert "localhost:11434" in str(excinfo.value)
+
+
 def test_missing_model_raises_model_not_available_error(monkeypatch):
     class _FakeModel:
         def __init__(self, name):

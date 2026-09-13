@@ -978,6 +978,8 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
         state_store.close()
         return
 
+    _run_startup_gate(command_name="paper-live")
+
     db_path = args.db or DEFAULT_LIVE_SIM_DB_PATH
     store = PaperStore(db_path)
     engine = PaperTradingEngine(store, initial_capital=args.initial_capital)
@@ -3109,6 +3111,43 @@ def _health_db_paths() -> dict:
     }
 
 
+def _run_startup_gate(*, command_name: str) -> None:
+    """Final-product-hardening: the release-gate mission's own explicit
+    "startup diagnostics" requirement -- CRITICAL failure -> SAFE_STOP
+    (refuse to start), OPTIONAL failure -> DEGRADED (warn, continue).
+    Wired into the trading-adjacent entry points ONLY (`paper-live`,
+    `schedule tick`/`schedule loop`) -- deliberately NOT `dashboard`,
+    `health`, or `readiness-check` themselves, since those are exactly
+    the diagnostic tools an operator needs to be able to reach even when
+    something else is broken; gating them on their own health check
+    would make a broken system undiagnosable, the opposite of the
+    mission's own intent. `check_ollama=False`: Ollama is an optional
+    dependency (see core/health.py's own CRITICAL/OPTIONAL split) that
+    a paper-trading session may not even use (--skip-critic, no
+    --with-ai) -- attempting a network call to it on every startup
+    would be an unjustified dependency for a session that never needs
+    it. A SAFE_STOP (kill switch active) does NOT block startup --
+    unlike a FAILED critical dependency, an active kill switch is a
+    deliberate, already-effective safety halt (it already blocks every
+    new order downstream); refusing to even START the process would
+    prevent an operator from reaching the interactive session needed to
+    review and reset it."""
+    from core.health import OverallStatus, collect_system_health
+
+    health = collect_system_health(db_paths=_health_db_paths(), probe_dir=PROJECT_ROOT, check_ollama=False)
+    if health.overall == OverallStatus.FAILED:
+        failed = [c for c in health.components if c.status.value == "FAILED"]
+        detail = "; ".join(f"{c.name}: {c.detail}" for c in failed)
+        print(f"[SAFE_STOP] A critical dependency is broken -- refusing to start {command_name}. {detail}", file=sys.stderr)
+        print("Run `python main.py health` for the full report.", file=sys.stderr)
+        sys.exit(1)
+    if health.overall == OverallStatus.SAFE_STOP:
+        print(f"[WARNING] Kill switch is ACTIVE -- {command_name} will start, but no new orders will be submitted until it is reset.")
+    elif health.overall == OverallStatus.DEGRADED:
+        degraded = [c.name for c in health.components if c.status.value in ("DEGRADED", "FAILED")]
+        print(f"[INFO] System is DEGRADED ({', '.join(degraded)}) -- {command_name} will continue. Run `python main.py health` for details.")
+
+
 def run_health_command(args: argparse.Namespace) -> None:
     from core.health import ComponentStatus, OverallStatus, collect_system_health
 
@@ -3299,6 +3338,8 @@ def run_schedule_command(args: argparse.Namespace) -> None:
 
         add_rotating_file_handler(args.log_file)
         logger.info("schedule: file logging enabled at %s (rotating, 10MB x 5 backups)", args.log_file)
+
+    _run_startup_gate(command_name=f"schedule {args.schedule_command}")
 
     if args.schedule_command == "tick":
         now = datetime.fromisoformat(args.now) if args.now else None

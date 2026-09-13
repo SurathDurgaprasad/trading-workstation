@@ -101,6 +101,37 @@ def test_non_2xx_status_raises_dhan_rest_error_with_status_code(credentials):
     assert exc_info.value.status_code == 401
 
 
+# --- final-product-hardening: transport-level failures (timeout, DNS/connection error) ---
+
+
+def _raising_get(exc: Exception):
+    def _fn(url, headers):
+        raise exc
+    return _fn
+
+
+def test_a_timeout_is_wrapped_in_a_dhan_rest_error(credentials):
+    """Real gap found via a provider-failure-matrix survey: _get()
+    previously let ANY transport-level failure from http_get propagate
+    RAW -- a caller catching only DhanRestError (what every other Dhan
+    REST failure in this codebase raises) would not catch a real
+    requests.exceptions.Timeout. Every other provider in this project
+    (YahooFinanceProvider, live/dhan/clock_skew.py) wraps a transport
+    failure into its own clean error type; this closes the one place
+    that didn't."""
+    client = DhanRestClient(credentials=credentials, http_get=_raising_get(TimeoutError("Dhan REST request timed out after 10s")))
+
+    with pytest.raises(DhanRestError, match="timed out"):
+        client.get_fund_limit()
+
+
+def test_a_connection_error_is_wrapped_in_a_dhan_rest_error(credentials):
+    client = DhanRestClient(credentials=credentials, http_get=_raising_get(ConnectionError("connection refused")))
+
+    with pytest.raises(DhanRestError, match="connection refused"):
+        client.get_positions()
+
+
 def test_get_requests_never_use_a_mutating_http_method():
     """Structural check: DhanRestClient exposes no method whose name
     suggests a write (post/put/delete/place/modify/cancel/submit)."""

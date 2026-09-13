@@ -109,7 +109,23 @@ class DhanRestClient:
         return {"Content-Type": "application/json", "access-token": self.credentials.access_token}
 
     def _get(self, path: str):
-        status_code, body = self.http_get(f"{self.base_url}{path}", self._headers())
+        # Final-product-hardening: a real, previously-untested gap found
+        # by a provider-failure-matrix survey -- this method previously
+        # let any transport-level failure (a timeout, a DNS/connection
+        # error) from self.http_get propagate RAW, uncaught, as whatever
+        # exception type the underlying HTTP library happens to raise
+        # (e.g. requests.exceptions.Timeout from _default_http_get's own
+        # real `requests.get(..., timeout=10)` call) -- every other
+        # provider in this project (YahooFinanceProvider, clock_skew.py's
+        # measure_clock_skew) wraps a transport failure into its own
+        # clean, documented error type; this was the one place that
+        # didn't. A caller catching only DhanRestError (the type every
+        # other Dhan REST failure in this codebase raises) would not
+        # catch a raw requests exception.
+        try:
+            status_code, body = self.http_get(f"{self.base_url}{path}", self._headers())
+        except Exception as exc:  # noqa: BLE001 -- any transport failure becomes a DhanRestError, matching every other REST failure this class raises
+            raise DhanRestError(f"Dhan REST GET {path} failed: {type(exc).__name__}: {exc}") from exc
         if status_code < 200 or status_code >= 300:
             raise DhanRestError(f"Dhan REST GET {path} returned HTTP {status_code}: {body}", status_code=status_code, body=body)
         return body

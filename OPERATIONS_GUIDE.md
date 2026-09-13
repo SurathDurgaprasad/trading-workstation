@@ -4,6 +4,22 @@ Running this system unattended, monitoring it, and recovering it. For
 one-off command usage, see `USER_GUIDE.md`. For what to do when
 something breaks, see `TROUBLESHOOTING.md`.
 
+## Startup gate
+
+`paper-live` and `schedule tick`/`schedule loop` run a startup health
+check (the same `core/health.py` model `health`/`/health` use) before
+doing anything else. If a CRITICAL component is broken (database
+corruption, a disk-write failure, an invalid risk config), the command
+refuses to start at all (`[SAFE_STOP]`, exit code 1) rather than
+proceeding against a system it cannot trust. If the kill switch is
+active, it prints a warning and starts anyway (the kill switch already
+blocks new orders downstream, and refusing to start would prevent you
+from reaching the session needed to reset it). A DEGRADED optional
+component (e.g. Ollama unreachable) prints an informational note and
+continues normally. `--kill-switch`/`--reset-kill-switch` themselves,
+and `schedule status`, always bypass the gate -- you can always reach
+the tools needed to diagnose or recover a broken system.
+
 ## Starting unattended operation
 
 ```bash
