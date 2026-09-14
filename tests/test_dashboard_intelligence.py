@@ -196,6 +196,31 @@ def test_intelligence_page_shows_learning_snapshot(client, _isolated_intelligenc
     assert "100.0%" in response.text  # win rate: 1/1 resolved, all wins
 
 
+def test_intelligence_page_includes_a_live_path_prediction_with_no_matching_decision(client, _isolated_intelligence_dbs):
+    """Real-time strategy validation mission, Phase H: live/prediction_
+    recorder.py deliberately records predictions with decision_id =
+    signal.stable_id() -- NOT a real decision_engine.models.Decision ID
+    (see that module's own docstring for why). dashboard/intelligence.py
+    ::get_learning_snapshot already gracefully constructs decision=None
+    for exactly this shape (Phase G, learning/analysis.py verified this
+    generalizes correctly at the function level) -- this proves it
+    end-to-end through the ACTUAL dashboard HTTP endpoint, not just the
+    underlying function, with NO matching decision ever saved at all
+    (deliberately, unlike test_intelligence_page_shows_learning_snapshot,
+    which saves a real decision -- the research-path shape)."""
+    tmp_path = _isolated_intelligence_dbs
+    _save_prediction_and_evaluation(
+        tmp_path / "predictions.db", "RELIANCE", "live-signal-stable-id-does-not-exist-anywhere",
+        PredictionOutcomeState.TARGET_HIT, 0.08,
+    )
+
+    response = client.get("/intelligence")
+
+    assert response.status_code == 200
+    assert "1 evaluated prediction(s) considered." in response.text
+    assert "100.0%" in response.text  # win rate: 1/1 resolved, all wins -- profitability still computed with decision=None
+
+
 def test_intelligence_page_shows_profitability_evidence_insufficient_data_for_one_prediction(client, _isolated_intelligence_dbs):
     """Phase 41: a single resolved prediction is nowhere near the
     evidence threshold -- the page must show INSUFFICIENT_DATA, never a
