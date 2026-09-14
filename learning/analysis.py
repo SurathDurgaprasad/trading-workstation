@@ -78,11 +78,24 @@ def compare_by_config_version(items: list[EvaluatedPrediction]) -> list[Strategy
 def compute_regime_performance(
     items: list[EvaluatedPrediction], *, provider: MarketDataProvider, period: str = "2y"
 ) -> list[RegimePerformance]:
+    from predictions.tracker import resolution_period_for_interval
+
     groups = {}
     for item in items:
+        # Real-time strategy validation mission, Phase G: the SAME real,
+        # empirically-confirmed Yahoo Finance defect FINAL_FAILURE_MODE_
+        # ANALYSIS.md entry #41 fixed for evaluate_prediction/evaluate_
+        # forecast -- classify_regime_at's own provider.fetch_ohlcv call
+        # shares the identical shape, and this is a REAL caller (not a
+        # latent one) for a live-recorded prediction's typically-intraday
+        # interval: without this, every live-path prediction's regime
+        # bucket would silently be UNKNOWN forever (MarketDataError ->
+        # classify_regime_at's own safe fallback), not a wrong answer,
+        # but a permanent dead end just like the evaluation gap was.
+        item_period = resolution_period_for_interval(item.prediction.interval, requested_period=period)
         regime = classify_regime_at(
             item.prediction.symbol, item.prediction.entry_time,
-            provider=provider, period=period, interval=item.prediction.interval,
+            provider=provider, period=item_period, interval=item.prediction.interval,
         )
         groups.setdefault(regime, []).append(item)
 

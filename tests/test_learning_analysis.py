@@ -37,11 +37,11 @@ def _decision(decision_id: str, *, config_version: str = "cfg1", composite: floa
     )
 
 
-def _prediction(prediction_id: str, decision_id: str, *, symbol: str = "AAPL") -> PredictionRecord:
+def _prediction(prediction_id: str, decision_id: str, *, symbol: str = "AAPL", interval: str = "1d") -> PredictionRecord:
     return PredictionRecord(
         prediction_id=prediction_id, decision_id=decision_id, symbol=symbol, created_at=datetime.now(timezone.utc),
         label=DecisionLabel.BUY, entry_price=100.0, stop_price=95.0, target_price=110.0, entry_time=_START,
-        horizon_bars=20, interval="1d",
+        horizon_bars=20, interval=interval,
     )
 
 
@@ -118,6 +118,33 @@ def test_compute_regime_performance_classifies_and_groups():
     result = compute_regime_performance(items, provider=provider)
     assert result[0].regime == MarketRegime.UNKNOWN
     assert result[0].total == 1
+
+
+def test_compute_regime_performance_forwards_the_corrected_period_for_an_intraday_prediction():
+    """Real-time strategy validation mission, Phase G: this shares the
+    SAME real, empirically-confirmed Yahoo Finance defect
+    predictions.tracker.resolution_period_for_interval fixes for
+    evaluate_prediction/evaluate_forecast -- a live-recorded prediction's
+    interval is typically "1m", and classify_regime_at's own default
+    period ("2y") would silently return zero bars for it, exactly as
+    entry_time=1y/interval=1m did for evaluate_prediction."""
+
+    class _CapturingProvider:
+        def __init__(self):
+            self.calls: list[tuple[str, str]] = []
+
+        def fetch_ohlcv(self, symbol, *, period="1y", interval="1d"):
+            self.calls.append((period, interval))
+            return _rising_ohlcv(symbol)
+
+    provider = _CapturingProvider()
+    items = [
+        EvaluatedPrediction(_prediction("p1", "d1", interval="1m"), _evaluation("p1", PredictionOutcomeState.TARGET_HIT, actual_return=0.1), None),
+    ]
+
+    compute_regime_performance(items, provider=provider)
+
+    assert provider.calls == [("7d", "1m")]
 
 
 # --- compute_confidence_calibration -------------------------------------------
@@ -277,3 +304,47 @@ def test_build_learning_report_handles_zero_predictions():
     assert report.confidence_calibration == []
     assert report.real_confidence_calibration == []
     assert report.signal_quality.resolved == 0
+
+
+def test_build_learning_report_correctly_includes_a_live_path_prediction_with_no_decision():
+    """Real-time strategy validation mission, Phase G verification: this
+    project's ENTIRE statistical evaluation engine (learning/analysis.py,
+    learning/profitability.py) was built for the daily, scanner-driven
+    research path (decision_id -> a real decision_engine.models.Decision)
+    -- but live/prediction_recorder.py (Phase A/B) deliberately records
+    live/paper-live predictions with decision_id=signal.stable_id() and
+    NO corresponding Decision, by design (see that module's own
+    docstring). This test proves -- does not merely assume from reading
+    the source -- that a live-path EvaluatedPrediction (decision=None)
+    still flows correctly through the WHOLE report: profitability,
+    signal quality, sector performance, and regime performance (all four
+    only need PredictionEvaluation/PredictionRecord data) genuinely
+    include it, while strategy comparison and both confidence-calibration
+    variants (which fundamentally need scanner_evidence/Decision.
+    confidence that a live-path prediction never has) correctly and
+    gracefully exclude it rather than crashing or fabricating a value.
+    No new production code was required for this generalization to work
+    -- see FINAL_FAILURE_MODE_ANALYSIS.md entry #41/#42 for the real
+    defects (Yahoo Finance intraday period) that DID need fixing along
+    the way."""
+    provider = _FakeProvider({"AAPL": _rising_ohlcv("AAPL")})
+    live_path_item = EvaluatedPrediction(
+        _prediction("live-p1", "live-signal-stable-id-123", interval="1m"),
+        _evaluation("live-p1", PredictionOutcomeState.TARGET_HIT, actual_return=0.05, mfe=0.06, mae=0.01),
+        None,  # exactly what live/prediction_recorder.py's own construction produces -- no Decision object
+    )
+
+    report = build_learning_report([live_path_item], provider=provider)
+
+    assert report.total_predictions_considered == 1
+    # Included (decision-agnostic):
+    assert report.profitability.sample_size == 1
+    assert report.signal_quality.resolved == 1
+    assert report.signal_quality.average_favorable_excursion == 0.06
+    assert sum(s.resolved for s in report.sector_performance) == 1
+    assert any(s.sector == "Unknown" for s in report.sector_performance)  # honest fallback, not fabricated
+    assert sum(r.resolved for r in report.regime_performance) == 1
+    # Gracefully excluded (fundamentally require scanner-driven Decision context):
+    assert report.strategy_comparison == []
+    assert report.confidence_calibration == []
+    assert report.real_confidence_calibration == []
