@@ -648,6 +648,7 @@ def run_hypothesis_registry_command(args: argparse.Namespace) -> None:
 
 def run_paper_command(args: argparse.Namespace) -> None:
     from backtesting.cache import CachedMarketDataProvider
+    from backtesting.costs import CostModel
     from market.data_provider import get_market_data_provider
     from market.indicators import compute_indicator_series
     from paper.engine import PaperTradingEngine
@@ -657,7 +658,16 @@ def run_paper_command(args: argparse.Namespace) -> None:
 
     db_path = args.db or DEFAULT_PAPER_DB_PATH
     store = PaperStore(db_path)
-    engine = PaperTradingEngine(store, initial_capital=args.initial_capital)
+    # Phase 8 fix (real-time strategy validation mission): PaperTradingEngine
+    # previously always defaulted to CostModel()'s generic, NOT market-
+    # specific placeholder here -- ZERO STT/exchange charges for every NSE
+    # symbol run through this command, a silent, favorable-to-profitability
+    # cost understatement. Same explicit, disclosed --cost-model opt-in
+    # backtest-universe already has (default unchanged for backward
+    # compatibility -- see FINAL_FAILURE_MODE_ANALYSIS.md entry #43).
+    cost_model = CostModel.india_nse_intraday_2026() if args.cost_model == "india_nse_intraday_2026" else CostModel()
+    engine = PaperTradingEngine(store, initial_capital=args.initial_capital, cost_model=cost_model)
+    print(f"Cost model: {args.cost_model}{' -- APPROXIMATE (GST/stamp duty not included, see CostModel.india_nse_intraday_2026 docstring)' if args.cost_model == 'india_nse_intraday_2026' else ' -- generic placeholder, not market-specific (no STT/exchange charges)'}")
 
     if args.paper_command == "status":
         account = engine.account
@@ -738,6 +748,7 @@ DEFAULT_LIVE_SIM_DB_PATH = PROJECT_ROOT / "data" / "live_sim_trading.db"
 
 
 def run_live_sim_command(args: argparse.Namespace) -> None:
+    from backtesting.costs import CostModel
     from live.freshness import FreshnessPolicy
     from live.mock_source import MockMarketDataSource
     from live.pipeline import LiveSimPipeline
@@ -747,7 +758,10 @@ def run_live_sim_command(args: argparse.Namespace) -> None:
 
     db_path = args.db or DEFAULT_LIVE_SIM_DB_PATH
     store = PaperStore(db_path)
-    engine = PaperTradingEngine(store, initial_capital=args.initial_capital)
+    # Same Phase 8 fix as `paper`/`paper-live` -- see FINAL_FAILURE_MODE_ANALYSIS.md entry #43.
+    cost_model = CostModel.india_nse_intraday_2026() if args.cost_model == "india_nse_intraday_2026" else CostModel()
+    engine = PaperTradingEngine(store, initial_capital=args.initial_capital, cost_model=cost_model)
+    print(f"Cost model: {args.cost_model}{' -- APPROXIMATE (GST/stamp duty not included, see CostModel.india_nse_intraday_2026 docstring)' if args.cost_model == 'india_nse_intraday_2026' else ' -- generic placeholder, not market-specific (no STT/exchange charges)'}")
     strategy = get_strategy(args.strategy)
 
     source = MockMarketDataSource.from_cached_history(args.symbol, interval=args.interval, period=args.period)
@@ -967,6 +981,7 @@ def _build_critic_gate_for_paper_live(args: argparse.Namespace):
 
 
 def run_paper_live_command(args: argparse.Namespace) -> None:
+    from backtesting.costs import CostModel
     from live.freshness import FreshnessPolicy
     from live.pipeline import DEFAULT_APPROVAL_TIMEOUT_SECONDS, LiveSimPipeline
     from live.state_store import LiveStateStore
@@ -994,7 +1009,18 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
 
     db_path = args.db or DEFAULT_LIVE_SIM_DB_PATH
     store = PaperStore(db_path)
-    engine = PaperTradingEngine(store, initial_capital=args.initial_capital)
+    # Phase 8 fix (real-time strategy validation mission): this is the
+    # command the whole mission is centered on, and it previously always
+    # defaulted to CostModel()'s generic placeholder here -- ZERO STT/
+    # exchange charges applied to every NSE-symbol paper fill, a silent,
+    # favorable-to-profitability cost understatement in the exact system
+    # meant to be the honest proving ground. Same explicit, disclosed
+    # --cost-model opt-in as `paper`/`live-sim`/backtest-universe (default
+    # unchanged for backward compatibility). See
+    # FINAL_FAILURE_MODE_ANALYSIS.md entry #43.
+    cost_model = CostModel.india_nse_intraday_2026() if args.cost_model == "india_nse_intraday_2026" else CostModel()
+    engine = PaperTradingEngine(store, initial_capital=args.initial_capital, cost_model=cost_model)
+    print(f"Cost model: {args.cost_model}{' -- APPROXIMATE (GST/stamp duty not included, see CostModel.india_nse_intraday_2026 docstring)' if args.cost_model == 'india_nse_intraday_2026' else ' -- generic placeholder, not market-specific (no STT/exchange charges)'}")
     strategy = get_strategy(args.strategy)
 
     source, source_label, status_label = _build_market_data_source(args)
@@ -3746,6 +3772,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "(restart-safe, same posture as every other persisted store in this project)."
         ),
     )
+    paper_parser.add_argument(
+        "--cost-model", choices=["default", "india_nse_intraday_2026"], default="default",
+        help=(
+            "Which backtesting.costs.CostModel preset PaperTradingEngine fills against (default: default -- "
+            "a generic, not-market-specific placeholder with NO STT/exchange charges, matching "
+            "backtest-universe's own --cost-model default). 'india_nse_intraday_2026' is the documented "
+            "APPROXIMATE NSE preset (STT/exchange charges/brokerage; GST and stamp duty are NOT included -- "
+            "see CostModel.india_nse_intraday_2026's own docstring)."
+        ),
+    )
     paper_subparsers = paper_parser.add_subparsers(dest="paper_command", required=True)
 
     paper_subparsers.add_parser("status", help="Show account state, open positions, and reconciliation status.")
@@ -3778,6 +3814,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     live_sim_parser.add_argument(
         "--initial-capital", type=float, default=100_000.0,
         help="Simulated starting capital (default: 100000). Only takes effect the first time this database is used.",
+    )
+    live_sim_parser.add_argument(
+        "--cost-model", choices=["default", "india_nse_intraday_2026"], default="default",
+        help=(
+            "Which backtesting.costs.CostModel preset PaperTradingEngine fills against (default: default -- "
+            "a generic, not-market-specific placeholder with NO STT/exchange charges). "
+            "'india_nse_intraday_2026' is the documented APPROXIMATE NSE preset -- see "
+            "CostModel.india_nse_intraday_2026's own docstring."
+        ),
     )
 
     paper_live_parser = subparsers.add_parser(
@@ -3818,6 +3863,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     paper_live_parser.add_argument(
         "--initial-capital", type=float, default=100_000.0,
         help="Simulated starting capital (default: 100000). Only takes effect the first time this database is used.",
+    )
+    paper_live_parser.add_argument(
+        "--cost-model", choices=["default", "india_nse_intraday_2026"], default="default",
+        help=(
+            "Which backtesting.costs.CostModel preset PaperTradingEngine fills against (default: default -- "
+            "a generic, not-market-specific placeholder with NO STT/exchange charges). "
+            "'india_nse_intraday_2026' is the documented APPROXIMATE NSE preset -- see "
+            "CostModel.india_nse_intraday_2026's own docstring."
+        ),
     )
     paper_live_parser.add_argument("--schedule-config", type=str, default=None, help="Optional path to the SAME YAML schedule/holiday config used with `schedule --config` (holidays: key). When given, the startup market-session banner is cross-checked against it.")
     paper_live_parser.add_argument(

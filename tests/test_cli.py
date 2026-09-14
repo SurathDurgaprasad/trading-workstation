@@ -8,6 +8,7 @@ from main import (
     run_evaluate_command,
     run_hypothesis_registry_command,
     run_learn_command,
+    run_live_sim_command,
     run_paper_command,
     run_paper_live_command,
     run_predict_command,
@@ -403,6 +404,48 @@ def test_paper_initial_capital_only_applies_on_first_creation(tmp_path, capsys):
     run_paper_command(parse_args(["paper", "--db", db_path, "--initial-capital", "999999", "status"]))
     output = capsys.readouterr().out
     assert "Initial Capital:     20,000.00" in output  # unchanged, NOT 999,999
+
+
+def _capture_engine_cost_model(monkeypatch):
+    """Real-time strategy validation mission, Phase 8: monkeypatches
+    paper.engine.PaperTradingEngine.__init__ to record the exact
+    `cost_model` kwarg it was constructed with, then delegates to the
+    real __init__ -- proves the CLI layer's --cost-model selection
+    actually reaches the engine, not just that argparse parses the flag.
+    """
+    import paper.engine as paper_engine_module
+
+    captured: dict = {}
+    real_init = paper_engine_module.PaperTradingEngine.__init__
+
+    def _capturing_init(self, *args, **kwargs):
+        captured["cost_model"] = kwargs.get("cost_model")
+        return real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(paper_engine_module.PaperTradingEngine, "__init__", _capturing_init)
+    return captured
+
+
+def test_run_paper_command_defaults_to_the_generic_cost_model(tmp_path, monkeypatch):
+    """FINAL_FAILURE_MODE_ANALYSIS.md entry #43: `paper` previously always
+    constructed PaperTradingEngine with no cost_model at all, silently
+    defaulting to CostModel()'s generic placeholder (zero STT/exchange
+    charges for every NSE symbol). This proves the new --cost-model
+    default ("default") is wired through as the SAME generic CostModel()
+    -- byte-for-byte unchanged behavior for every existing caller."""
+    from backtesting.costs import CostModel
+
+    captured = _capture_engine_cost_model(monkeypatch)
+    run_paper_command(parse_args(["paper", "--db", str(tmp_path / "paper.db"), "status"]))
+    assert captured["cost_model"] == CostModel()
+
+
+def test_run_paper_command_cost_model_flag_selects_the_india_preset(tmp_path, monkeypatch):
+    from backtesting.costs import CostModel
+
+    captured = _capture_engine_cost_model(monkeypatch)
+    run_paper_command(parse_args(["paper", "--db", str(tmp_path / "paper.db"), "--cost-model", "india_nse_intraday_2026", "status"]))
+    assert captured["cost_model"] == CostModel.india_nse_intraday_2026()
 
 
 def test_paper_run_subcommand_defaults():
@@ -1255,6 +1298,56 @@ def test_paper_live_kill_switch_flags_parse_without_a_symbol():
 # --- functional (executes run_paper_live_command against real cached data) ---
 
 pytestmark_paper_live = pytest.mark.skipif(not AAPL_CACHE_PATH.exists(), reason=f"No cached AAPL data at {AAPL_CACHE_PATH}")
+
+
+@pytestmark_paper_live
+def test_run_live_sim_command_cost_model_flag_selects_the_india_preset(tmp_path, monkeypatch):
+    from backtesting.costs import CostModel
+
+    captured = _capture_engine_cost_model(monkeypatch)
+    args = parse_args([
+        "live-sim", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--db", str(tmp_path / "live_sim.db"), "--max-bars", "1", "--freshness-multiplier", "1000000",
+        "--cost-model", "india_nse_intraday_2026",
+    ])
+    run_live_sim_command(args)
+    assert captured["cost_model"] == CostModel.india_nse_intraday_2026()
+
+
+@pytestmark_paper_live
+def test_run_paper_live_command_defaults_to_the_generic_cost_model(tmp_path, monkeypatch):
+    """The command this mission is centered on -- previously always
+    silently used CostModel()'s generic placeholder here too (zero STT/
+    exchange charges), even though this is the intended real-money-shaped
+    proving ground. Default unchanged for backward compatibility."""
+    from backtesting.costs import CostModel
+
+    captured = _capture_engine_cost_model(monkeypatch)
+    args = parse_args([
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--db", str(tmp_path / "paper.db"), "--state-db", str(tmp_path / "state.db"),
+        "--max-bars", "1", "--auto-approve", "--no-ai-explanation", "--freshness-multiplier", "1000000",
+    ])
+    run_paper_live_command(args)
+    assert captured["cost_model"] == CostModel()
+
+
+@pytestmark_paper_live
+def test_run_paper_live_command_cost_model_flag_selects_the_india_preset(tmp_path, monkeypatch, capsys):
+    from backtesting.costs import CostModel
+
+    captured = _capture_engine_cost_model(monkeypatch)
+    args = parse_args([
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--db", str(tmp_path / "paper.db"), "--state-db", str(tmp_path / "state.db"),
+        "--max-bars", "1", "--auto-approve", "--no-ai-explanation", "--freshness-multiplier", "1000000",
+        "--cost-model", "india_nse_intraday_2026",
+    ])
+    run_paper_live_command(args)
+    assert captured["cost_model"] == CostModel.india_nse_intraday_2026()
+    output = capsys.readouterr().out
+    assert "Cost model: india_nse_intraday_2026" in output
+    assert "APPROXIMATE" in output
 
 
 @pytestmark_paper_live
