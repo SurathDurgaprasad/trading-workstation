@@ -2,22 +2,31 @@
 
 Branch: `final-product-hardening`, merged forward to `main` after every
 cycle (`main == origin/main` verified at every commit). Current HEAD:
-`c8fbc16`. Companion documents: `FINAL_PRODUCT_CAPABILITY_MATRIX.md`
+`4cba014`. Companion documents: `FINAL_PRODUCT_CAPABILITY_MATRIX.md`
 (the authoritative per-requirement evidence table this report
-summarizes), `FINAL_FAILURE_MODE_ANALYSIS.md` (39 numbered entries),
-`tests/failure_injection/failure_matrix.yaml` (110 executable rows),
+summarizes), `FINAL_FAILURE_MODE_ANALYSIS.md` (46 numbered entries),
+`TRADING_STRATEGY_READINESS.md` (the seven-dimension strategy-readiness
+breakdown this report's Sections 7/11 summarize), `tests/
+failure_injection/failure_matrix.yaml` (110 executable rows),
 `ARCHITECTURE.md`, `SECURITY.md`.
 
 This report supersedes the version of itself written at the end of an
 earlier three-pass hardening campaign (that version's own historical
 content — clean-install proof, Claude-Code-independence proof, the
 original documentation suite — remains true and is not re-litigated
-here). Since that version, a further **35-cycle autonomous adversarial
-hardening campaign** ran against this same codebase: systematic
-mutation testing, real OS-subprocess and multi-thread concurrency
-attacks, crash/restart/recovery injection against real temporary SQLite
-files, and a full reality/profitability audit against the actual local
-databases. Two of the defects found and fixed in that campaign reached
+here). Since that version, a **35-cycle autonomous adversarial
+hardening campaign** ran against this same codebase, followed by a
+further **"real-time strategy validation" mission** (entries #40-#46 of
+`FINAL_FAILURE_MODE_ANALYSIS.md`) that built the missing bridge between
+the live/paper-live path and this project's existing prediction-ledger/
+outcome-resolution/statistical-evaluation machinery, and found and
+closed several real, previously-undetected defects along the way:
+systematic mutation testing, real OS-subprocess and multi-thread
+concurrency attacks, crash/restart/recovery injection against real
+temporary SQLite files, a full reality/profitability audit against the
+actual local databases, and — new this mission — the first real
+Dhan-account connectivity verification in this project's history. Two
+of the defects found and fixed across this whole body of work reached
 **CRITICAL** severity — both are described below, in full, because a
 report that omitted them would misrepresent what this system actually
 is.
@@ -59,15 +68,34 @@ Exceptions/unmet items, all previously disclosed and none unsafe:
 ## 2. What is actually implemented?
 
 A layered pipeline (data → validation → indicators → strategy → risk →
-decision → paper execution → persistence → learning/tracking), a
-deterministic risk/decision core with zero LLM involvement, a
+decision → paper execution → prediction ledger → automatic outcome
+resolution → statistical evaluation → persistence → learning/tracking),
+a deterministic risk/decision core with zero LLM involvement, a
 signal_id-keyed idempotent paper-trading engine, a kill switch and
 account-level circuit breakers now proven to hold even across
 mid-flight process crashes and TOCTOU races, a scheduler with
 process-level-proven mutual exclusion and crash recovery, a real Dhan
-WebSocket data-source implementation (untested against a live account),
-a structurally-disabled real-broker-order path, an MCP server, a
-dashboard, and a ~30-subcommand CLI. Full detail: `FINAL_PRODUCT_CAPABILITY_MATRIX.md`.
+WebSocket data-source implementation (**REST authentication and
+WebSocket connectivity now live-verified against a real account this
+mission — see Section 5**), a structurally-disabled real-broker-order
+path, an MCP server, a dashboard, and a ~30-subcommand CLI.
+
+**New this mission**: `live/prediction_recorder.py` bridges the real-time
+paper-live path into this project's existing (previously
+scanner-research-only) immutable prediction ledger and automatic
+outcome-resolution engine, opt-in via `--record-predictions`, with
+automatic periodic re-evaluation (`--evaluate-every-n-bars`) so evidence
+accumulates without a separate manual step. A real, previously-silent
+Yahoo Finance data-availability defect that would have permanently
+blocked this from ever working for intraday predictions was found and
+fixed (`predictions.tracker.resolution_period_for_interval`). A real,
+silent, favorable-to-profitability cost-model defect (`paper`/
+`live-sim`/`paper-live` never applying real India transaction costs by
+default) was found and fixed. Cycle 34's own "accepted limitation"
+(`live/pipeline.py`'s unbounded indicator buffer) is now a genuine,
+proven-equivalent, benchmarked fix, not a documented limitation. Full
+detail: `FINAL_PRODUCT_CAPABILITY_MATRIX.md`, `FINAL_FAILURE_MODE_
+ANALYSIS.md` entries #40-#46.
 
 ## 3. What is actually verified?
 
@@ -90,9 +118,23 @@ dashboard, and a ~30-subcommand CLI. Full detail: `FINAL_PRODUCT_CAPABILITY_MATR
   crashed here" simulation at named transaction boundaries, real fresh
   store/pipeline instances standing in for a restarted process (cycles
   8, 15, 20, 22, 26, 29).
-- **External-provider verification**: **not performed**. Every Dhan-
-  related test uses dependency-injected fake transports. No test in
-  this project's history has run against real Dhan credentials.
+- **External-provider verification**: **performed for the first time this
+  mission.** Every automated test still uses dependency-injected fake
+  transports (unchanged, and correctly so — a test suite should not
+  depend on live network/credentials). But this mission found real Dhan
+  credentials available in this environment and, with explicit user
+  authorization, ran the existing `readiness-check --deep` command
+  against the real Dhan API: REST authentication confirmed (real HTTP
+  200 from `/fundlimit`), WebSocket connectivity confirmed (real
+  `CONNECTED` state, successful subscription). Live tick reception was
+  NOT verified — the test ran outside NSE market hours, so no tick data
+  existed to receive regardless of connection health. See
+  `FINAL_FAILURE_MODE_ANALYSIS.md` entry #45.
+- **Crash-atomicity of the new prediction-recording write path**:
+  verified against the real SQLite engine this mission, not only
+  reasoned about — a manually-abandoned mid-transaction write (the exact
+  state a SIGKILL leaves) produces zero partial state, and a committed
+  write survives an abrupt, non-graceful connection loss. See entry #46.
 - **Mutation testing**: systematic, repeated, and — critically —
   sometimes **failed on the first attempt and was caught**: cycle 24's
   17-mutant campaign against `risk/engine.py` (all killed); cycles 27
@@ -102,9 +144,14 @@ dashboard, and a ~30-subcommand CLI. Full detail: `FINAL_PRODUCT_CAPABILITY_MATR
 ## 4. What is simulated or mocked?
 
 - **Dhan market data**: real client library (`websocket-client`), real
-  WebSocket protocol handling — but every test drives it through a
-  dependency-injected fake transport. `SIMULATED / VERIFIED`, never
-  `REAL PROVIDER / VERIFIED`.
+  WebSocket protocol handling — every AUTOMATED TEST still drives it
+  through a dependency-injected fake transport (`SIMULATED / VERIFIED`
+  for the test suite itself, unchanged). REST authentication and
+  WebSocket connectivity, specifically, are now `REAL PROVIDER /
+  VERIFIED` as of this mission (a real, one-off, user-authorized
+  connectivity check — see Section 5). Live tick reception remains
+  `SIMULATED / VERIFIED` only — never run against real incoming market
+  data end-to-end.
 - **`MockBrokerAdapter`**: not a broker connection at all — delegates
   entirely to `PaperTradingEngine`. The name describes a Protocol-
   conformance rehearsal, not simulated broker access.
@@ -130,9 +177,10 @@ collapsing these into one word:
 | Axis | Status |
 |---|---|
 | Live-capable market data | YES — real `websocket-client` transport, real Dhan REST client |
-| Live-verified market data | **NO** — never run against real credentials in this environment |
+| Live-verified market data (REST auth + WebSocket connectivity) | **YES — new this mission**, real HTTP 200 + real `CONNECTED` state against a real Dhan account (entry #45) |
+| Live-verified market data (actual tick reception) | **NO** — the one real connectivity test ran outside NSE market hours; needs a re-run during real trading hours |
 | Paper execution | YES, real, the sole exercised execution path |
-| Broker connectivity (read-only) | YES, live-capable (`DhanAccountReader`), not live-verified |
+| Broker connectivity (read-only) | Underlying REST client proven live-working this mission; `DhanAccountReader`'s own specific methods not yet directly exercised |
 | Real broker order execution | **NO** — structurally, unconditionally disabled (`RealOrderPlacementDisabledError`), no bypass exists anywhere in the codebase |
 | Live-money operation | **NOT ENABLED, NOT AUTHORIZED, NOT ATTEMPTED** |
 
@@ -140,8 +188,10 @@ collapsing these into one word:
 
 - **Paper**: **YES.**
 - **Broker-connected (data only, no orders)**: **YES**, for market data
-  and read-only account/fund/position access — unverified against a
-  live account.
+  and read-only account/fund/position access — REST authentication and
+  WebSocket connectivity now live-verified against a real account this
+  mission (entry #45); actual live tick reception and the specific
+  `DhanAccountReader` position/holding methods remain unverified.
 - **Real-money**: **NO.** Structurally impossible without a deliberate
   source-code change to remove `RealOrderPlacementDisabledError` and
   wire a real execution adapter into the pipeline — neither of which
@@ -173,11 +223,25 @@ walk-forward evaluation, and the result is negative, not merely absent.
   of the last evaluation (2026-09-09) **all 13 remain ACTIVE with zero
   resolved outcomes** — the live calibration mechanism works, but
   produces no usable evidence yet, positive or negative.
+- **New this mission**: the live/paper-live path can now ALSO contribute
+  to this same evidence base (`live/prediction_recorder.py`,
+  `--record-predictions`), and this project's entire statistical
+  evaluation engine (`learning/analysis.py`, `learning/profitability.py`)
+  was verified this mission to already generalize correctly to that new
+  prediction source with zero new feature code. This closes the
+  MACHINERY gap for accumulating Levels 5-8 evidence — it does not, and
+  cannot by itself, produce that evidence: zero real-time paper-live
+  sessions have been run outside of tests, so `data/predictions.db`
+  currently holds zero live-path predictions. See
+  `TRADING_STRATEGY_READINESS.md` for the full seven-dimension breakdown
+  (engineering / data / strategy / statistics / paper trading / live
+  verification / profitability kept explicitly separate).
 
 **Evidence-hierarchy position**: Level 4 (cost-adjusted walk-forward,
 negative). Levels 5–8 (out-of-sample paper trading, long-duration paper
 trading, controlled live trading, statistically credible live evidence)
-have not been attempted.
+have not been attempted — the machinery to attempt them is now complete
+and verified, the attempt itself has not yet been made.
 
 ## 8. What does the current quantitative evidence say?
 
@@ -198,20 +262,30 @@ This conclusion is preserved unchanged.
 
 **READY.**
 
-35 adversarial hardening cycles; 2378 passing tests (final regression, 0 failed); a 110-row
-executable failure-injection matrix; 39 documented, evidence-graded
-failure-mode entries; systematic mutation testing (including two
-instances where the campaign's own new tests were themselves caught as
-initially too weak and fixed before being trusted); real OS-subprocess
-and multi-thread concurrency proof for the highest-value locking
-primitives; a bounded, measured soak test finding no leak (one accepted,
-documented long-session limitation). All 8 sacred live-execution-safety
-files (`live/dhan/broker_adapter.py`, `live/broker.py`,
-`live/pipeline.py`, `decision_engine/rules.py`,
-`decision_engine/engine.py`, `risk/engine.py`, `risk/sizing.py`,
-`main.py`) reviewed line-by-line after every cycle; zero-diff except for
-five deliberate, individually-reviewed, purely-additive changes to
-`live/pipeline.py`.
+35 adversarial hardening cycles, plus a further "real-time strategy
+validation" mission (entries #40-#46); 2420 passing tests (final
+regression, 0 failed); a 110-row executable failure-injection matrix; 46
+documented, evidence-graded failure-mode entries; systematic mutation
+testing throughout, including this mission's own new work (period-
+resolution logic, cost-model wiring, the bounded indicator buffer, and
+the crash-atomicity tests all mutation-tested and confirmed-killed); two
+instances in the earlier campaign where its own new tests were
+themselves caught as initially too weak and fixed before being trusted;
+real OS-subprocess and multi-thread concurrency proof for the
+highest-value locking primitives; a bounded, measured soak test finding
+no leak (one previously-accepted limitation from that soak test —
+`live/pipeline.py`'s unbounded indicator-history buffer — is now a
+genuine fix this mission, not a documented limitation: bounded to 1000
+bars, proven numerically equivalent to unbounded history, benchmarked
+3.10x faster / 74.4% less peak memory over 4000 bars with throughput
+that stabilizes instead of degrading — see `FINAL_FAILURE_MODE_
+ANALYSIS.md` entry #44). All 8 sacred live-execution-safety files
+(`live/dhan/broker_adapter.py`, `live/broker.py`, `live/pipeline.py`,
+`decision_engine/rules.py`, `decision_engine/engine.py`,
+`risk/engine.py`, `risk/sizing.py`, `main.py`) reviewed line-by-line
+after every cycle across both the original campaign and this mission;
+every diff to any of them additive, opt-in-gated, and reviewed before
+commit.
 
 ## 10. Safety readiness
 
@@ -239,7 +313,13 @@ Live order execution remains structurally, unconditionally disabled.
 
 **INSUFFICIENT EVIDENCE** to authorize any capital deployment,
 and current directional evidence is negative, not merely absent (see
-Section 7).
+Section 7). See `TRADING_STRATEGY_READINESS.md` for the full breakdown
+across the seven dimensions this mission's own spec requires kept
+separate (engineering / data / strategy / statistics / paper trading /
+live verification / profitability) plus the required evidence table (OOS
+performance, walk-forward, costs, slippage, calibration, positive
+expectancy, drawdown, regime robustness, paper track record, statistical
+confidence, live validation).
 
 ## 12. Live-money readiness
 
@@ -255,7 +335,7 @@ make and did not make.
 | Capability | Implemented | Integrated | Tested | Externally Verified | Real | Safe | Production Ready | Evidence |
 |---|---|---|---|---|---|---|---|---|
 | Market data (Yahoo) | Yes | Yes | Yes | Yes (real provider, unofficial API) | Yes | Yes | Yes | Extensive |
-| Market data (Dhan WebSocket) | Yes | Yes | Yes (fake transport) | **No** | Yes (real library) | Yes | Live-capable, not live-verified | Cycles 21/22/23/28 |
+| Market data (Dhan WebSocket) | Yes | Yes | Yes (fake transport) | **REST auth + connectivity: Yes (this mission)**; tick reception: No | Yes (real library) | Yes | Connectivity live-verified; tick reception not | Cycles 21/22/23/28; entry #45 |
 | Indicators | Yes | Yes | Yes | N/A | Yes | Yes | Yes | Cycle 10 property tests |
 | Deterministic decision/risk engine | Yes | Yes | Yes | N/A | Yes | Yes, mutation-tested | Yes | Cycle 24 (17/17 mutants killed) |
 | Kill switch / circuit breakers | Yes | Yes | Yes | N/A | Yes | Yes, mutation-tested | Yes | Cycles 4/24/25 |
@@ -267,18 +347,21 @@ make and did not make.
 | Dashboard | Yes | Yes | Yes | N/A | Yes | Partially (no auth, deliberate) | Yes for the intended threat model | — |
 | LLM/RAG | Yes | Yes | Partial | N/A | Yes | Yes (structurally excluded from risk/execution) | Yes | Zero-diff sacred files |
 | Trading edge / profitability | Research attempted | N/A | Yes (walk-forward) | N/A | Yes | N/A | **No** | `PromotionVerdict.NEGATIVE` |
-| Live prediction calibration | Yes | Yes | Yes (mechanism) | N/A | Yes | Yes | Data insufficient | 13 predictions, 0 resolved |
+| Live prediction calibration (research path) | Yes | Yes | Yes (mechanism) | N/A | Yes | Yes | Data insufficient | 13 predictions, 0 resolved |
+| Live prediction calibration (live/paper-live path) | Yes (new this mission) | Yes (`--record-predictions`) | Yes (unit + real-CLI end-to-end) | N/A | Yes | Yes | Data does not yet exist (0 live sessions run) | Entries #40/#41/#46 |
+| Cost model realism (paper/live-sim/paper-live) | Yes (new this mission) | Yes (`--cost-model`) | Yes, mutation-tested | N/A | Yes | Yes | Yes, opt-in | Entry #43 |
+| Bounded indicator-history buffer | Yes (new this mission) | Yes | Yes, mutation-tested + benchmarked | N/A | Yes | Yes | Yes | Entry #44 |
 
 ## Final remaining-risk table
 
 | Risk | Severity | Impact | Mitigation | Acceptable? |
 |---|---|---|---|---|
-| Dhan data path never live-verified | MEDIUM | Real-account behavior (auth edge cases, real rate limits, real malformed frames) unproven | Extensive simulated-protocol testing; structurally cannot place real orders even if data misbehaves | Yes, for a paper-only deployment |
-| No demonstrated trading edge | HIGH (to any capital-deployment decision), N/A to engineering safety | A live/paper deployment expecting profit would be unsupported by evidence | Verdict is surfaced live by the CLI itself, not hidden | Yes, as long as no capital is deployed on this basis |
-| Indicator-history buffer unbounded (`_SymbolBuffer.bars`) | LOW | Memory/compute grow for a multi-month continuous session without restart | Documented; project's own operating model is per-session, not multi-month-continuous | Yes |
+| Dhan live tick reception never verified | MEDIUM (was: also REST/WebSocket connectivity, now closed) | Real-account tick-streaming behavior (real rate limits, real malformed frames, sustained-connection edge cases) unproven; REST auth + WebSocket connectivity ARE now live-verified (entry #45) | Extensive simulated-protocol testing; structurally cannot place real orders even if data misbehaves; a re-run during real market hours would close the remaining gap | Yes, for a paper-only deployment |
+| No demonstrated trading edge | HIGH (to any capital-deployment decision), N/A to engineering safety | A live/paper deployment expecting profit would be unsupported by evidence | Verdict is surfaced live by the CLI itself, not hidden; `TRADING_STRATEGY_READINESS.md` states it explicitly across every relevant dimension | Yes, as long as no capital is deployed on this basis |
 | Dashboard has no authentication | LOW–MEDIUM if exposed beyond loopback | Unauthorized access to a locally-reachable dashboard | Documented single-operator/loopback threat model | Yes, for the stated deployment model only |
-| Fresh clean-install not re-run this specific cycle | LOW | Small chance of an undetected install-time regression | `requirements.txt` confirmed unchanged since the last full clean-install verification (cycle 18); ~15 full-suite runs on the existing venv this campaign, all passing | Yes |
-| Live prediction calibration sample size (13, 0 resolved) | N/A to safety, HIGH to any calibration claim | No live accuracy claim can currently be supported | None needed — no such claim is made | Yes |
+| Fresh clean-install not re-run this specific cycle | LOW | Small chance of an undetected install-time regression | `requirements.txt` confirmed unchanged since the last full clean-install verification (cycle 18); ~20+ full-suite runs on the existing venv across this campaign and this mission, all passing | Yes |
+| Live prediction calibration sample size — research path (13, 0 resolved) AND live path (0 predictions, 0 sessions run) | N/A to safety, HIGH to any calibration claim | No live accuracy claim can currently be supported for either source | None needed — no such claim is made; the live-path machinery to accumulate this evidence is now complete and verified (entries #40/#41/#46) | Yes |
+| No GST/stamp duty in the India cost-model preset | LOW | `--cost-model india_nse_intraday_2026` slightly understates real costs even when explicitly opted into | Documented, disclosed in the preset's own docstring and every startup print | Yes |
 
 ---
 
@@ -289,9 +372,14 @@ not assumed from prior documentation:
 
 - **"Live trading"**: never claimed as enabled. Correctly described
   throughout as structurally disabled.
-- **"Real-time"**: not claimed for Dhan data (live-capable, not
-  live-verified); Yahoo data is correctly described as delayed/EOD-
-  or-intraday-batch, not tick-real-time.
+- **"Real-time"**: connectivity (REST auth + WebSocket) is now
+  live-verified for Dhan (entry #45), but actual real-time TICK DATA
+  flowing through this system has still never been observed end-to-end
+  — the one connectivity test ran outside market hours. This precise
+  distinction (connectivity ≠ tick reception) is stated explicitly
+  rather than letting a passing connectivity check imply more than it
+  proved. Yahoo data is correctly described as delayed/EOD-or-intraday-
+  batch, not tick-real-time.
 - **"AI-powered"**: the LLM/RAG layer is real and integrated, but
   verified (via zero-diff sacred files across the entire campaign) to
   have no path into risk, sizing, execution, or kill-switch decisions —
@@ -333,25 +421,39 @@ not assumed from prior documentation:
 5. SQLite stores have no automatic retention/archival policy —
    deliberately: every one is exactly the "critical trading state" this
    project's own rule forbids automatically deleting.
-6. Performance profiling beyond this cycle's own bounded soak test has
-   not been done.
-7. `_SymbolBuffer.bars` (indicator history) has no eviction policy —
-   see the remaining-risk table above.
+6. Performance profiling beyond this cycle's own bounded soak test and
+   this mission's own before/after buffer-bound benchmark has not been
+   done.
+7. ~~`_SymbolBuffer.bars` (indicator history) has no eviction policy~~ —
+   **CLOSED this mission**, see `FINAL_FAILURE_MODE_ANALYSIS.md` entry
+   #44 and the remaining-risk table above (now removed from that table).
+8. GST and stamp duty are not modeled even in the `india_nse_intraday_
+   2026` cost preset — a documented, disclosed approximation.
+9. Live Dhan tick reception has not been verified end-to-end — REST
+   authentication and WebSocket connectivity are now live-verified
+   (entry #45), but the one real test ran outside market hours.
 
 None of the above represent unsafe behavior. Live order execution
 remains structurally blocked; the deterministic risk/decision core is
-untouched (zero-diff across all 35 cycles of this campaign); every
-safety-critical restart/recovery/concurrency path attacked was found
-already correct or was closed with a real fix, a regression test, and
-mutation-test evidence.
+untouched (zero-diff across all 35 cycles of the original campaign and
+every cycle of this mission); every safety-critical restart/recovery/
+concurrency path attacked was found already correct or was closed with
+a real fix, a regression test, and mutation-test evidence.
 
 ## Remaining external dependencies
 
-- Dhan credentials and live connectivity remain unavailable in this
-  development environment.
+- Dhan credentials became available in this environment for the first
+  time this mission, and REST authentication + WebSocket connectivity
+  are now live-verified (entry #45) — but live tick reception is still
+  unverified, and there is no guarantee these credentials remain valid
+  or present in any future environment.
 - Yahoo Finance's continued availability and rate limits (unofficial,
   free-tier API) remain an external dependency with no official
-  NSE/BSE/SEBI alternative.
+  NSE/BSE/SEBI alternative. A real, previously-undetected Yahoo Finance
+  data-availability limit for intraday intervals was found and worked
+  around this mission (entry #41) — Yahoo genuinely does not retain
+  1-minute bars older than ~8 days, a hard external constraint, not a
+  bug.
 - Ollama's continued availability for the critic/RAG advisory layer
   (confirmed non-blocking to the deterministic core).
 
@@ -361,6 +463,7 @@ mutation-test evidence.
 
 **Live trading: DISABLED, structurally, by design.**
 **Can it place a real order: NO.**
+**Is market data connectivity live-verified: YES for REST auth + WebSocket connection (new this mission); NO for actual tick reception.**
 **Is it profitable: CURRENT EVIDENCE IS NEGATIVE.**
 **Engineering readiness: READY.**
 **Safety readiness: READY.**
@@ -368,9 +471,16 @@ mutation-test evidence.
 **Live-money readiness: NOT READY.**
 
 This is a safe, resilient, independently-operable, extensively
-adversarially-hardened **paper-trading research platform**. It is not,
-and does not claim to be, a demonstrated source of trading profit. The
+adversarially-hardened **paper-trading research platform**, now with a
+real, verified, end-to-end bridge from real-time signal generation
+through immutable prediction recording, automatic outcome resolution,
+and statistical evaluation — machinery this mission built, fixed real
+defects in, and proved generalizes correctly, but has not yet been
+exercised in a real, extended paper-trading session. It is not, and
+does not claim to be, a demonstrated source of trading profit. The
 distinction between those two things — engineering quality and trading
-edge — is the single most important fact in this report, and this
-campaign's entire final cycle sequence (27–35) existed specifically to
-make sure that distinction was never allowed to blur.
+edge — is the single most important fact in this report, and both this
+campaign's original final cycle sequence (27–35) and this mission's own
+work existed specifically to make sure that distinction was never
+allowed to blur. See `TRADING_STRATEGY_READINESS.md` for the complete,
+dimension-by-dimension statement of this same fact.
