@@ -265,6 +265,88 @@ def test_try_start_run_is_atomic_under_real_concurrent_contention(tmp_path):
     assert len(winners) == 1, f"exactly one racing start must win a shared lock, got {results}"
 
 
+def test_try_start_run_is_atomic_under_real_os_subprocess_contention(tmp_path):
+    """Autonomous hardening cycle 27 -- the thread-based test above proves
+    the SQLite-level atomicity of try_start_run's `BEGIN IMMEDIATE` lock
+    against two connections in ONE Python process; this test goes one
+    level further, per this cycle's own mission ("Thread tests are
+    useful but do not replace process-level tests for restart
+    semantics"): two GENUINELY SEPARATE OS processes (real subprocess.
+    Popen calls, not threads sharing one interpreter/GIL/page cache),
+    each with their own independent sqlite3 connection, racing
+    try_start_run against the SAME run-db file -- the faithful simulation
+    of the exact scenario try_start_run's own docstring names: "an
+    operator accidentally running both `schedule loop` and a
+    cron-triggered `schedule tick` against one database."
+
+    Repeated 10 times (fresh db per repetition), and each worker uses a
+    real CROSS-PROCESS FILE BARRIER (not just launched back-to-back) --
+    Python interpreter startup (~50-100ms) dwarfs the actual SQLite
+    operations under test (microseconds), so two subprocesses merely
+    Popen'd back-to-back rarely have their try_start_run calls genuinely
+    overlap; a first version of this test without the barrier was found
+    to NOT actually kill a deliberate mutation of try_start_run's own
+    BEGIN IMMEDIATE -> plain BEGIN (deferred locking), passing 3/3 times
+    regardless -- exactly the kind of silently-too-weak test this
+    cycle's own mission warns about ("A surviving realistic safety
+    mutant is a defect in either production code or test coverage").
+    Each worker therefore completes ALL its slow setup (interpreter
+    start, imports, opening its own SQLite connection) BEFORE signaling
+    readiness via a marker file, then spins polling for the OTHER
+    worker's marker file before calling try_start_run -- forcing both
+    processes to enter the actual race window at nearly the same real
+    wall-clock moment, the process-level equivalent of the thread test's
+    threading.Barrier above."""
+    import subprocess
+    import sys
+
+    from core.config import PROJECT_ROOT
+
+    worker_path = tmp_path / "_try_start_run_worker.py"
+    worker_path.write_text(
+        "import sys, os, time\n"
+        f"sys.path.insert(0, {str(PROJECT_ROOT)!r})\n"
+        "from datetime import datetime, timezone\n"
+        "from scheduler.store import SchedulerRunStore\n"
+        "db_path, run_id, ready_dir = sys.argv[1], sys.argv[2], sys.argv[3]\n"
+        "store = SchedulerRunStore(db_path)\n"  # all slow setup happens BEFORE the barrier
+        "other = 'b' if run_id == 'a' else 'a'\n"
+        "with open(os.path.join(ready_dir, run_id + '.ready'), 'w') as f:\n"
+        "    f.write('1')\n"
+        "deadline = time.time() + 10\n"
+        "while not os.path.exists(os.path.join(ready_dir, other + '.ready')):\n"
+        "    if time.time() > deadline:\n"
+        "        print('BARRIER_TIMEOUT')\n"
+        "        sys.exit(1)\n"
+        "    time.sleep(0.0005)\n"
+        "record = store.try_start_run(run_id=run_id, slot_name='intraday', run_date='2026-09-03', started_at=datetime.now(timezone.utc))\n"
+        "print('ACQUIRED' if record is not None else 'NONE')\n"
+        "store.close()\n",
+        encoding="utf-8",
+    )
+
+    for i in range(10):
+        db_path = tmp_path / f"subprocess_runs_{i}.db"
+        SchedulerRunStore(db_path).close()  # create the file/schema before the subprocesses race on it
+        ready_dir = tmp_path / f"ready_{i}"
+        ready_dir.mkdir()
+
+        p1 = subprocess.Popen([sys.executable, str(worker_path), str(db_path), "a", str(ready_dir)], stdout=subprocess.PIPE, text=True)
+        p2 = subprocess.Popen([sys.executable, str(worker_path), str(db_path), "b", str(ready_dir)], stdout=subprocess.PIPE, text=True)
+        out1, _ = p1.communicate(timeout=30)
+        out2, _ = p2.communicate(timeout=30)
+
+        results = [out1.strip(), out2.strip()]
+        assert "BARRIER_TIMEOUT" not in results, f"repetition {i}: barrier itself failed (test infrastructure, not the property under test): {results}"
+        assert results.count("ACQUIRED") == 1, f"repetition {i}: expected exactly one process to acquire the lock, got {results}"
+        assert results.count("NONE") == 1, f"repetition {i}: expected exactly one process to be refused, got {results}"
+
+        store = SchedulerRunStore(db_path)
+        runs = store.list_runs()
+        store.close()
+        assert len(runs) == 1, f"repetition {i}: two real OS processes must never both persist a RUNNING row for the same lock -- found {len(runs)}"
+
+
 def test_reopening_the_same_db_path_preserves_history(tmp_path):
     db_path = tmp_path / "runs.db"
     store1 = SchedulerRunStore(db_path)

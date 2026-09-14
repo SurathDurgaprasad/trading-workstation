@@ -734,3 +734,17 @@
   test: tests/test_approval_security.py::test_a_crash_after_submit_signal_commits_but_before_finalize_decision_is_reconciled_not_resurrected
   evidence_grade: B
   note: "Two tests cover both crash sub-cases. The companion test (test_a_crash_before_submit_signal_ever_committed_is_marked_abandoned_never_auto_resumed) proves the no-JournalEntry case: the orphan is marked abandoned, approve_pending() called again on it afterward still returns ALREADY_DECIDED (never re-executes), zero journal entries/orders exist. Idempotency guarantee established: effectively-once execution per Signal.stable_id() -- at most one PaperOrder/JournalEntry ever, proven across concurrent approve/reject (cycle 19/20), approve/expire (cycle 23), kill-switch-during-approve (cycle 25), and this cycle's crash-before/after-execution-but-before-finalization. Mutation-tested: both tests confirmed to FAIL (landing on NOT_FOUND instead of the reconciled ALREADY_DECIDED) when the reconciliation call was disabled, before confirming they pass against the real fix."
+
+- id: FI-CONCURRENCY-SCHEDULER-LOCK-REAL-SUBPROCESS
+  component: scheduler_store
+  failure: "two genuinely separate OS processes (not threads) race SchedulerRunStore.try_start_run against the SAME run-db file, simulating an operator accidentally running both `schedule loop` and a cron-triggered `schedule tick`"
+  injection_method: "two real subprocess.Popen python processes, each with its own independent SQLite connection, synchronized by a real cross-process file-based barrier (each worker signals readiness via a marker file after completing all slow setup, then polls for the other's marker before calling try_start_run) -- forces the actual race window to overlap despite interpreter-startup overhead dwarfing the SQL operations under test. Repeated 10 times, fresh db per repetition."
+  expected:
+    detection: true
+    trade_authorization: N/A -- scheduler-run mutual exclusion, not a trade-authorization check
+    safe_response: "NEGATIVE AUDIT, autonomous hardening cycle 27 -- try_start_run's existing BEGIN IMMEDIATE lock is confirmed genuinely atomic under real OS-process contention: exactly one process ever acquires the lock, the other is cleanly refused (None), exactly one row is ever persisted, across all 10 repetitions and 5 repeated full-suite runs."
+    recovery: N/A -- no inconsistency is ever produced to recover from
+    safety_invariant: SCHEDULER_OVERLAP_PREVENTION
+  test: tests/test_scheduler_store.py::test_try_start_run_is_atomic_under_real_os_subprocess_contention
+  evidence_grade: B
+  note: "Real OS subprocesses (subprocess.Popen), not threads -- genuinely separate interpreter processes, separate SQLite connections, separate process memory. Process note: a first version of this test with no cross-process synchronization was itself caught as too weak by mutation testing (BEGIN IMMEDIATE weakened to plain BEGIN passed 3/3 times regardless, since back-to-back Popen calls rarely genuinely overlap given interpreter-startup overhead) -- corrected with a real file-based barrier before being trusted as evidence. The corrected version reliably kills the same mutation 3/3 times, with the failure mode itself informative (an unhandled sqlite3.OperationalError: database is locked in the losing process, confirming BEGIN IMMEDIATE prevents that crash by acquiring the write lock immediately rather than letting both connections collide on a later lock upgrade)."
