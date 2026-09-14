@@ -159,13 +159,22 @@ def evaluate_risk_tool(
     would actually have on hand — equity, cash, peak equity, the day's
     starting equity, and the current losing streak.
     """
-    account = Account(
-        initial_capital=account_equity,
-        cash=account_cash,
-        peak_equity=account_peak_equity,
-        daily_start_equity=account_daily_start_equity,
-        consecutive_losses=account_consecutive_losses,
-    )
+    # Autonomous hardening cycle 11: found via an MCP boundary attack --
+    # account_equity maps to Account.initial_capital (Field(gt=0)), so a
+    # caller passing NaN/0/negative here previously raised a raw, uncaught
+    # pydantic.ValidationError instead of the clean ToolError contract
+    # this tool already uses for an invalid risk_config override just
+    # below. Symmetric handling now, not a special case.
+    try:
+        account = Account(
+            initial_capital=account_equity,
+            cash=account_cash,
+            peak_equity=account_peak_equity,
+            daily_start_equity=account_daily_start_equity,
+            consecutive_losses=account_consecutive_losses,
+        )
+    except Exception as exc:
+        raise ToolError(f"Invalid account state: {exc}") from exc
 
     config_kwargs = {
         key: value

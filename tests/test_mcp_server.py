@@ -216,6 +216,103 @@ def test_evaluate_risk_tool_cannot_alter_the_signals_entry_stop_target():
     assert not hasattr(decision, "stop")
 
 
+# --- Autonomous hardening cycle 11: MCP executable boundary attack ---------
+#
+# Proves, with a real executable test (not merely inspection), that a
+# NaN/Inf value reaching this boundary cannot authorize a trade -- the
+# exact property risk/engine.py::evaluate's NON_FINITE_VALUE guard
+# (autonomous hardening cycle 7) exists to enforce, now verified to
+# actually be inherited through the MCP tool layer, not merely assumed
+# because "the tool calls RiskEngine underneath."
+
+
+def test_evaluate_risk_tool_never_approves_a_nan_target_price_signal():
+    """The exact real defect cycle 7 found and fixed (a NaN target_price
+    previously slipped past every structural check and produced
+    approved=True) -- reproduced here through the MCP tool boundary
+    specifically, not just the direct RiskEngine call cycle 7's own
+    regression test already covers."""
+    from risk.veto import VetoReason
+
+    signal = _real_signal(target_price=float("nan"))
+    decision = evaluate_risk_tool(
+        signal=signal,
+        account_equity=100_000.0, account_cash=100_000.0,
+        account_peak_equity=100_000.0, account_daily_start_equity=100_000.0,
+    )
+    assert not decision.approved
+    assert VetoReason.NON_FINITE_VALUE in decision.veto_reasons
+
+
+@pytest.mark.parametrize("field", ["reference_price", "stop_price", "target_price"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_evaluate_risk_tool_never_approves_any_non_finite_signal_price(field, value):
+    from risk.veto import VetoReason
+
+    signal = _real_signal(**{field: value})
+    decision = evaluate_risk_tool(
+        signal=signal,
+        account_equity=100_000.0, account_cash=100_000.0,
+        account_peak_equity=100_000.0, account_daily_start_equity=100_000.0,
+    )
+    assert not decision.approved
+    assert VetoReason.NON_FINITE_VALUE in decision.veto_reasons
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_evaluate_risk_tool_never_approves_a_non_finite_account_equity(value):
+    """account_equity/account_cash are caller-supplied plain floats at
+    this tool's own boundary (Account is constructed FROM them inside
+    the tool, not passed in as an already-validated object) -- a
+    malicious or buggy MCP client could set cash to NaN/Inf directly."""
+    from risk.veto import VetoReason
+
+    signal = _real_signal()
+    decision = evaluate_risk_tool(
+        signal=signal,
+        account_equity=100_000.0, account_cash=value,
+        account_peak_equity=100_000.0, account_daily_start_equity=100_000.0,
+    )
+    assert not decision.approved
+    assert VetoReason.NON_FINITE_VALUE in decision.veto_reasons
+
+
+def test_evaluate_risk_tool_never_raises_an_untyped_exception_for_any_non_finite_input():
+    """Robustness companion to the properties above: whatever combination
+    of NaN/Inf arrives, this tool must only ever either return a
+    RiskDecision or raise the tool's own typed ToolError -- never an
+    untyped exception escaping to the MCP client.
+
+    Real defect found here (autonomous hardening cycle 11): account_
+    equity maps to Account.initial_capital (Field(gt=0)) -- NaN/0/
+    negative previously raised a raw, uncaught pydantic.ValidationError
+    instead of ToolError. Fixed by wrapping Account construction the
+    same way RiskConfig construction already was."""
+    for value in (float("nan"), float("inf"), float("-inf")):
+        signal = _real_signal(stop_price=value)
+        try:
+            evaluate_risk_tool(
+                signal=signal,
+                account_equity=value, account_cash=value,
+                account_peak_equity=100_000.0, account_daily_start_equity=100_000.0,
+            )
+        except ToolError:
+            pass  # a clean, typed rejection is an acceptable safe outcome
+        # any OTHER exception type is not caught -- it fails this test
+
+
+def test_evaluate_risk_tool_rejects_a_non_finite_account_equity_with_a_clean_tool_error():
+    """Pins the exact real defect: account_equity=NaN previously crashed
+    with a raw pydantic.ValidationError; now raises the same ToolError
+    contract every other invalid-input path in this tool already uses."""
+    signal = _real_signal()
+    with pytest.raises(ToolError):
+        evaluate_risk_tool(
+            signal=signal, account_equity=float("nan"), account_cash=100_000.0,
+            account_peak_equity=100_000.0, account_daily_start_equity=100_000.0,
+        )
+
+
 # --- explain_signal_tool: schema-enforced non-mutation (mocked LLM here — --
 # --- the REAL-Ollama version is test_signal_explainer.py + this session's --
 # --- manual MCP transcript, both already proven) ---------------------------

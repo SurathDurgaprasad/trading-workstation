@@ -201,6 +201,13 @@ layers alongside the existing example-based suite:
   attempt through the same reconnect funnel every other failure already
   uses. Found and fixed cycle 8, revisiting a gap cycle 7 had explicitly
   disclosed but left unfixed pending a dedicated re-audit.
+- **The MCP boundary cannot bypass or crash past risk evaluation** —
+  `evaluate_risk_tool`/`paper_trade_signal_tool` inherit `RiskEngine`'s
+  `NON_FINITE_VALUE` guard (proven with executable tests, not just
+  inspection, cycle 11); a malformed `account_equity` now raises the
+  same clean `ToolError` contract every other invalid-input path in the
+  server already uses, instead of a raw, uncaught `ValidationError`
+  (a real defect found and fixed cycle 11).
 - **NaN/Infinity can never authorize a trade** — `RiskEngine.evaluate`
   runs an explicit `math.isfinite()` guard across every safety-relevant
   numeric input (`reference_price`/`stop_price`/`target_price`/

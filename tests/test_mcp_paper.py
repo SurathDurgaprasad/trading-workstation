@@ -86,6 +86,20 @@ def test_paper_trade_signal_tool_rejects_a_structurally_invalid_signal_cleanly()
     assert journal.outcome == JournalOutcome.REJECTED
 
 
+def test_paper_trade_signal_tool_rejects_a_non_finite_signal_cleanly():
+    """Autonomous hardening cycle 11: proves the MUTATION boundary (not
+    just the read-only evaluate_risk_tool) also inherits cycle 7's
+    NON_FINITE_VALUE guard -- a NaN target_price must produce a REJECTED
+    journal entry, never a real, persisted PaperOrder."""
+    journal = paper_trade_signal_tool(signal=_signal(target_price=float("nan")))
+    assert journal.outcome == JournalOutcome.REJECTED
+    assert journal.order_id is None
+
+    import mcp_server.server as server_module
+    engine = server_module._get_paper_engine()
+    assert engine.store.get_pending_order("TEST") is None  # no order was ever created
+
+
 # --- real stdio subprocess tests ---------------------------------------------
 
 
