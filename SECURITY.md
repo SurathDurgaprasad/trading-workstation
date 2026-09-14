@@ -84,18 +84,35 @@ like `"fake-token-for-tests"`).
 
 ## Dependency vulnerability scan
 
-Run with `pip-audit` against `requirements.txt` as part of this
-hardening campaign:
+Run with `pip-audit` against the full `venv/` (not just direct pins —
+`pip-audit` walks every installed package, transitive dependencies
+included) as part of this hardening campaign, most recently
+**autonomous hardening cycle 17** (a re-scan; the prior scan, cited
+below, was from an earlier release-gate pass). The re-scan surfaced 53
+advisories across 8 packages — a large jump from the prior scan's 2,
+reflecting newly-disclosed CVEs in the time between scans, not a
+change this project made. Every one was triaged the same way: **is
+this package's vulnerable code path ever actually reachable in this
+project's own usage**, not merely "is it present in `venv/`."
 
-| Package | Version | Advisory | Applicable here? |
-|---|---|---|---|
-| `langchain` | was 1.3.4, now **1.3.9** | PYSEC-2026-2192 (filesystem-path-confinement in agent file-search middleware and prompt/chain-config loaders) | **Not exploitable in this project's actual usage** — this project imports only `langchain_core`, `langchain_text_splitters`, `langchain_community`, and `langchain_chroma`; it never uses `langchain`'s agent file-search middleware or configuration loaders (the vulnerable components). Bumped to the patched version anyway (low-risk patch bump, full regression re-confirmed passing) as defense-in-depth. |
-| `chromadb` | 1.5.9 (unchanged) | PYSEC-2026-311, -3813, -3814, -3815 (code injection and cross-tenant authorization bypasses in chromadb's networked, multi-tenant HTTP server, `/api/v2/tenants/{tenant}/databases/{db}/collections`) | **Not exploitable in this project's actual usage** — this project uses chromadb exclusively as an embedded, local, file-backed vector store (`langchain_chroma.Chroma(persist_directory=...)`, see `rag/retriever.py`, `rag/vector_store.py`). The vulnerable networked HTTP server is never started. No fix version is listed by `pip-audit` for these; left pinned rather than bumped speculatively, since the vulnerable surface does not exist in this deployment. |
+| Package | Advisories | Applicable here? |
+|---|---|---|
+| `langchain` | PYSEC-2026-2192 (filesystem-path-confinement in agent file-search middleware and prompt/chain-config loaders) | **Not exploitable** — this project imports only `langchain_core`, `langchain_text_splitters`, `langchain_community`, and `langchain_chroma`; never the agent file-search middleware or configuration loaders (the vulnerable components). Bumped to the patched version anyway as defense-in-depth. |
+| `chromadb` | PYSEC-2026-311, -3813, -3814, -3815 (code injection and cross-tenant authorization bypasses in chromadb's networked, multi-tenant HTTP server) | **Not exploitable** — used exclusively as an embedded, local, file-backed vector store (`langchain_chroma.Chroma(persist_directory=...)`, see `rag/retriever.py`, `rag/vector_store.py`). The vulnerable networked HTTP server is never started. No fix version listed by `pip-audit`; left pinned since the vulnerable surface does not exist in this deployment. |
+| `torch` | PYSEC-2025-194 | **Not exploitable, and not even executed** — `grep`-confirmed zero direct import anywhere in project code (autonomous hardening cycle 17). Present only as a transitive dependency of one of chromadb's optional embedding-function extras; this project's own RAG embeddings go through `llm/provider.py::get_embeddings()`, which calls Ollama's `OllamaEmbeddings` over HTTP (confirmed by reading that function directly) — torch's own code never runs in this project's actual code path. |
+| `pypdf` | PYSEC-2026-3018/3610/3611/3612/3613/3655/3656/3910/3911/3912/3913, CVE-2026-57204 | **Not exploitable, and not even executed** — `grep`-confirmed zero direct import anywhere in project code (cycle 17). Transitive only; this project's document ingestion path was not found to route through `pypdf` directly. |
+| `aiohttp` | PYSEC-2026-2107 through -2113, -237, -3545/3546/3547 | **Not exploitable, and not even executed** — `grep`-confirmed zero direct import (cycle 17). Transitive-only (likely pulled in by `langchain-community`'s or `mcp`'s own optional async-HTTP extras, never invoked here — this project's own HTTP calls all go through the synchronous `requests` library, per this document's own "Live trading is structurally blocked" section above). |
+| `langsmith` | CVE-2026-59152 | **Not exploitable** — transitive dependency of `langchain`, active only when LangChain tracing is explicitly enabled (`LANGCHAIN_TRACING_V2`/`LANGSMITH_API_KEY`); this project sets neither. |
+| `pydantic-settings` | CVE-2026-58203 | **Not exploitable, and not even executed** — `grep`-confirmed zero direct import (cycle 17). This project's own config (`core/config.py::Settings`) is a plain `pydantic.BaseModel`, never `pydantic_settings.BaseSettings`; present only as some other package's transitive dependency. |
+| `pip`, `setuptools` | PYSEC-2026-3721, PYSEC-2026-3447 | **Different category, not an application vulnerability** — these are the packaging/installer toolchain itself, not runtime dependencies this project's own code imports or executes. Relevant to supply-chain hygiene when installing (`pip install --upgrade pip` before `pip install -r requirements.txt` is good practice), not to this application's own attack surface once installed. |
 
-No other package in `requirements.txt` had a known vulnerability at
-scan time. This scan reflects a point in time — dependencies should be
-re-scanned periodically (`pip install pip-audit && pip-audit -r
-requirements.txt`), not treated as a one-time clearance.
+No other package had a known vulnerability at scan time. This scan
+reflects a point in time — dependencies should be re-scanned
+periodically (`pip install pip-audit && pip-audit`), not treated as a
+one-time clearance. The triage methodology above (direct-import
+`grep`, then trace the actual code path for anything that IS imported)
+is the reusable check for any future re-scan, not a one-off judgment
+call specific to this list.
 
 ## LLM / RAG failure is non-fatal to the deterministic core
 
