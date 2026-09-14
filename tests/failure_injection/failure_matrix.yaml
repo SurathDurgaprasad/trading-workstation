@@ -748,3 +748,17 @@
   test: tests/test_scheduler_store.py::test_try_start_run_is_atomic_under_real_os_subprocess_contention
   evidence_grade: B
   note: "Real OS subprocesses (subprocess.Popen), not threads -- genuinely separate interpreter processes, separate SQLite connections, separate process memory. Process note: a first version of this test with no cross-process synchronization was itself caught as too weak by mutation testing (BEGIN IMMEDIATE weakened to plain BEGIN passed 3/3 times regardless, since back-to-back Popen calls rarely genuinely overlap given interpreter-startup overhead) -- corrected with a real file-based barrier before being trusted as evidence. The corrected version reliably kills the same mutation 3/3 times, with the failure mode itself informative (an unhandled sqlite3.OperationalError: database is locked in the losing process, confirming BEGIN IMMEDIATE prevents that crash by acquiring the write lock immediately rather than letting both connections collide on a later lock upgrade)."
+
+- id: FI-DHAN-INPROCESS-RECONNECT-REPLAY-FULL-PIPELINE
+  component: dhan_pipeline_integration
+  failure: "a genuine in-process WebSocket reconnect (the SAME DhanMarketDataSource instance, not a fresh one) is followed by a 'replayed' tick for an already-completed bucket, exercised through the COMPLETE chain: source -> bounded queue -> LiveSimPipeline -> indicator buffer -> PaperTradingEngine"
+  injection_method: "a real bar processes through the full pipeline; the fake transport's on_close callback triggers cycle-8's self-healing reconnect (a NEW transport opens on the SAME source instance, _candle_builders/_bar_queue untouched); a replayed tick for the already-closed bucket arrives on the reconnected transport; a genuine new tick follows"
+  expected:
+    detection: true
+    trade_authorization: N/A -- data-integrity finding, not an execution-authorization one
+    safe_response: "NEGATIVE AUDIT, autonomous hardening cycle 28. CandleBuilder's existing late/out-of-order guard (persisted state across the in-process reconnect) correctly rejects the replayed tick before it ever reaches the pipeline as a bar; the genuine bar afterward is completely unaffected (full OHLC unchanged)."
+    recovery: N/A -- no corruption ever occurs to recover from
+    safety_invariant: SILENT_INCORRECT_DECISION_PREVENTED
+  test: tests/test_dhan_pipeline_integration.py::test_an_in_process_reconnect_rejects_a_replayed_tick_through_the_full_pipeline
+  evidence_grade: B
+  note: "Closes a real end-to-end coverage gap: the existing duplicate-bar test in this file simulated a BRAND NEW source object (a process restart), not an actual in-process WebSocket reconnect (verified via main.py that production constructs exactly one DhanMarketDataSource for the process lifetime, so reconnects happen within that same instance). Process note: mutation-testing this new test (disabling the late/out-of-order guard) revealed it initially survived -- the assertion only checked bar.open, which a corrupted late-tick merge never touches (open is seeded once, never revisited); high/low/close are what actually get corrupted. Strengthened to assert the full OHLC, with the replayed tick's price deliberately chosen to make any corruption unmissable; the identical mutation now reliably fails with the exact corrupted value visible in the assertion diff. The second instance in two consecutive cycles of this campaign's own mutation discipline catching an initially-too-weak test."
