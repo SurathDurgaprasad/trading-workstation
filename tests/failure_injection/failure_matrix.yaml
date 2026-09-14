@@ -575,6 +575,19 @@
   test: tests/test_cli_universe.py::test_a_malformed_watchlist_file_produces_a_clean_cli_error_not_a_traceback
   evidence_grade: B
 
+- id: FI-CACHE-CORRUPT-CSV
+  component: backtesting_cache
+  failure: "a cached market-data CSV file that is empty (0 bytes) or contains non-CSV garbage bytes (e.g. from a process killed mid-write, or disk corruption)"
+  injection_method: "write a real 0-byte file / a file of raw garbage bytes at the exact path CachedMarketDataProvider expects, then call fetch_ohlcv for that symbol"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "REAL DEFECT found and fixed in autonomous hardening cycle 14: previously raised a raw pandas.errors.EmptyDataError or UnicodeDecodeError. Both happen to already be ValueError subclasses (incidental, not an intentional contract), so existing ValueError-catching callers (scanner.py's per-symbol exclusion, main.py's _CONTROLLED_ERRORS) did not crash -- but the message was a confusing raw pandas error. Now raises a clear, actionable MarketDataError naming the actual cache file and this module's own documented recovery step ('delete the file to force a fresh fetch')."
+    recovery: "manual -- delete the corrupted cache file to force a fresh fetch (this module's own documented behavior)"
+    safety_invariant: INVALID_DATA_NO_TRADE
+  test: tests/test_backtest_cache.py::test_an_empty_cache_file_raises_a_clear_market_data_error_not_a_raw_pandas_error
+  evidence_grade: B
+
 # --- Expand over subsequent cycles ------------------------------------------
 #
 # NOT yet in the matrix (deliberately -- honest about scope, not padded
@@ -585,7 +598,12 @@
 # test convention does -- FastMCP's own JSON-schema argument validation,
 # exercised over the real stdio transport, is a third-party library
 # concern already covered by that library's own test suite, not
-# re-verified here), and cache adversarial scenarios (stale/corrupt/
-# partial cache). Add one row at a time, each backed by a real test, in
-# priority order -- never pad this file with a row whose `test` field
-# does not point at real, passing, collectible coverage.
+# re-verified here), and further cache adversarial scenarios (duplicate-
+# timestamp cache rows -- investigated this cycle, found to already be
+# defended-in-depth downstream by paper/engine.py's own bar_cursor
+# idempotency for the live-trading path, not a new gap worth a
+# dedicated fix; a missing-schema-column cache file, already correctly
+# handled via OHLCV.from_dataframe's existing MarketDataError). Add one
+# row at a time, each backed by a real test, in priority order -- never
+# pad this file with a row whose `test` field does not point at real,
+# passing, collectible coverage.

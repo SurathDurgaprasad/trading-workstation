@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from backtesting.cache import CachedMarketDataProvider, report_cache_staleness
-from market.data_provider import OHLCV
+from market.data_provider import MarketDataError, OHLCV
 
 
 class _CountingProvider:
@@ -54,6 +54,58 @@ def test_cached_round_trip_preserves_ohlcv_values(tmp_path):
 
     assert [b.close for b in reloaded.bars] == [b.close for b in original.bars]
     assert [b.timestamp for b in reloaded.bars] == [b.timestamp for b in original.bars]
+
+
+# --- autonomous hardening cycle 14: cache adversarial testing --------------
+#
+# Real, reachable gap found: a corrupted cache CSV (0 bytes, or genuinely
+# non-CSV garbage bytes) previously raised a raw pandas.errors.
+# EmptyDataError/UnicodeDecodeError -- both happen to already be
+# ValueError subclasses (an incidental fact of their class hierarchy),
+# so callers that already catch ValueError (scanner.py's per-symbol
+# exclusion, main.py's _CONTROLLED_ERRORS) did NOT crash the whole
+# scan/command -- but the resulting message was a confusing raw pandas
+# error, not this project's own clear, actionable MarketDataError
+# convention (e.g. naming the file and "delete it to force a fresh
+# fetch," per this module's own documented recovery step). Never
+# trusts a corrupted cache as usable trading evidence either way -- the
+# fix is entirely about diagnosability, not a new safety property.
+
+
+class _NeverCalledProvider:
+    def fetch_ohlcv(self, symbol, *, period="1y", interval="1d"):
+        raise AssertionError("a corrupted cache file must never fall through to a fresh fetch silently -- it must raise, naming the corruption")
+
+
+def test_an_empty_cache_file_raises_a_clear_market_data_error_not_a_raw_pandas_error(tmp_path):
+    csv_path = tmp_path / "EMPTY" / "1d.csv"
+    csv_path.parent.mkdir(parents=True)
+    csv_path.write_text("")  # 0 bytes -- e.g. a process killed mid-write
+
+    cached = CachedMarketDataProvider(_NeverCalledProvider(), cache_root=tmp_path)
+    with pytest.raises(MarketDataError, match="corrupted or unreadable"):
+        cached.fetch_ohlcv("EMPTY", interval="1d")
+
+
+def test_a_corrupted_binary_cache_file_raises_a_clear_market_data_error_not_a_raw_pandas_error(tmp_path):
+    csv_path = tmp_path / "CORRUPT" / "1d.csv"
+    csv_path.parent.mkdir(parents=True)
+    csv_path.write_bytes(b"\x00\x01\x02garbage-not-csv-at-all\xff\xfe")
+
+    cached = CachedMarketDataProvider(_NeverCalledProvider(), cache_root=tmp_path)
+    with pytest.raises(MarketDataError, match="corrupted or unreadable"):
+        cached.fetch_ohlcv("CORRUPT", interval="1d")
+
+
+def test_the_clear_error_names_the_actual_cache_file_path(tmp_path):
+    csv_path = tmp_path / "NAMED" / "1d.csv"
+    csv_path.parent.mkdir(parents=True)
+    csv_path.write_text("")
+
+    cached = CachedMarketDataProvider(_NeverCalledProvider(), cache_root=tmp_path)
+    with pytest.raises(MarketDataError) as exc_info:
+        cached.fetch_ohlcv("NAMED", interval="1d")
+    assert str(csv_path) in str(exc_info.value)
 
 
 def test_cache_writes_a_metadata_sidecar(tmp_path):

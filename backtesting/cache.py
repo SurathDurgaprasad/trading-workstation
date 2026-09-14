@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from core.config import PROJECT_ROOT
-from market.data_provider import OHLCV, MarketDataProvider
+from market.data_provider import OHLCV, MarketDataError, MarketDataProvider
 
 CACHE_ROOT = PROJECT_ROOT / "data" / "market"
 
@@ -79,7 +79,35 @@ class CachedMarketDataProvider:
         return csv_path.with_suffix(".meta.json")
 
     def _read(self, csv_path: Path, *, symbol: str, interval: str) -> OHLCV:
-        frame = pd.read_csv(csv_path, parse_dates=["Date"], index_col="Date")
+        # Autonomous hardening cycle 14 (cache adversarial testing): a
+        # genuinely empty cache file (0 bytes -- e.g. a process killed
+        # mid-write, or disk corruption) raises pandas.errors.
+        # EmptyDataError; a corrupted/non-CSV file (garbage bytes) raises
+        # UnicodeDecodeError from the CSV parser itself. Both happen to
+        # already be ValueError subclasses (an incidental fact of their
+        # class hierarchy, not an intentional contract this project
+        # controls), so callers that already catch ValueError -- e.g.
+        # market_intelligence/scanner.py's own per-symbol exclusion, and
+        # main.py's _CONTROLLED_ERRORS -- do NOT crash the whole
+        # scan/command. But the resulting message ("No columns to parse
+        # from file", a raw codec error) is confusing and gives no
+        # actionable next step, unlike this project's own established
+        # MarketDataError messages elsewhere. Wrapped here into a clear,
+        # actionable MarketDataError naming the actual cache file and
+        # this module's own documented recovery step ("delete the file
+        # to refresh it") -- never silently treating corrupted cached
+        # data as usable trading evidence, per this cycle's own mandate.
+        try:
+            frame = pd.read_csv(csv_path, parse_dates=["Date"], index_col="Date")
+        except (pd.errors.ParserError, ValueError) as exc:
+            # ValueError also covers pd.errors.EmptyDataError and
+            # UnicodeDecodeError (both are ValueError subclasses), plus a
+            # malformed-date-string parse failure -- one catch-all for
+            # every "this file is not the CSV it's supposed to be" case.
+            raise MarketDataError(
+                f"Cached data for {symbol} ({interval}) at {csv_path} is corrupted or unreadable "
+                f"({type(exc).__name__}: {exc}) -- delete the file to force a fresh fetch."
+            ) from exc
         return OHLCV.from_dataframe(symbol=symbol, interval=interval, frame=frame)
 
     def _write(self, csv_path: Path, ohlcv: OHLCV, *, symbol: str, interval: str, period: str) -> None:
