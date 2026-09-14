@@ -254,6 +254,19 @@ layers alongside the existing example-based suite:
   with an extra or misplaced row. A stale (but genuinely new, in-order)
   bar is still appended — its data is real, just late; only its
   signal-generation consequence is suppressed.
+- **A PENDING order can never fill after the kill switch or a risk
+  circuit breaker activates mid-flight** — `PaperTradingEngine.
+  process_bar(..., allow_new_fill=...)` skips the fill-a-pending-order
+  branch entirely when `allow_new_fill=False`; `live/pipeline.py`
+  computes it immediately before every `process_bar` call: false only
+  when no position is open yet for the symbol AND (an account-level
+  circuit breaker is active OR the kill switch is active). Found and
+  fixed cycle 24, mirroring a guard `paper/advance.py` already carried
+  at its own (batch/catch-up) call site — the actual continuous LIVE
+  path had no equivalent protection until this cycle. Deliberately does
+  NOT gate an already-OPEN position's stop/target check, which always
+  runs regardless — refusing to manage an existing position during a
+  halt would strand it with no way to exit.
 - **The MCP boundary cannot bypass or crash past risk evaluation** —
   `evaluate_risk_tool`/`paper_trade_signal_tool` inherit `RiskEngine`'s
   `NON_FINITE_VALUE` guard (proven with executable tests, not just

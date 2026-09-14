@@ -292,6 +292,118 @@ def test_a_stale_bar_never_closes_an_already_open_position():
     assert store.get_pending_order("TEST") is None
 
 
+# --- 4b. pending-order fill halted by kill switch / circuit breaker (cycle 24) --
+
+
+def test_a_pending_order_never_fills_after_the_kill_switch_activates_mid_flight(tmp_path):
+    """Autonomous hardening cycle 24 -- a real, reproduced defect: a bare
+    PENDING order (created from a signal approved while the account was
+    healthy) previously filled UNCONDITIONALLY on the next bar, even if
+    the kill switch -- this project's primary emergency stop -- had since
+    been activated. live/pipeline.py's own KILL_SWITCH_ACTIVE check only
+    ever gated a brand-NEW signal generated from THIS bar; it never
+    protected an entry already in flight from a PRIOR bar's decision.
+    paper/advance.py already carried the equivalent guard at its own call
+    site (a real, reproduced finding from an earlier hardening pass) --
+    this closes the same gap in the actual continuous LIVE pipeline path,
+    which had no equivalent protection until now."""
+    from live.state_store import LiveStateStore
+
+    bar1 = _qualifying_bar(1, minute=15)
+    bar2 = _qualifying_bar(1, minute=16)
+    script = [MockScriptEvent.bar_event("TEST", bar1), MockScriptEvent.bar_event("TEST", bar2)]
+    state_store = LiveStateStore(tmp_path / "s.db")
+
+    pipeline, engine, store = _pipeline(
+        script, interval="1m", strategy=_ScriptedStrategy(), clock=lambda: bar2.timestamp + timedelta(seconds=10),
+        state_store=state_store,
+    )
+
+    first = pipeline.process_next()
+    assert first.kind == "BAR_PROCESSED"
+    assert store.get_pending_order("TEST") is not None
+
+    state_store.activate_kill_switch(reason="test: emergency stop mid-flight")
+
+    second = pipeline.process_next()
+    assert second.kind == "PENDING_FILL_HALTED"
+    assert store.get_open_position("TEST") is None, "a kill-switch-active bar must never fill a pending order"
+    assert store.get_pending_order("TEST") is not None  # untouched, re-evaluated once the kill switch is reset
+
+
+def test_a_pending_order_never_fills_after_the_account_crosses_a_drawdown_circuit_breaker():
+    """Same defect class as the kill-switch test above, attacked via the
+    OTHER circuit breaker RiskEngine.account_level_halt_reasons() covers:
+    max_drawdown_pct (10% by default). Simulates the account having
+    crossed it via some OTHER symbol's trades between this signal's
+    approval and the bar that would fill it -- exactly the scenario
+    paper/advance.py's own docstring describes as "reproduced directly"
+    for its own call site."""
+    bar1 = _qualifying_bar(1, minute=15)
+    bar2 = _qualifying_bar(1, minute=16)
+    script = [MockScriptEvent.bar_event("TEST", bar1), MockScriptEvent.bar_event("TEST", bar2)]
+
+    pipeline, engine, store = _pipeline(
+        script, interval="1m", strategy=_ScriptedStrategy(), clock=lambda: bar2.timestamp + timedelta(seconds=10),
+    )
+
+    first = pipeline.process_next()
+    assert first.kind == "BAR_PROCESSED"
+    assert store.get_pending_order("TEST") is not None
+
+    engine.account.cash = 50_000.0  # peak_equity stays 100_000.0 -> 50% drawdown, well past the 10% default limit
+    store.save_account(engine.account)
+
+    second = pipeline.process_next()
+    assert second.kind == "PENDING_FILL_HALTED"
+    assert store.get_open_position("TEST") is None, "a bar arriving after a drawdown-breach must never fill a pending order"
+    assert store.get_pending_order("TEST") is not None
+
+
+def test_an_open_positions_stop_still_gets_checked_despite_an_active_kill_switch(tmp_path):
+    """The critical asymmetry, exercised through the real pipeline wiring
+    (not just process_bar directly, as in test_paper_bar_ordering.py):
+    the kill switch/circuit-breaker gate is only computed when there is
+    NO open position yet for the symbol -- an already-OPEN position must
+    keep being managed for stop/target regardless, or it would be
+    stranded with no way to exit, exactly the distinction paper/
+    advance.py's own docstring draws."""
+    from live.state_store import LiveStateStore
+
+    bar1 = _qualifying_bar(1, minute=15)
+    bar2 = _qualifying_bar(1, minute=16)
+    bar3 = _qualifying_bar(1, minute=17, low=90.0, close=91.0)  # would hit stop_price=95.0
+    script = [MockScriptEvent.bar_event("TEST", bar1), MockScriptEvent.bar_event("TEST", bar2), MockScriptEvent.bar_event("TEST", bar3)]
+    state_store = LiveStateStore(tmp_path / "s.db")
+
+    pipeline, engine, store = _pipeline(
+        script, interval="1m", strategy=_ScriptedStrategy(), clock=lambda: bar3.timestamp + timedelta(seconds=10),
+        state_store=state_store, freshness_policy=FreshnessPolicy(multiplier=2.0, minimum_threshold=timedelta(minutes=10)),
+    )
+
+    first = pipeline.process_next()
+    assert first.kind == "BAR_PROCESSED"
+    assert store.get_pending_order("TEST") is not None
+
+    second = pipeline.process_next()
+    assert second.kind == "BAR_PROCESSED"
+    assert store.get_open_position("TEST") is not None  # filled -- kill switch not active yet
+
+    state_store.activate_kill_switch(reason="test: emergency stop while a position is already open")
+
+    third = pipeline.process_next()
+    # _ScriptedStrategy fires a signal on every bar, so process_next()
+    # correctly ALSO blocks that separate, brand-NEW signal via the
+    # pipeline's own pre-existing is_kill_switch_active() check further
+    # down (kind == KILL_SWITCH_ACTIVE, not PENDING_FILL_HALTED) -- that
+    # part is expected and unrelated to this cycle's fix. What matters
+    # here is that process_bar() itself (called earlier in the same
+    # process_next()) already closed the existing position on its stop,
+    # BEFORE that new-signal check ever ran.
+    assert third.kind == "KILL_SWITCH_ACTIVE"
+    assert store.get_open_position("TEST") is None, "the kill switch must never block closing an already-open position on its own stop"
+
+
 # --- 5/6. feed disconnect / reconnect ------------------------------------------
 
 

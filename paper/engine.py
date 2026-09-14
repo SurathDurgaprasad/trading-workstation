@@ -91,6 +91,14 @@ class BarOutcome(str, Enum):
     passed to process_bar (see that parameter's own docstring) -- bar
     dedup/ordering bookkeeping still ran, but no position-affecting
     action (entry fill or stop/target check) was taken."""
+    EXECUTION_HALTED_SKIPPED = "EXECUTION_HALTED_SKIPPED"
+    """Autonomous hardening cycle 24: returned when a PENDING order WOULD
+    have filled on this bar (no open position exists for `symbol`, a
+    pending order does), but `allow_new_fill=False` was passed to
+    process_bar -- see that parameter's own docstring. An OPEN position's
+    stop/target check is NEVER affected by this (see process_bar's own
+    docstring for why) -- this outcome is returned ONLY for the specific
+    case of a skipped NEW-capital-commitment fill."""
 
 
 @dataclass
@@ -237,7 +245,7 @@ class PaperTradingEngine:
 
     # -- bar processing ----------------------------------------------------------
 
-    def process_bar(self, symbol: str, bar: Bar, *, is_fresh: bool = True) -> BarOutcome:
+    def process_bar(self, symbol: str, bar: Bar, *, is_fresh: bool = True, allow_new_fill: bool = True) -> BarOutcome:
         """Advance time for `symbol` by one bar: check any OPEN position's
         stop/target against this bar (same conservative same-bar-ambiguity
         rule as the backtester), then fill any PENDING order at this bar's
@@ -274,6 +282,36 @@ class PaperTradingEngine:
         BarOutcome.STALE_SKIPPED. The skipped action is not lost, only
         deferred: the SAME still-PENDING order or still-OPEN position is
         re-evaluated against the next bar that arrives, fresh or not.
+
+        `allow_new_fill` (autonomous hardening cycle 24): defaults to True
+        so every non-live caller is unaffected. Mirrors a guard
+        paper/advance.py's own hold-back/retry mechanism already applies
+        (see that module's own docstring, "Real, reproduced finding"): a
+        PENDING order is risk-evaluated exactly ONCE, at submission time
+        -- this method's own fill path never re-checks anything, and
+        Account.open_position() itself performs NO risk validation at
+        all. A symbol approved while the account was healthy (or before
+        the kill switch was activated) could therefore fill unconditionally
+        on a LATER bar even after the account has since crossed
+        max_drawdown_pct/max_daily_loss_pct/consecutive_loss_hard_limit,
+        or after the kill switch has since been activated -- silently
+        bypassing the exact same circuit breaker (or the project's
+        primary emergency stop) that would reject a brand-new signal
+        submitted in that same moment. paper/advance.py's own equivalent
+        guard was applied ONLY at ITS call site (the batch/catch-up
+        path); live/pipeline.py -- the actual continuous LIVE path -- had
+        no equivalent protection until this cycle. When allow_new_fill is
+        False and a PENDING order (not an already-OPEN position) would
+        otherwise have filled, the fill is skipped entirely and
+        BarOutcome.EXECUTION_HALTED_SKIPPED is returned -- the order
+        remains PENDING, re-evaluated against the next bar. Deliberately
+        does NOT affect an already-OPEN position's stop/target check
+        (that branch is untouched regardless of this flag): refusing to
+        manage an EXISTING position during a halt/kill-switch event would
+        strand it with no way to exit, a worse, new bug -- the exact same
+        distinction paper/advance.py's own docstring already draws
+        ("a symbol that already HAS an open position... must still be
+        monitored... regardless of an account-level halt").
         """
         incoming_ts = _naive(bar.timestamp)
 
@@ -293,6 +331,7 @@ class PaperTradingEngine:
 
             self.account.roll_to_day(bar.timestamp.date())
 
+            fill_was_halted = False
             if is_fresh:
                 open_position = self.store.get_open_position(symbol)
                 if open_position is not None:
@@ -300,15 +339,18 @@ class PaperTradingEngine:
                 else:
                     pending_order = self.store.get_pending_order(symbol)
                     if pending_order is not None:
-                        new_position = self._fill_pending_order(pending_order, bar)
-                        # The bar that just filled this order must ALSO be
-                        # checked against the new stop/target — matches the
-                        # backtester exactly: entry uses bar i+1's open, and the
-                        # very next backtester loop iteration (i+1) checks exit
-                        # using that same bar's full OHLC. Skipping this delays
-                        # a legitimate same-bar exit by one bar (found via real
-                        # AAPL replay diverging from the backtester — Phase 6).
-                        self._process_open_position(new_position, bar)
+                        if allow_new_fill:
+                            new_position = self._fill_pending_order(pending_order, bar)
+                            # The bar that just filled this order must ALSO be
+                            # checked against the new stop/target — matches the
+                            # backtester exactly: entry uses bar i+1's open, and the
+                            # very next backtester loop iteration (i+1) checks exit
+                            # using that same bar's full OHLC. Skipping this delays
+                            # a legitimate same-bar exit by one bar (found via real
+                            # AAPL replay diverging from the backtester — Phase 6).
+                            self._process_open_position(new_position, bar)
+                        else:
+                            fill_was_halted = True
 
             # Always persisted, even when this bar had nothing to do for
             # `symbol` (no open position, no pending order, or is_fresh=False)
@@ -319,7 +361,11 @@ class PaperTradingEngine:
             # restart guarantee for Phase 7A's continuous ingestion.
             self.store.save_account(self.account)
             self.store.set_last_bar_timestamp(symbol, incoming_ts)
-            return BarOutcome.PROCESSED if is_fresh else BarOutcome.STALE_SKIPPED
+            if not is_fresh:
+                return BarOutcome.STALE_SKIPPED
+            if fill_was_halted:
+                return BarOutcome.EXECUTION_HALTED_SKIPPED
+            return BarOutcome.PROCESSED
 
     def close_at_end_of_data(self, symbol: str, bar: Bar) -> None:
         """Mirrors the backtester's end-of-data forced close — any position

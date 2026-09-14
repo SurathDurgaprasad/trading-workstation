@@ -176,6 +176,96 @@ def test_is_fresh_false_never_checks_an_open_positions_stop_or_target():
     assert report.ok, report.issues
 
 
+def test_allow_new_fill_false_never_fills_a_pending_order():
+    """Autonomous hardening cycle 24: direct unit-level proof, mirroring
+    is_fresh's own tests above -- a PENDING order must not fill when
+    allow_new_fill=False (simulating an active kill switch or account
+    circuit breaker), and the order must remain untouched, awaiting the
+    next bar."""
+    store = PaperStore(":memory:")
+    engine = PaperTradingEngine(store, initial_capital=100_000.0)
+
+    from strategy.signal import ReasonCode, Side, Signal
+
+    engine.submit_signal(
+        Signal(
+            symbol="TEST", generated_at=datetime(2026, 1, 1), side=Side.LONG, reference_price=100.0,
+            stop_price=95.0, target_price=110.0, risk_reward=2.0, strategy_name="unit-test",
+            reason_codes=[ReasonCode.TREND_CONFIRMED],
+        )
+    )
+    assert store.get_pending_order("TEST") is not None
+
+    fill_bar = _bar(2, open=101.0, high=101.5, low=100.5, close=101.0)
+    outcome = engine.process_bar("TEST", fill_bar, allow_new_fill=False)
+
+    assert outcome == BarOutcome.EXECUTION_HALTED_SKIPPED
+    assert store.get_open_position("TEST") is None
+    assert store.get_pending_order("TEST") is not None  # untouched, still awaiting a bar where filling is allowed
+
+    report = reconcile(store)
+    assert report.ok, report.issues
+
+
+def test_allow_new_fill_false_still_checks_an_open_positions_stop_or_target():
+    """The critical asymmetry: allow_new_fill=False must NEVER block
+    managing an already-OPEN position -- refusing to check its stop/
+    target during a halt/kill-switch event would strand it with no way
+    to exit, a worse bug than the one this cycle fixes."""
+    store = PaperStore(":memory:")
+    engine = PaperTradingEngine(store, initial_capital=100_000.0)
+
+    from strategy.signal import ReasonCode, Side, Signal
+
+    engine.submit_signal(
+        Signal(
+            symbol="TEST", generated_at=datetime(2026, 1, 1), side=Side.LONG, reference_price=100.0,
+            stop_price=95.0, target_price=110.0, risk_reward=2.0, strategy_name="unit-test",
+            reason_codes=[ReasonCode.TREND_CONFIRMED],
+        )
+    )
+    fill_bar = _bar(2, open=101.0, high=101.5, low=100.5, close=101.0)
+    assert engine.process_bar("TEST", fill_bar) == BarOutcome.PROCESSED
+    opened = store.get_open_position("TEST")
+    assert opened is not None
+
+    # This bar's low would hit the stop_price of 95.0 -- must still be
+    # checked and close the position, even with allow_new_fill=False.
+    breach_bar = _bar(3, open=96.0, high=96.5, low=90.0, close=91.0)
+    outcome = engine.process_bar("TEST", breach_bar, allow_new_fill=False)
+
+    assert outcome == BarOutcome.PROCESSED  # a real action happened -- not EXECUTION_HALTED_SKIPPED
+    assert store.get_open_position("TEST") is None  # closed via stop, exactly as if allow_new_fill had been True
+
+    report = reconcile(store)
+    assert report.ok, report.issues
+
+
+def test_allow_new_fill_true_is_the_unaffected_default_for_every_non_live_caller():
+    """Every non-live caller (backtest replay, paper/advance.py's own
+    catch-up fills -- which apply the EQUIVALENT guard at ITS OWN call
+    site already, direct calls like every other test in this file) omits
+    allow_new_fill entirely -- must remain byte-for-byte the
+    pre-cycle-24 behavior (PROCESSED, real fill)."""
+    store = PaperStore(":memory:")
+    engine = PaperTradingEngine(store, initial_capital=100_000.0)
+
+    from strategy.signal import ReasonCode, Side, Signal
+
+    engine.submit_signal(
+        Signal(
+            symbol="TEST", generated_at=datetime(2026, 1, 1), side=Side.LONG, reference_price=100.0,
+            stop_price=95.0, target_price=110.0, risk_reward=2.0, strategy_name="unit-test",
+            reason_codes=[ReasonCode.TREND_CONFIRMED],
+        )
+    )
+    fill_bar = _bar(2, open=101.0, high=101.5, low=100.5, close=101.0)
+    outcome = engine.process_bar("TEST", fill_bar)  # no allow_new_fill kwarg at all
+
+    assert outcome == BarOutcome.PROCESSED
+    assert store.get_open_position("TEST") is not None
+
+
 def test_is_fresh_true_is_the_unaffected_default_for_every_non_live_caller():
     """Every non-live caller (backtest replay, paper/advance.py's catch-up
     fills, direct calls like every other test in this file) omits

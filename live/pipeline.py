@@ -77,7 +77,7 @@ class _SymbolBuffer:
 class PipelineStepResult:
     """One outcome of LiveSimPipeline.process_next()."""
 
-    kind: str  # BAR_PROCESSED | DUPLICATE_SKIPPED | OUT_OF_ORDER_REJECTED | STALE_SIGNAL_SUPPRESSED | FEED_DISCONNECTED | FEED_EXHAUSTED | NO_NEW_DATA | PENDING_HUMAN_APPROVAL | KILL_SWITCH_ACTIVE | CRITIC_REJECTED
+    kind: str  # BAR_PROCESSED | DUPLICATE_SKIPPED | OUT_OF_ORDER_REJECTED | STALE_SIGNAL_SUPPRESSED | PENDING_FILL_HALTED | FEED_DISCONNECTED | FEED_EXHAUSTED | NO_NEW_DATA | PENDING_HUMAN_APPROVAL | KILL_SWITCH_ACTIVE | CRITIC_REJECTED
     symbol: str | None = None
     bar: OHLCVBar | None = None
     freshness: FreshnessResult | None = None
@@ -276,9 +276,26 @@ class LiveSimPipeline:
         now = self._clock()
         freshness = self.freshness_policy.check(bar.timestamp, interval=self.interval, now=now)
 
+        # Autonomous hardening cycle 24: mirrors paper/advance.py's own
+        # hold-back guard (see process_bar's own allow_new_fill docstring
+        # for the full real, reproduced defect this closes) -- a bare
+        # PENDING order (no OPEN position yet for this symbol) must not
+        # fill on a LATER bar after the kill switch has since been
+        # activated, or after the account has since crossed a circuit
+        # breaker via some OTHER symbol's trades, even though it was
+        # validly risk-approved earlier. An already-OPEN position's own
+        # stop/target check is NEVER gated by this (see process_bar's
+        # docstring) -- computed only when there's no open position, to
+        # avoid a needless account_level_halt_reasons() call on every bar.
+        allow_new_fill = True
+        if self.engine.store.get_open_position(symbol) is None:
+            halt_reasons = self.engine.risk_engine.account_level_halt_reasons(self.engine.account)
+            if halt_reasons or self.is_kill_switch_active():
+                allow_new_fill = False
+
         engine_bar = Bar(timestamp=bar.timestamp, open=bar.open, high=bar.high, low=bar.low, close=bar.close, volume=bar.volume)
         try:
-            outcome = self.engine.process_bar(symbol, engine_bar, is_fresh=freshness.is_fresh)
+            outcome = self.engine.process_bar(symbol, engine_bar, is_fresh=freshness.is_fresh, allow_new_fill=allow_new_fill)
         except OutOfOrderBarError as exc:
             # Autonomous hardening cycle 23: buffer.append() must NOT have
             # already happened for this bar (see below) -- an out-of-order
@@ -304,6 +321,15 @@ class LiveSimPipeline:
             # -> signal generation), not by re-testing process_bar's own,
             # already-correct, already-tested dedup in isolation.
             return PipelineStepResult(kind="DUPLICATE_SKIPPED", symbol=symbol, bar=bar, expired_signal_ids=expired)
+
+        if outcome == BarOutcome.EXECUTION_HALTED_SKIPPED:
+            # A PENDING order was skipped this bar because a circuit
+            # breaker or the kill switch is active (see the
+            # allow_new_fill computation above) -- the order remains
+            # PENDING, re-evaluated against the next bar. Distinct from
+            # KILL_SWITCH_ACTIVE below, which only ever gated a brand-NEW
+            # signal from this bar, never an entry already in flight.
+            return PipelineStepResult(kind="PENDING_FILL_HALTED", symbol=symbol, bar=bar, expired_signal_ids=expired)
 
         # Only reached for a genuinely NEW, in-order bar -- fresh or stale.
         # A stale bar's OHLCV data is still real, chronologically-ordered
