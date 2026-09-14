@@ -507,6 +507,37 @@ class LiveSimPipeline:
                 # no order was created by this losing attempt.
                 return ApprovalActionResult(outcome=ApprovalActionOutcome.ALREADY_DECIDED, signal_id=signal_id, reason=reason)
 
+        # Autonomous hardening cycle 25: a genuine TOCTOU window closed --
+        # is_kill_switch_active() was previously checked ONLY once, inside
+        # _check_actionable() at the very TOP of this method, before the
+        # CAS claim write above and before submit_signal() below ever run.
+        # RiskEngine.evaluate() (the "mandatory second risk check" the
+        # comment below refers to) has NO kill-switch awareness at all --
+        # a deliberate architectural separation, verified directly against
+        # risk/engine.py's full source during cycle 24's mutation audit:
+        # kill switch is a live-system-only concept living in
+        # LiveStateStore, and RiskEngine stays pure/deterministic/
+        # backtest-reusable. So nothing between the initial check and
+        # submit_signal() actually creating a real PaperOrder would ever
+        # catch a kill switch activated in that window -- e.g. a human
+        # hits the emergency stop in the moment between clicking Approve
+        # and this call actually reaching submit_signal(). The CAS claim
+        # already committed by this point (this call holds exclusive
+        # ownership of signal_id, persisted OUT of PENDING_HUMAN_APPROVAL)
+        # -- so losing this race to the kill switch must be recorded as a
+        # real, final decision, not silently dropped or re-queued.
+        # HUMAN_APPROVED -> RISK_REJECTED is already a legal transition
+        # (the same one a genuine second risk-check failure uses below),
+        # so no new state-machine change is needed.
+        if self.is_kill_switch_active():
+            pending.lifecycle.transition_to(SignalLifecycleState.RISK_REJECTED, now=self._clock())
+            if self.state_store is not None:
+                self.state_store.finalize_decision(
+                    signal_id, state=pending.lifecycle.state.value, history=pending.lifecycle.history,
+                    approved_quantity=None, final_execution_result="KILL_SWITCH_ACTIVE",
+                )
+            return ApprovalActionResult(outcome=ApprovalActionOutcome.KILL_SWITCH_ACTIVE, signal_id=signal_id, reason=reason)
+
         # THE mandatory second risk check — re-derives everything from
         # CURRENT account state via the real RiskEngine, inside
         # submit_signal(). The signal's own price levels are immutable

@@ -267,6 +267,19 @@ layers alongside the existing example-based suite:
   NOT gate an already-OPEN position's stop/target check, which always
   runs regardless — refusing to manage an existing position during a
   halt would strand it with no way to exit.
+- **A human approval can never execute after the kill switch activates in
+  the window between claiming it and submitting it** —
+  `LiveSimPipeline.approve_pending()` re-checks `is_kill_switch_active()`
+  immediately after its CAS claim succeeds and immediately before calling
+  `submit_signal()`. Found and fixed cycle 25: the kill switch was
+  previously checked only once, at the very top of the method, before the
+  claim write and before `submit_signal()` (`RiskEngine` itself has no
+  kill-switch awareness — a deliberate separation, since it stays pure/
+  backtest-reusable). A losing decision is recorded as a real
+  `RISK_REJECTED` outcome (`HUMAN_APPROVED -> RISK_REJECTED` is already a
+  legal transition), never silently dropped. Proven both deterministically
+  and with a real two-thread, two-connection race synchronized by a
+  `threading.Event` pair.
 - **The MCP boundary cannot bypass or crash past risk evaluation** —
   `evaluate_risk_tool`/`paper_trade_signal_tool` inherit `RiskEngine`'s
   `NON_FINITE_VALUE` guard (proven with executable tests, not just

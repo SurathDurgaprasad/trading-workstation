@@ -384,3 +384,179 @@ def test_concurrent_approve_and_expire_of_the_same_signal_never_produces_inconsi
     final_state_store.close()
     assert record.state == "APPROVAL_EXPIRED"
     assert record.decision == "EXPIRED"
+
+
+def test_approve_pending_never_calls_submit_signal_when_the_kill_switch_activates_between_the_claim_and_the_risk_check(tmp_path):
+    """Autonomous hardening cycle 25 -- a real TOCTOU window closed, found
+    by tracing approve_pending()'s exact temporal sequence rather than
+    re-testing any single check in isolation.
+
+    is_kill_switch_active() was previously checked ONLY ONCE, inside
+    _check_actionable() at the very TOP of approve_pending() -- before the
+    CAS claim write (LiveStateStore.update_decision, cycle 20) and before
+    submit_signal() (which actually creates the real PaperOrder).
+    RiskEngine.evaluate() -- "the mandatory second risk check" the
+    original code comment already names -- has NO kill-switch awareness
+    at all (verified directly against risk/engine.py's full source during
+    cycle 24's mutation audit: kill switch is a live-system-only concept
+    living in LiveStateStore, deliberately kept out of the pure,
+    backtest-reusable RiskEngine). So nothing between the initial check
+    and submit_signal() actually creating an order would ever catch a
+    kill switch activated in that window -- e.g. a human hits the
+    emergency stop in the moment between clicking Approve and the call
+    actually reaching submit_signal().
+
+    This test forces that EXACT interleaving deterministically (not a
+    timing-dependent race): LiveStateStore.update_decision (the CAS claim
+    write) is wrapped so that the instant it returns -- i.e. the instant
+    this call has won exclusive ownership of signal_id, but BEFORE
+    approve_pending's own next line runs -- the kill switch is activated.
+    A losing race is impossible to construct any other way with 100%
+    reliability; this is the same deterministic-injection technique cycle
+    20's own test used for the equivalent approve/reject claim race."""
+    from datetime import datetime
+    from unittest.mock import MagicMock
+
+    from live.freshness import FreshnessPolicy
+    from live.mock_source import MockMarketDataSource
+    from live.state_store import LiveStateStore
+    from paper.engine import PaperTradingEngine
+    from paper.store import PaperStore
+    from strategy.baseline import TrendMomentumBaseline
+    from tests.conftest import AAPL_CACHE_PATH, real_aapl_mock_script
+
+    if not AAPL_CACHE_PATH.exists():
+        pytest.skip(f"No cached AAPL data at {AAPL_CACHE_PATH}")
+
+    script = real_aapl_mock_script()
+    store = PaperStore(tmp_path / "p.db")
+    engine = PaperTradingEngine(store, initial_capital=100_000.0)
+    state_store = LiveStateStore(tmp_path / "s.db")
+    pipeline = LiveSimPipeline(
+        source=MockMarketDataSource(script), engine=engine, strategy=TrendMomentumBaseline(), symbols=["AAPL"], interval="1d",
+        require_human_approval=True, state_store=state_store,
+        freshness_policy=FreshnessPolicy(multiplier=1_000_000.0), clock=lambda: datetime(2026, 8, 26),
+    )
+    result = None
+    while True:
+        result = pipeline.process_next()
+        if result.kind in ("PENDING_HUMAN_APPROVAL", "FEED_EXHAUSTED"):
+            break
+    assert result.kind == "PENDING_HUMAN_APPROVAL"
+    signal_id = result.signal.stable_id()
+
+    original_update_decision = state_store.update_decision
+
+    def _claim_then_activate_kill_switch(*args, **kwargs):
+        original_update_decision(*args, **kwargs)  # the real CAS claim write -- must commit first
+        state_store.activate_kill_switch(reason="test: activated in the exact window between the CAS claim and submit_signal")
+
+    state_store.update_decision = _claim_then_activate_kill_switch
+
+    original_submit_signal = engine.submit_signal
+    mock_submit_signal = MagicMock(side_effect=AssertionError("submit_signal must never be called once the kill switch has activated"))
+    engine.submit_signal = mock_submit_signal
+    try:
+        action = pipeline.approve_pending(signal_id)
+    finally:
+        engine.submit_signal = original_submit_signal
+        state_store.update_decision = original_update_decision
+
+    assert action.outcome.value == "KILL_SWITCH_ACTIVE"
+    mock_submit_signal.assert_not_called()
+    assert store.get_pending_order("AAPL") is None  # no order was ever created
+
+    record = state_store.get(signal_id)
+    assert record.state == "RISK_REJECTED"
+    assert record.final_execution_result == "KILL_SWITCH_ACTIVE"
+
+
+def test_a_real_concurrent_kill_switch_activation_during_approve_pending_never_creates_an_order(tmp_path):
+    """Real-thread confirmation of the deterministic proof above, using a
+    threading.Barrier so the exact ordering is controlled rather than
+    timing-dependent luck: thread A calls approve_pending(); thread B is
+    released from the barrier the INSTANT thread A's CAS claim commits
+    (via the same update_decision wrapping technique, now signaling a
+    real second thread instead of acting inline), and immediately
+    activates the kill switch on a genuinely separate LiveStateStore
+    connection to the same file -- the faithful simulation of an operator
+    hitting the emergency-stop button in a different browser tab/process
+    at that exact moment."""
+    import threading
+    from datetime import datetime
+
+    from live.freshness import FreshnessPolicy
+    from live.mock_source import MockMarketDataSource
+    from live.state_store import LiveStateStore
+    from paper.engine import PaperTradingEngine
+    from paper.store import PaperStore
+    from strategy.baseline import TrendMomentumBaseline
+    from tests.conftest import AAPL_CACHE_PATH, real_aapl_mock_script
+
+    if not AAPL_CACHE_PATH.exists():
+        pytest.skip(f"No cached AAPL data at {AAPL_CACHE_PATH}")
+
+    paper_db = tmp_path / "p.db"
+    state_db = tmp_path / "s.db"
+
+    script = real_aapl_mock_script()
+    store = PaperStore(paper_db)
+    engine = PaperTradingEngine(store, initial_capital=100_000.0)
+    state_store = LiveStateStore(state_db)
+    pipeline = LiveSimPipeline(
+        source=MockMarketDataSource(script), engine=engine, strategy=TrendMomentumBaseline(), symbols=["AAPL"], interval="1d",
+        require_human_approval=True, state_store=state_store,
+        freshness_policy=FreshnessPolicy(multiplier=1_000_000.0), clock=lambda: datetime(2026, 8, 26),
+    )
+    result = None
+    while True:
+        result = pipeline.process_next()
+        if result.kind in ("PENDING_HUMAN_APPROVAL", "FEED_EXHAUSTED"):
+            break
+    assert result.kind == "PENDING_HUMAN_APPROVAL"
+    signal_id = result.signal.stable_id()
+
+    claim_committed = threading.Event()
+    kill_switch_activated = threading.Event()
+    original_update_decision = state_store.update_decision
+
+    def _claim_then_wait_for_the_kill_switch(*args, **kwargs):
+        original_update_decision(*args, **kwargs)  # the real CAS claim write -- must commit first
+        claim_committed.set()
+        # Block here -- deliberately -- until the OTHER thread's own,
+        # genuinely separate connection has ACTUALLY committed the kill
+        # switch activation. Without this wait, the two threads merely
+        # race (the activator's own connection-open overhead alone is
+        # enough to usually lose), which proves nothing about the
+        # property under test; this forces the exact interleaving the
+        # mission asks for -- "use synchronization barriers/events so the
+        # test controls exact ordering" -- while still exercising a real
+        # second thread and a real second SQLite connection, not a
+        # single-threaded shortcut.
+        assert kill_switch_activated.wait(timeout=15), "the activator thread never completed -- test infrastructure failure, not the property under test"
+
+    state_store.update_decision = _claim_then_wait_for_the_kill_switch
+
+    def _activate_kill_switch_the_instant_the_claim_commits():
+        claim_committed.wait(timeout=15)
+        activating_store = LiveStateStore(state_db)  # a genuinely separate connection -- a different process/thread
+        try:
+            activating_store.activate_kill_switch(reason="test: real second thread, real second connection")
+        finally:
+            activating_store.close()
+        kill_switch_activated.set()
+
+    activator = threading.Thread(target=_activate_kill_switch_the_instant_the_claim_commits)
+    activator.start()
+    try:
+        action = pipeline.approve_pending(signal_id)
+    finally:
+        activator.join(timeout=15)
+        state_store.update_decision = original_update_decision
+
+    assert action.outcome.value == "KILL_SWITCH_ACTIVE"
+
+    final_store = PaperStore(paper_db)
+    order_exists = final_store.get_pending_order("AAPL") is not None
+    final_store.close()
+    assert not order_exists, "a kill switch activated during approve_pending's own CAS-claim-to-execution window must never let an order through"
