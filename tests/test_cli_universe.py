@@ -50,6 +50,31 @@ def test_universe_with_watchlist_file(tmp_path, capsys):
     assert "RELIANCE.NS" in output and "INFY.NS" in output
 
 
+def test_a_malformed_watchlist_file_produces_a_clean_cli_error_not_a_traceback(tmp_path, capsys, monkeypatch):
+    """Autonomous hardening cycle 13: the most serious real defect found
+    this cycle -- `symbols: RELIANCE.NS` (a bare scalar, a plausible
+    YAML typo for a one-item list) previously passed silently through
+    `list("RELIANCE.NS")`, producing single-letter garbage tickers with
+    NO error at all. Now raises a clear ValueError (already in main.py's
+    _CONTROLLED_ERRORS, so no main.py change was needed this cycle,
+    unlike cycle 12's SchedulerConfigurationError) -- proven end to end
+    through a real main.main() invocation."""
+    import main as main_module
+
+    path = tmp_path / "bad_list.yaml"
+    path.write_text("market_universe:\n  mode: watchlist\n  symbols: RELIANCE.NS\n")
+    monkeypatch.setattr("sys.argv", ["main.py", "universe", "--watchlist-file", str(path)])
+
+    with pytest.raises(SystemExit) as exc_info:
+        main_module.main()
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "Universe failed" in err
+    assert "must be a list" in err
+    assert "Traceback" not in err
+
+
 def test_universe_with_dhan_ids_resolves_known_symbols(monkeypatch, capsys):
     import live.dhan.instruments as instruments_module
 

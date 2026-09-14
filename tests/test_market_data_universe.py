@@ -88,6 +88,46 @@ def test_from_config_rejects_an_unknown_mode():
         MarketUniverse.from_config({"mode": "totally_made_up"})
 
 
+# --- autonomous hardening cycle 13: config-adversarial testing --------------
+#
+# Same class of defect cycle 12 closed in scheduler/config.py -- a
+# malformed YAML universe file previously either crashed with a raw,
+# unwrapped AttributeError (not caught by main.py's _CONTROLLED_ERRORS)
+# or, worse, SILENTLY produced a corrupted universe with no error at all.
+
+
+def test_from_watchlist_rejects_a_non_string_symbol_with_a_clear_error():
+    """Real defect: a YAML watchlist entry that isn't a string (e.g. an
+    unquoted numeric-looking ticker) previously raised a raw
+    AttributeError from .strip() -- not a ValueError, so it was never
+    caught by main.py's _CONTROLLED_ERRORS and crashed the CLI."""
+    with pytest.raises(ValueError, match="is not a string"):
+        MarketUniverse.from_watchlist(["AAPL", 12345])
+
+
+def test_from_config_rejects_a_non_dict_config():
+    """Real defect: `market_universe: "just a string"` previously raised
+    a raw AttributeError from config.get(...)."""
+    with pytest.raises(ValueError, match="must be a mapping"):
+        MarketUniverse.from_config("not-a-dict")
+
+
+def test_from_config_rejects_a_non_list_symbols_value():
+    """The most serious real defect found this cycle: `symbols: AAPL`
+    (a bare scalar, a plausible YAML typo for a one-item list) previously
+    passed silently through `list("AAPL")`, producing ('A', 'P', 'L') --
+    three garbage single-letter tickers with NO error at all. A string
+    is iterable, which is exactly what made the old `list(...)` call
+    silently wrong instead of loudly wrong."""
+    with pytest.raises(ValueError, match="must be a list"):
+        MarketUniverse.from_config({"mode": "watchlist", "symbols": "AAPL"})
+
+
+def test_from_config_rejects_a_dict_symbols_value():
+    with pytest.raises(ValueError, match="must be a list"):
+        MarketUniverse.from_config({"mode": "watchlist", "symbols": {"AAPL": 1}})
+
+
 def test_from_yaml_file(tmp_path):
     config_path = tmp_path / "universe.yaml"
     config_path.write_text(

@@ -536,6 +536,45 @@
   test: tests/test_cli_schedule.py::test_a_malformed_schedule_config_file_produces_a_clean_cli_error_not_a_traceback
   evidence_grade: B
 
+- id: FI-CONFIG-UNIVERSE-NON-STRING-SYMBOL
+  component: market_data_universe
+  failure: "a YAML watchlist entry that isn't a string (e.g. an unquoted numeric-looking ticker)"
+  injection_method: "MarketUniverse.from_watchlist(['AAPL', 12345])"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "REAL DEFECT found and fixed in autonomous hardening cycle 13: previously raised a raw AttributeError from .strip() (not a ValueError -- would have crashed the CLI, same class as cycle 12's scheduler-config defect). Now raises a clear ValueError naming the actual mistake."
+    recovery: manual (operator fixes the YAML file)
+    safety_invariant: FAILED_STARTUP_GATE_NO_TRADE
+  test: tests/test_market_data_universe.py::test_from_watchlist_rejects_a_non_string_symbol_with_a_clear_error
+  evidence_grade: B
+
+- id: FI-CONFIG-UNIVERSE-SYMBOLS-NOT-A-LIST
+  component: market_data_universe
+  failure: "'symbols: AAPL' (a bare scalar) in a YAML watchlist file, instead of 'symbols: [AAPL]'"
+  injection_method: "MarketUniverse.from_config({'mode': 'watchlist', 'symbols': 'AAPL'})"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "THE MOST SERIOUS REAL DEFECT found this campaign in the config-adversarial domain, found and fixed in autonomous hardening cycle 13: previously SILENTLY produced ('A', 'P', 'L') as the universe -- three garbage single-letter tickers, with NO error at all (a string is iterable, so list('AAPL') 'succeeded'). This is a genuine silent-data-corruption defect, not merely a crash -- the scanner could have silently operated on a completely wrong, garbage universe. Now requires symbols to actually be a list/tuple, raising a clear ValueError naming the typo otherwise."
+    recovery: manual (operator fixes the YAML file)
+    safety_invariant: INVALID_DATA_NO_TRADE
+  test: tests/test_market_data_universe.py::test_from_config_rejects_a_non_list_symbols_value
+  evidence_grade: B
+
+- id: FI-CONFIG-UNIVERSE-CLI-SURFACE
+  component: main_cli
+  failure: "a malformed --watchlist-file's ValueError reaching main()'s own top-level exception handler"
+  injection_method: "a real main.main() invocation (sys.argv monkeypatched) with --watchlist-file pointing at 'symbols: RELIANCE.NS' (the bare-scalar typo)"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "clean 'Universe failed: <message>' surface, never a raw traceback -- ValueError was already in main.py's _CONTROLLED_ERRORS (unlike cycle 12's SchedulerConfigurationError, no main.py change was needed here), verified end to end through the real CLI entry point"
+    recovery: manual (operator fixes the YAML file)
+    safety_invariant: FAILED_STARTUP_GATE_NO_TRADE
+  test: tests/test_cli_universe.py::test_a_malformed_watchlist_file_produces_a_clean_cli_error_not_a_traceback
+  evidence_grade: B
+
 # --- Expand over subsequent cycles ------------------------------------------
 #
 # NOT yet in the matrix (deliberately -- honest about scope, not padded
@@ -546,9 +585,7 @@
 # test convention does -- FastMCP's own JSON-schema argument validation,
 # exercised over the real stdio transport, is a third-party library
 # concern already covered by that library's own test suite, not
-# re-verified here), market_data.universe.MarketUniverse.from_yaml_file's
-# own adversarial-input coverage (a similar, not-yet-audited config-file
-# boundary), and cache adversarial scenarios (stale/corrupt/partial
-# cache). Add one row at a time, each backed by a real test, in priority
-# order -- never pad this file with a row whose `test` field does not
-# point at real, passing, collectible coverage.
+# re-verified here), and cache adversarial scenarios (stale/corrupt/
+# partial cache). Add one row at a time, each backed by a real test, in
+# priority order -- never pad this file with a row whose `test` field
+# does not point at real, passing, collectible coverage.

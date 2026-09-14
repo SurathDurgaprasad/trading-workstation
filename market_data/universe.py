@@ -58,6 +58,23 @@ class MarketUniverse:
         normalized: list[str] = []
         seen: set[str] = set()
         for raw in symbols:
+            # Autonomous hardening cycle 13: a real, reachable gap found
+            # via config-adversarial testing (the same class of defect
+            # cycle 12 closed in scheduler/config.py) -- a YAML watchlist
+            # entry that isn't a string (e.g. an unquoted numeric-looking
+            # ticker like `12345`, or a nested list/mapping) previously
+            # raised a raw, unwrapped AttributeError from `.strip()`
+            # (not a ValueError, so main.py's _CONTROLLED_ERRORS never
+            # caught it) instead of this method's own established
+            # "reject with a message that names the actual mistake"
+            # convention, already used for the comma-joined-string check
+            # just below.
+            if not isinstance(raw, str):
+                raise ValueError(
+                    f"Watchlist symbol {raw!r} is not a string (got {type(raw).__name__}) -- "
+                    "check for a missing quote around a numeric-looking ticker, or a stray "
+                    "nested list/mapping entry in the YAML file."
+                )
             symbol = raw.strip().upper()
             if not symbol:
                 raise ValueError(f"Watchlist contains an empty/blank symbol: {raw!r}.")
@@ -83,9 +100,32 @@ class MarketUniverse:
     def from_config(cls, config: dict) -> "MarketUniverse":
         """`config` matches the roadmap's own documented shape:
         {"mode": "watchlist", "symbols": [...]}."""
+        if not isinstance(config, dict):
+            raise ValueError(
+                f"The 'market_universe' YAML key must be a mapping (e.g. {{mode: watchlist, symbols: [...]}}), "
+                f"got {type(config).__name__}: {config!r}."
+            )
         mode = config.get("mode")
         if mode == "watchlist":
-            return cls.from_watchlist(list(config.get("symbols") or []))
+            symbols = config.get("symbols") or []
+            # Autonomous hardening cycle 13: a real, SILENT data-
+            # corruption defect found via config-adversarial testing --
+            # `symbols: AAPL` (a plausible YAML typo: a bare scalar
+            # instead of a list, since YAML allows both without an
+            # obvious syntax error) previously passed straight through
+            # `list("AAPL")`, silently producing ('A', 'P', 'L') as the
+            # "universe" -- three garbage single-letter tickers, with NO
+            # error at all, potentially scanning/trading the wrong
+            # universe entirely undetected. A string happens to be
+            # iterable, which is exactly what made list() the wrong tool
+            # here; require an actual list/tuple instead.
+            if not isinstance(symbols, (list, tuple)):
+                raise ValueError(
+                    f"The 'symbols' YAML key must be a list (e.g. symbols: [AAPL, MSFT]), "
+                    f"got {type(symbols).__name__}: {symbols!r}. A bare, unbracketed value "
+                    "(e.g. 'symbols: AAPL') is a common YAML typo for a one-item list."
+                )
+            return cls.from_watchlist(list(symbols))
         if mode in _KNOWN_FUTURE_MODES:
             raise UnsupportedUniverseModeError(
                 f"Universe mode {mode!r} is a recognized future mode (index-membership universes) "
