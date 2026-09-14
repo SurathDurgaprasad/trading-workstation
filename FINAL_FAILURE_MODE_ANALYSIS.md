@@ -40,11 +40,11 @@ for the component map this analysis is built against.
 ### 4. Dhan broker unreachable / WebSocket disconnect
 
 - **FAILURE**: network issue, Dhan-side outage.
-- **DETECTION**: connection-state tracking in `live/dhan/` adapters.
-- **SAFE RESPONSE**: no order placement is attempted without a live, authenticated session; paper-execution continues unaffected since it never touches Dhan.
-- **RECOVERY**: reconnect logic exists in the adapter layer (not re-verified against a real Dhan outage this session -- no credentials in this environment).
-- **USER VISIBILITY**: connection status in live-state.
-- **Evidence**: **[ASSUMED]**, consistent with prior-session code reading; **not independently re-verified this session** (no Dhan credentials available in this environment).
+- **DETECTION**: connection-state tracking in `live/dhan/market_data_source.py` (`DhanConnectionState`: DISCONNECTED/CONNECTING/CONNECTED/RECONNECTING/FAILED/CLOSED).
+- **SAFE RESPONSE**: no order placement is attempted without a live, authenticated session; paper-execution continues unaffected since it never touches Dhan. Bounded exponential backoff with a terminal FAILED state after `max_reconnect_attempts` -- never an unbounded retry storm (a REAL past incident: this project's own Dhan client ID was rate-limited during live testing before this bound existed, per that module's own docstring).
+- **RECOVERY**: automatic reconnect on a transient failure; FAILED is terminal until an explicit `subscribe()` call resets the retry budget. **Autonomous hardening cycle 7 disclosed gap**: there is no timeout on the CONNECTING state itself, and the real transport runs `ping_interval=0` (no protocol-level keepalive) -- a genuinely silent hang (TCP connects, but the handshake or all subsequent traffic is silently dropped with no RST/FIN) would leave the feed stuck in CONNECTING indefinitely with no self-triggered reconnect. **Not a safety gap**: `live/freshness.py`'s `FreshnessPolicy` is an independent downstream layer keyed on bar-timestamp-vs-wall-clock, so `STALE_DATA_NO_TRADE` still engages regardless of why no fresh bar arrived -- this is an availability/liveness gap (undetected outage), not an unsafe-trade risk. Left unfixed this cycle deliberately: this is one of the most incident-hardened, concurrency-sensitive modules in the codebase, and a watchdog-timer change deserves its own dedicated cycle, not a rushed addition alongside unrelated work.
+- **USER VISIBILITY**: connection status in live-state; `is_connected()` correctly reports `False` throughout a CONNECTING hang (no false claim of health), even though nothing proactively surfaces the hang itself yet.
+- **Evidence**: **[SIMULATED / VERIFIED]**, upgraded from `[ASSUMED]` this cycle -- `tests/test_dhan_market_data_source.py` (34 tests, several documented as fixes for real incidents against a live account) plus `tests/failure_injection/test_dhan_reconnect_simulation.py` (autonomous hardening cycle 7, indexing disconnect/malformed-message/repeated-failure/reconnect-success scenarios into the executable failure matrix, and explicitly asserting the CONNECTING-timeout gap above). Still **not** `[REAL PROVIDER / VERIFIED]` -- no Dhan credentials exist in this environment; that grade should never be claimed without one.
 
 ### 5. Live order execution attempted despite structural disablement
 
@@ -206,6 +206,24 @@ for the component map this analysis is built against.
 - **RECOVERY**: automatic -- the DEGRADED status clears itself the next time the slot completes successfully; no manual reset needed.
 - **USER VISIBILITY**: `python main.py health`, the dashboard `/health` route, and `schedule status`'s existing per-slot last-success/last-failure summary all surface it now.
 - **Evidence**: **[VERIFIED-TEST]** `tests/test_scheduler_store.py` (7 new tests for `consecutive_failures_for_slot`'s edge cases) and `tests/test_core_health.py` (3 new tests for the health-check integration), all passing in the full regression (2152 passed).
+
+### 23. A NaN or Infinity value reaches the risk engine and silently authorizes (or crashes on) a trade
+
+- **FAILURE**: any of a signal's `reference_price`/`stop_price`/`target_price`/`risk_reward`, or the account's `equity`, is NaN or +/-Infinity -- e.g. from an unguarded upstream computation, not necessarily malicious input.
+- **DETECTION**: **found via property-based testing this cycle (autonomous hardening cycle 7), not a theoretical concern** -- `RiskEngine.evaluate`'s existing structural checks are all `<=`/`>=` comparisons, and EVERY comparison against NaN is `False` in Python. A NaN `target_price` slipped past the one check that reads it and produced **`approved=True`, a real quantity, with zero veto reasons** -- a genuinely reproduced silent unsafe-trade defect, this campaign's own #1 priority class. Separately, a NaN/Inf `reference_price`, `stop_price`, or `account.equity` crashed `evaluate()` with an unhandled `ValueError`/`OverflowError` out of `math.floor()`, rather than a clean veto.
+- **SAFE RESPONSE**: **fixed this cycle** -- `evaluate()` now runs an explicit `math.isfinite()` guard across all five values as its very first check, appending a new, dedicated `VetoReason.NON_FINITE_VALUE` and short-circuiting the sizing block entirely. Verified with both permanent example-based regressions AND a bounded, deterministic Hypothesis property suite sweeping the full adversarial space (NaN/Inf/zero/negative/extreme-magnitude combinations across all five inputs).
+- **RECOVERY**: N/A -- each `evaluate()` call is independent; the next call with finite inputs is unaffected.
+- **USER VISIBILITY**: the `NON_FINITE_VALUE` veto reason names the exact failure class, distinct from every other rejection reason.
+- **Evidence**: **[VERIFIED-TEST]** `tests/test_risk_gates.py`'s "Non-finite values" section (7 example-based regressions, including `test_nan_target_price_does_not_silently_approve_a_trade`, which pins the exact real defect found) plus `tests/test_risk_sizing_properties.py` (5 Hypothesis property tests, `max_examples=150`, `derandomize=True` for full reproducibility).
+
+### 24. The failure-mode catalog itself silently drifts from the code it describes
+
+- **FAILURE**: this document is prose -- nothing forces it to stay accurate as the code it describes changes. (Confirmed as a REAL, not hypothetical, problem: cycle 5 of this campaign found and fixed exactly this kind of drift in entry #6 above.)
+- **DETECTION**: previously none -- prose documentation has no test.
+- **SAFE RESPONSE**: **autonomous hardening cycle 7 addition** -- `tests/failure_injection/failure_matrix.yaml` is a machine-readable, parallel registry: every row's `test` field names a real pytest node id, and `tests/failure_injection/test_matrix_integrity.py` asserts, on every regression run, that the node id still exists and is collectible. A renamed or deleted test, or a typo in the matrix, fails the NEXT regression run automatically -- no separate manual audit step required. This document (prose, for a human reading top to bottom) and that registry (machine-checked, for CI) are deliberately complementary, not competing: this document explains WHY; the registry proves the WHAT still holds.
+- **RECOVERY**: automatic detection (test failure) on drift; the fix itself is still manual (update the stale row or restore the test).
+- **USER VISIBILITY**: a failing `test_matrix_integrity.py` test, naming the exact stale row.
+- **Evidence**: **[VERIFIED-TEST]** `tests/failure_injection/test_matrix_integrity.py` (validates schema completeness, no duplicate IDs, and that every one of 23 rows' test references genuinely import and exist), run as part of the normal full regression.
 
 ---
 

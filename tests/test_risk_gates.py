@@ -295,3 +295,76 @@ def test_insufficient_capital_reduces_quantity_and_can_veto_at_zero():
     decision = engine.evaluate(_signal(reference_price=100.0, stop_price=95.0), account)
     assert not decision.approved
     assert VetoReason.INSUFFICIENT_CAPITAL in decision.veto_reasons
+
+
+# --- Non-finite values (autonomous hardening cycle 7) -------------------------
+#
+# Real defects found via property-based testing, reproduced here as
+# permanent example-based regressions. Two distinct failure classes:
+# (1) a NaN target_price previously slipped past every existing
+# structural check (every `<=`/`>=` comparison against NaN is False) and
+# produced a fully APPROVED trade with a nonsensical target -- a silent
+# unsafe-trade defect. (2) a NaN/Inf reference_price, stop_price, or
+# account.equity instead crashed evaluate() with an unhandled
+# ValueError/OverflowError out of math.floor(), rather than a clean veto.
+
+
+def test_nan_target_price_does_not_silently_approve_a_trade():
+    """The actual defect this cycle found: previously approved=True,
+    approved_quantity=100, with no veto reason at all -- the ONE existing
+    check that reads target_price (`target_price <= reference_price`) is
+    always False for NaN, so nothing ever caught it."""
+    engine = RiskEngine()
+    account = new_account(100_000.0)
+    decision = engine.evaluate(_signal(target_price=float("nan")), account)
+    assert not decision.approved
+    assert VetoReason.NON_FINITE_VALUE in decision.veto_reasons
+    assert decision.approved_quantity == 0
+
+
+@pytest.mark.parametrize("field", ["reference_price", "stop_price", "target_price"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_signal_price_fields_never_approve_and_never_crash(field, value):
+    engine = RiskEngine()
+    account = new_account(100_000.0)
+    decision = engine.evaluate(_signal(**{field: value}), account)
+    assert not decision.approved
+    assert VetoReason.NON_FINITE_VALUE in decision.veto_reasons
+
+
+def test_non_finite_risk_reward_never_approves():
+    """risk_reward=NaN or -Inf cannot even construct a Signal
+    (Field(gt=0) already rejects both via Pydantic, since `nan > 0` and
+    `-inf > 0` are both False) -- only +Inf can reach RiskEngine.evaluate
+    at all."""
+    engine = RiskEngine()
+    account = new_account(100_000.0)
+    decision = engine.evaluate(_signal(risk_reward=float("inf")), account)
+    assert not decision.approved
+    assert VetoReason.NON_FINITE_VALUE in decision.veto_reasons
+
+
+@pytest.mark.parametrize("cash", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_account_equity_never_approves_and_never_crashes(cash):
+    """Previously crashed with ValueError (NaN) or OverflowError (Inf)
+    straight out of math.floor(risk_budget / risk_per_unit) -- fail-closed
+    in effect (no trade), but via an undiagnosed crash instead of the
+    RiskDecision contract every other rejection path honors."""
+    from risk.account import Account
+
+    engine = RiskEngine()
+    account = Account(initial_capital=100_000.0, cash=cash, peak_equity=100_000.0, daily_start_equity=100_000.0)
+    decision = engine.evaluate(_signal(), account)
+    assert not decision.approved
+    assert VetoReason.NON_FINITE_VALUE in decision.veto_reasons
+
+
+def test_finite_values_are_unaffected_by_the_non_finite_guard():
+    """Sanity check: the new guard must not reject ordinary, valid
+    signals/accounts -- every pre-existing test in this file already
+    covers this broadly, but this pins the exact baseline case."""
+    engine = RiskEngine()
+    account = new_account(100_000.0)
+    decision = engine.evaluate(_signal(), account)
+    assert decision.approved
+    assert VetoReason.NON_FINITE_VALUE not in decision.veto_reasons

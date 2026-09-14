@@ -6,6 +6,7 @@ class VetoReason(str, Enum):
     risk/engine.py — no placeholder/future reasons."""
 
     INVALID_SIGNAL = "INVALID_SIGNAL"
+    NON_FINITE_VALUE = "NON_FINITE_VALUE"
     INVALID_STOP = "INVALID_STOP"
     INVALID_RISK_REWARD = "INVALID_RISK_REWARD"
     ZERO_POSITION_SIZE = "ZERO_POSITION_SIZE"

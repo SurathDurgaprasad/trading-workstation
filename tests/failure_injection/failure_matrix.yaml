@@ -1,0 +1,353 @@
+# Executable failure-injection matrix -- autonomous hardening cycle 7.
+#
+# This is NOT a second, competing documentation artifact alongside
+# FINAL_FAILURE_MODE_ANALYSIS.md. That document is prose, written for a
+# human reading top to bottom. This file is a machine-readable REGISTRY:
+# every row's `test` field names a real pytest node id, and
+# tests/failure_injection/test_matrix_integrity.py asserts, on every
+# regression run, that the node id actually exists and is collectible --
+# so this file can never silently drift into a stale claim the way prose
+# documentation can. Every row must reference an ACTUAL test; a row with
+# no working `test` value fails the integrity check, not just a human
+# review.
+#
+# evidence_grade (see AUTONOMOUS LIMIT-PUSHING CONTROLLER mission,
+# section 24):
+#   A = real production-like execution (none in this project yet -- no
+#       live Dhan credentials or real broker in this environment)
+#   B = integration test with realistic infrastructure (a real temp
+#       SQLite file, a real Signal/Account/CLI argv, a real restart)
+#   C = deterministic simulation/injection (a mocked transport, an
+#       injected fake failing function, a monkeypatched clock)
+#   D = static inspection only (no automated test)
+#   E = assumption, not independently verified
+#
+# Started with the highest-risk boundaries this campaign has already
+# found and fixed real defects in (data quality, persistence, provider
+# resilience, scheduler resilience, risk-engine safety, disk headroom).
+# Expand incrementally in later cycles -- see this file's own "expand
+# over subsequent cycles" note at the bottom before adding new rows.
+
+- id: FI-DATA-MALFORMED-OHLCV
+  component: market_data
+  failure: impossible_ohlc_relationship
+  injection_method: "construct a DataFrame row with high < low / close outside [low, high] and feed it to OHLCV.from_dataframe"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "the individual row is dropped at construction time, same mechanism already used for NaN rows -- never reaches an indicator or a decision"
+    recovery: automatic (next clean fetch)
+    safety_invariant: INVALID_DATA_NO_TRADE
+  test: tests/test_market_data.py::test_ohlcv_from_dataframe_filters_rows_with_impossible_ohlc_relationships
+  evidence_grade: B
+
+- id: FI-DATA-INVALID-SERIES
+  component: market_data_validation
+  failure: invalid_series_classification
+  injection_method: "feed a series with duplicate/non-chronological timestamps or a symbol-identity mismatch through market_data/validation.py::validate_ohlcv"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "market_intelligence/scanner.py excludes the symbol entirely (ExcludedCandidate) -- never scored, never decided on"
+    recovery: automatic (next clean fetch)
+    safety_invariant: INVALID_DATA_NO_TRADE
+  test: tests/test_market_intelligence_scanner.py::test_invalid_data_quality_is_excluded_not_scored
+  evidence_grade: B
+
+- id: FI-DATA-EMPTY-PROVIDER-RESPONSE
+  component: yahoo_finance_provider
+  failure: empty_response
+  injection_method: "mock yfinance to return an empty DataFrame"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "raises MarketDataError explicitly -- never a silently empty/zero-bar result mistaken for valid data"
+    recovery: automatic (retried by the resilience wrapper, or the next scheduled fetch)
+    safety_invariant: INVALID_DATA_NO_TRADE
+  test: tests/test_yahoo_finance_provider.py::test_an_empty_dataframe_from_yfinance_raises_marketdataerror_not_a_silent_empty_result
+  evidence_grade: C
+
+- id: FI-DB-MISSING-DIR
+  component: core_sqlite_util
+  failure: missing_parent_directory
+  injection_method: "connect() to a path whose parent directory does not exist yet (a genuine fresh-clone scenario)"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "the parent directory is created automatically before the connection is opened -- found as a real fresh-clone-breaking bug in autonomous hardening cycle 1"
+    recovery: automatic
+    safety_invariant: RECOVERY_NEVER_BLOCKED
+  test: tests/test_core_sqlite_util.py::test_connect_creates_a_missing_parent_directory
+  evidence_grade: B
+
+- id: FI-DB-CORRUPT
+  component: core_sqlite_util
+  failure: corrupted_or_non_sqlite_file
+  injection_method: "write arbitrary non-SQLite bytes to the db path, then call connect()"
+  expected:
+    detection: true
+    health: FAILED
+    safe_response: "raises a clear DatabaseCorruptedError naming the file, on the very first connection attempt -- not only when an operator remembers to run an explicit integrity check"
+    recovery: manual (restore from backup, or move the file aside)
+    safety_invariant: CORRUPTED_STATE_NO_TRADE
+  test: tests/test_core_sqlite_util.py::test_connect_against_a_corrupted_file_raises_a_clear_database_corrupted_error
+  evidence_grade: B
+
+- id: FI-DB-LOCKED
+  component: core_sqlite_util
+  failure: concurrent_writer_contention
+  injection_method: "a real writer transaction held open on one connection while a second, real connection reads the same file under WAL"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "WAL mode means a reader is never blocked by an in-progress writer; only genuine writer-vs-writer contention can hit the 30s busy_timeout"
+    recovery: automatic once the contending transaction completes
+    safety_invariant: RECOVERY_NEVER_BLOCKED
+  test: tests/test_core_sqlite_util.py::test_concurrent_reader_is_not_blocked_by_a_writer_under_wal
+  evidence_grade: B
+
+- id: FI-DB-MALFORMED-ROW
+  component: paper_store
+  failure: malformed_stored_row
+  injection_method: "insert a data_json value directly via raw SQL that does not satisfy the Position model's required fields"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "raises a clear MalformedRowError naming the model and row identifier, instead of a raw pydantic.ValidationError traceback -- autonomous hardening cycle 1/2"
+    recovery: manual (the row's data is genuinely unreconstructable)
+    safety_invariant: CORRUPTED_STATE_NO_TRADE
+  test: tests/test_paper_store.py::test_a_malformed_position_row_raises_a_clear_error_not_a_raw_pydantic_traceback
+  evidence_grade: B
+
+- id: FI-DB-DUPLICATE-REPLAY
+  component: paper_restart
+  failure: replayed_already_processed_bar
+  injection_method: "a real restart, then feed the SAME bar timestamp the pre-restart process already processed"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "the replayed bar is rejected as a no-op -- verified against a real restart boundary, not the same in-memory instance retrying"
+    recovery: automatic (the process simply continues from the correct state)
+    safety_invariant: CORRUPTED_STATE_NO_TRADE
+  test: tests/test_paper_restart.py::test_replaying_an_already_processed_bar_after_a_restart_does_not_duplicate_state
+  evidence_grade: B
+
+- id: FI-PROVIDER-DHAN-TIMEOUT
+  component: dhan_rest
+  failure: transport_timeout
+  injection_method: "mock the underlying HTTP transport to raise a timeout"
+  expected:
+    detection: true
+    trade_authorization: false
+    health: DEGRADED
+    safe_response: "wrapped into a typed DhanRestError -- a real code defect this campaign found and fixed (DhanRestClient._get() was not wrapping transport exceptions at all before the provider-failure-matrix survey)"
+    recovery: retry_or_safe_stop
+    safety_invariant: FAILED_RISK_CHECK_NO_TRADE
+  test: tests/test_dhan_rest_client.py::test_a_timeout_is_wrapped_in_a_dhan_rest_error
+  evidence_grade: C
+
+- id: FI-PROVIDER-DHAN-HTTP-FAILURE
+  component: dhan_rest
+  failure: non_2xx_http_status
+  injection_method: "mock the transport to return a non-2xx HTTP response"
+  expected:
+    detection: true
+    trade_authorization: false
+    health: DEGRADED
+    safe_response: "raises DhanRestError with the actual status code, never silently treated as an empty/successful result"
+    recovery: retry_or_safe_stop
+    safety_invariant: FAILED_RISK_CHECK_NO_TRADE
+  test: tests/test_dhan_rest_client.py::test_non_2xx_status_raises_dhan_rest_error_with_status_code
+  evidence_grade: C
+
+- id: FI-PROVIDER-YAHOO-SUSTAINED-FAILURE
+  component: market_data_resilience
+  failure: repeated_consecutive_failures
+  injection_method: "an injected fake fetch function that fails on every call, driven past the circuit breaker's failure_threshold"
+  expected:
+    detection: true
+    trade_authorization: false
+    health: DEGRADED
+    safe_response: "circuit OPENs after N consecutive failures and rejects further attempts WITHOUT hitting the network again, protecting the rest of a multi-symbol run"
+    recovery: "automatic HALF_OPEN trial after cooldown_seconds; one success re-closes the circuit"
+    safety_invariant: FAILED_RISK_CHECK_NO_TRADE
+  test: tests/test_market_data_resilience.py::test_circuit_opens_after_consecutive_failure_threshold
+  evidence_grade: C
+
+- id: FI-PROVIDER-RETRY-EXHAUSTION
+  component: market_data_resilience
+  failure: retry_budget_exhausted
+  injection_method: "an injected fake fetch function that fails on every attempt, up to max_attempts"
+  expected:
+    detection: true
+    trade_authorization: false
+    health: N/A
+    safe_response: "raises a clear MarketDataError naming the attempt count and the last underlying error -- bounded retries, never an unbounded retry loop"
+    recovery: automatic on the next independent call
+    safety_invariant: FAILED_RISK_CHECK_NO_TRADE
+  test: tests/test_market_data_resilience.py::test_exhausts_retries_and_raises_with_a_clear_message
+  evidence_grade: C
+
+- id: FI-SCHED-JOB-EXCEPTION
+  component: scheduler_runner
+  failure: unexpected_exception_mid_slot
+  injection_method: "monkeypatch the market-data call inside _execute_slot to raise"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "the run is marked FAILED and the lock is released -- the scheduler loop itself is not killed"
+    recovery: automatic on the next tick
+    safety_invariant: RECOVERY_NEVER_BLOCKED
+  test: tests/test_scheduler_runner.py::test_run_tick_does_not_crash_on_a_market_data_failure
+  evidence_grade: B
+
+- id: FI-SCHED-REPEATED-FAILURE
+  component: core_health
+  failure: sustained_per_slot_failure_streak
+  injection_method: "persist 3+ consecutive FAILED runs for one slot with no COMPLETED run since, then call collect_system_health"
+  expected:
+    detection: true
+    health: DEGRADED
+    safe_response: "scheduler component reports DEGRADED naming the slot, streak length, and last failure reason -- previously invisible since every failed tick correctly released its lock (autonomous hardening cycle 3)"
+    recovery: automatic (clears on the slot's next success)
+    safety_invariant: RECOVERY_NEVER_BLOCKED
+  test: tests/test_core_health.py::test_scheduler_check_reports_degraded_for_a_sustained_failure_streak
+  evidence_grade: B
+
+- id: FI-SCHED-STALE-LOCK
+  component: scheduler_store
+  failure: orphaned_running_lock
+  injection_method: "a RUNNING row started long enough ago to exceed staleness_seconds, with no finished_at"
+  expected:
+    detection: true
+    health: DEGRADED (while held)
+    safe_response: "reclaim_stale_locks marks it RECLAIMED and frees the lock for a new run"
+    recovery: automatic on the next tick
+    safety_invariant: RECOVERY_NEVER_BLOCKED
+  test: tests/test_scheduler_store.py::test_reclaim_stale_locks_frees_an_orphaned_lock_for_restart_recovery
+  evidence_grade: B
+
+- id: FI-SCHED-PROCESS-RESTART
+  component: scheduler_store
+  failure: process_crash_and_restart
+  injection_method: "a real crashed SchedulerRunStore instance (no close(), no finish_run()), then a real NEW instance opened on the same db file"
+  expected:
+    detection: true
+    health: DEGRADED (until reclaimed)
+    safe_response: "the orphaned lock is visible to the new process and reclaimable -- proves the on-disk row, not in-memory state, is what makes recovery real"
+    recovery: automatic on the next tick after restart
+    safety_invariant: RECOVERY_NEVER_BLOCKED
+  test: tests/test_scheduler_store.py::test_reclaim_stale_locks_works_across_a_real_process_restart
+  evidence_grade: B
+
+- id: FI-SAFETY-KILL-SWITCH
+  component: live_pipeline
+  failure: kill_switch_active
+  injection_method: "activate the kill switch on a real LiveStateStore, then attempt a new auto-execute signal"
+  expected:
+    detection: true
+    trade_authorization: false
+    health: N/A
+    safe_response: "new signals are blocked; existing open positions/pending approvals are untouched"
+    recovery: manual (explicit reset required, by design)
+    safety_invariant: KILL_SWITCH_AUTHORITATIVE
+  test: tests/test_kill_switch_pipeline.py::test_kill_switch_blocks_new_auto_execute_signals
+  evidence_grade: B
+
+- id: FI-SAFETY-RISK-NON-FINITE-INPUT
+  component: risk_engine
+  failure: nan_or_inf_in_signal_or_account
+  injection_method: "construct a Signal/Account with NaN or +/-Inf in reference_price/stop_price/target_price/risk_reward/equity"
+  expected:
+    detection: true
+    trade_authorization: false
+    health: N/A
+    safe_response: "explicit NON_FINITE_VALUE veto -- a REAL defect this cycle found and fixed: a NaN target_price previously slipped past every existing structural check and produced an APPROVED trade with a nonsensical target"
+    recovery: N/A (each evaluate() call is independent)
+    safety_invariant: FAILED_RISK_CHECK_NO_TRADE
+  test: tests/test_risk_gates.py::test_nan_target_price_does_not_silently_approve_a_trade
+  evidence_grade: B
+
+- id: FI-SAFETY-STARTUP-GATE-FAILED
+  component: main_startup_gate
+  failure: failed_critical_dependency
+  injection_method: "monkeypatch collect_system_health to return overall=FAILED, then invoke paper-live/schedule tick"
+  expected:
+    detection: true
+    trade_authorization: false
+    health: FAILED
+    safe_response: "the command refuses to start and exits with a clear diagnostic"
+    recovery: manual (operator resolves the underlying FAILED component)
+    safety_invariant: FAILED_STARTUP_GATE_NO_TRADE
+  test: tests/test_cli_startup_gate.py::test_failed_status_refuses_to_start
+  evidence_grade: B
+
+- id: FI-RESOURCE-LOW-DISK
+  component: core_health
+  failure: low_free_disk_space
+  injection_method: "monkeypatch shutil.disk_usage to report free space below the DEGRADED threshold"
+  expected:
+    detection: true
+    health: DEGRADED
+    safe_response: "advance warning surfaced via health/dashboard, before any write actually fails -- autonomous hardening cycle 6"
+    recovery: manual (operator frees space)
+    safety_invariant: RECOVERY_NEVER_BLOCKED
+  test: tests/test_core_health.py::test_disk_check_reports_degraded_when_free_space_is_low
+  evidence_grade: C
+
+- id: FI-RESOURCE-CRITICAL-DISK
+  component: core_health
+  failure: critically_low_free_disk_space
+  injection_method: "monkeypatch shutil.disk_usage to report free space below the FAILED threshold"
+  expected:
+    detection: true
+    health: FAILED
+    safe_response: "escalates overall health to FAILED, which blocks the startup gate -- disk is a CRITICAL health component"
+    recovery: manual (operator frees space)
+    safety_invariant: FAILED_STARTUP_GATE_NO_TRADE
+  test: tests/test_core_health.py::test_disk_check_reports_failed_when_free_space_is_critically_low
+  evidence_grade: C
+
+- id: FI-DHAN-WS-RECONNECT-CYCLE
+  component: dhan_market_data_source
+  failure: "disconnect -> repeated_failure -> reconnect_success (full cycle)"
+  injection_method: "a fake WebSocket transport (no real socket): simulated disconnects/errors on demand, auto_open controls whether a new attempt succeeds"
+  expected:
+    detection: true
+    trade_authorization: N/A (this module produces bars, not trade decisions -- FreshnessPolicy is the downstream safety layer)
+    health: DEGRADED while RECONNECTING/FAILED
+    safe_response: "bounded exponential backoff, generation-tagged dedup of concurrent failure signals, terminal FAILED state after max_reconnect_attempts -- never an unbounded retry storm (a REAL past incident: Dhan rate-limited this project's client ID during live testing before this bound existed)"
+    recovery: "automatic reconnect on transient failure; FAILED is terminal until an explicit subscribe() call resets the budget"
+    safety_invariant: RECOVERY_NEVER_BLOCKED
+  test: tests/failure_injection/test_dhan_reconnect_simulation.py::test_reconnect_success_simulated_verified
+  evidence_grade: C
+  note: "SIMULATED / VERIFIED, not REAL PROVIDER / VERIFIED -- no Dhan credentials exist in this environment. See tests/test_dhan_market_data_source.py's 34 tests for the full depth of coverage this one row summarizes."
+
+- id: FI-DHAN-CONNECTING-STATE-NO-TIMEOUT
+  component: dhan_market_data_source
+  failure: "a connection attempt that never calls on_open, on_close, or on_error at all (a genuinely silent hang)"
+  injection_method: "a fake transport whose connect() registers callbacks but never invokes any of them"
+  expected:
+    detection: false
+    health: N/A (this module itself never notices)
+    safe_response: "NONE at this layer -- DISCLOSED, UNFIXED GAP found by this audit (autonomous hardening cycle 7). No CONNECTING-state timeout watchdog exists; the real transport also runs ping_interval=0 (no protocol-level keepalive)."
+    recovery: "none from this module; the feed stays silently stuck in CONNECTING"
+    safety_invariant: "NOT a safety gap in practice -- live/freshness.py's FreshnessPolicy is an independent downstream layer keyed on bar-timestamp-vs-wall-clock, not on this module's own state, so STALE_DATA_NO_TRADE still engages once enough time passes with no fresh bar. This is an AVAILABILITY/liveness gap (undetected outage), not an unsafe-trade risk."
+  test: tests/failure_injection/test_dhan_reconnect_simulation.py::test_no_connecting_state_timeout_watchdog_exists_yet
+  evidence_grade: C
+  note: "Intentionally asserts the CURRENT gap-having behavior, not a fix. A future cycle's fix (connect-attempt watchdog timer, or re-enabling ping_interval/ping_timeout) should invert this test's final assertion."
+
+# --- Expand over subsequent cycles ------------------------------------------
+#
+# NOT yet in the matrix (deliberately -- honest about scope, not padded
+# for row count): Ollama timeout/unavailable (covered qualitatively in
+# TROUBLESHOOTING.md but no dedicated failure-injection test yet), Dhan
+# WebSocket/live-feed reconnect scenarios (see
+# tests/failure_injection/test_dhan_reconnect_simulation.py's own module
+# docstring for why these are graded SIMULATED, not REAL PROVIDER --
+# added cycle 7), MCP boundary scenarios (malformed args, tool timeout,
+# unavailable server), configuration adversarial scenarios (missing/
+# invalid config values), and cache adversarial scenarios (stale/corrupt/
+# partial cache). Add one row at a time, each backed by a real test, in
+# priority order -- never pad this file with a row whose `test` field
+# does not point at real, passing, collectible coverage.

@@ -67,6 +67,18 @@ pyyaml==6.0.3
 
 # test-only
 pytest==9.1.1
+hypothesis==6.168.0
+# Autonomous hardening cycle 7 -- property-based testing for the highest-
+# risk deterministic pure functions/state machines (risk/sizing.py,
+# risk/engine.py, market/indicators.py, paper/store.py transitions):
+# generated adversarial inputs (NaN, Inf, extreme magnitudes, degenerate
+# series) beyond what hand-written example-based tests enumerate. Test-
+# only (no production import anywhere) -- deliberately bounded profiles
+# (max_examples capped), never left at Hypothesis's own unbounded
+# defaults, per this project's "no fake coverage / no meaningless test
+# explosion" discipline. sortedcontainers is its only transitive
+# dependency, already present in venv/ (a chromadb/langchain transitive
+# dep) before this addition.
 
 # Directly imported by ml_research/ (Phase 1 quantitative prediction
 # foundation, docs/research/ML_PHASE1_TRIPLE_BARRIER_BASELINE_

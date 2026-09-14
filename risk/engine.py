@@ -45,6 +45,28 @@ class RiskEngine:
         veto_reasons: list[VetoReason] = []
 
         structurally_valid = True
+
+        # Autonomous hardening cycle 7 (found via property-based testing,
+        # not theoretical): NaN/Inf anywhere here must fail closed via an
+        # explicit, named veto -- never rely on the incidental fact that
+        # every `<=`/`>=` comparison against NaN is False. Two real,
+        # reproduced defects this closes: (1) a NaN target_price slipped
+        # past every existing structural check below (none of them read
+        # target_price except the one `<=` comparison, which NaN always
+        # fails) and produced a fully APPROVED trade with a nonsensical
+        # target -- a silent unsafe-trade defect, the highest-priority
+        # class this campaign tracks. (2) a NaN/Inf reference_price,
+        # stop_price, or account.equity instead crashed evaluate() with
+        # an unhandled ValueError/OverflowError out of math.floor(),
+        # rather than returning a clean veto -- still fail-closed in
+        # effect (no trade), but via an undiagnosed crash instead of the
+        # RiskDecision contract every other rejection path honors.
+        if not all(math.isfinite(v) for v in (
+            signal.reference_price, signal.stop_price, signal.target_price, signal.risk_reward, account.equity,
+        )):
+            veto_reasons.append(VetoReason.NON_FINITE_VALUE)
+            structurally_valid = False
+
         if signal.side != Side.LONG:
             veto_reasons.append(VetoReason.INVALID_SIGNAL)
             structurally_valid = False

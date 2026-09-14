@@ -142,6 +142,31 @@ individual row with an impossible OHLC relationship (high below low,
 close outside `[low, high]`) at construction time, the same mechanism
 it already used for NaN rows.
 
+## Property-based testing and the executable failure matrix
+
+Autonomous hardening cycle 7 added two new, deliberately bounded testing
+layers alongside the existing example-based suite:
+
+- **`hypothesis`** (test-only dependency, pinned in `requirements.txt`):
+  a small number of properties derived directly from a function's own
+  documented contract (currently `risk/engine.py::RiskEngine.evaluate`
+  in `tests/test_risk_sizing_properties.py`), run with `max_examples`
+  capped and `derandomize=True` for full reproducibility -- never
+  unbounded fuzzing, never a substitute for example-based tests. Found
+  a real defect on first use: a NaN `target_price` silently authorized
+  a trade (see the "Safety invariants" section below).
+- **`tests/failure_injection/`**: a machine-readable failure registry
+  (`failure_matrix.yaml`) plus `test_matrix_integrity.py`, which asserts
+  on every regression run that every row's referenced test still exists
+  and is collectible -- turning "did we document this failure mode" into
+  something that fails CI on drift, rather than a prose claim that can
+  silently go stale (as `FINAL_FAILURE_MODE_ANALYSIS.md` itself once
+  did — see that document's entry #24). Each row carries an evidence
+  grade (A=real production execution, B=integration test with real
+  infrastructure, C=deterministic simulation/injection, D=static
+  inspection, E=assumption) so a claim's actual strength is never
+  overstated.
+
 ## Safety invariants (enforced, not just documented)
 
 - **Live order execution is structurally blocked** — see `SECURITY.md`.
@@ -162,3 +187,13 @@ it already used for NaN rows.
   caller, CLI or dashboard, goes through) emits a `logger.warning`, so
   the event is visible in a `--log-file`-backed log stream, not only by
   actively polling `health`/`readiness-check`.
+- **NaN/Infinity can never authorize a trade** — `RiskEngine.evaluate`
+  runs an explicit `math.isfinite()` guard across every safety-relevant
+  numeric input (`reference_price`/`stop_price`/`target_price`/
+  `risk_reward`/`account.equity`) before any other logic, raising a
+  dedicated `VetoReason.NON_FINITE_VALUE`. Found via property-based
+  testing (autonomous hardening cycle 7): a NaN `target_price`
+  previously slipped past every existing `<=`/`>=` structural check
+  (every comparison against NaN is `False`) and produced a fully
+  APPROVED trade with a nonsensical target — a real, reproduced defect,
+  not a theoretical one.
