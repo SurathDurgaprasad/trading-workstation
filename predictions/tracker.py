@@ -79,6 +79,55 @@ def create_prediction(
     )
 
 
+_INTRADAY_MAX_LOOKBACK_PERIOD = {
+    # Real-time strategy validation mission, Phase C -- empirically
+    # confirmed against live Yahoo Finance (not assumed from documentation):
+    # yf.Ticker(...).history(period="1y", interval="1m") returns a
+    # completely EMPTY frame (Yahoo's own error, surfaced only as a
+    # printed warning: "Only 8 days worth of 1m granularity data are
+    # allowed to be fetched per request"), which YahooFinanceProvider
+    # correctly turns into MarketDataError -> evaluate_prediction resolves
+    # it as INSUFFICIENT_DATA. That is SAFE (never a wrong resolution) but
+    # was previously a silent dead end: every prediction recorded via the
+    # live pipeline's default `--interval 1m` (live/prediction_recorder.py)
+    # could NEVER resolve through `python main.py evaluate`'s default
+    # `--period 1y`, defeating the whole point of recording it. This table
+    # is the fix: an intraday prediction.interval always overrides the
+    # caller's requested period with a period actually supported by Yahoo
+    # for that granularity (also empirically confirmed: 7d/1m, 60d/5m,
+    # 60d/15m all return real bars). A daily-or-longer prediction.interval
+    # is UNAFFECTED -- requested_period passes through unchanged, so the
+    # existing predict/shadow-run daily evidence path (interval="1d" by
+    # default) behaves exactly as it always has.
+    #
+    # This does not remove the underlying real-world limit: Yahoo simply
+    # does not retain 1-minute bars older than ~8 days at all, so a 1m
+    # prediction that goes unevaluated for longer than that window becomes
+    # permanently unresolvable (stuck at INSUFFICIENT_DATA forever, never
+    # a false TARGET_HIT/STOP_HIT). In practice this is not a binding
+    # constraint: `horizon_bars=20` at `interval="1m"` means the barrier
+    # check resolves or expires within 20 bars (20 minutes of market time)
+    # of the entry, so any `evaluate` run within days of a live paper
+    # session -- not weeks -- comfortably resolves it.
+    "1m": "7d",
+    "2m": "60d",
+    "5m": "60d",
+    "15m": "60d",
+    "30m": "60d",
+    "60m": "60d",
+    "90m": "60d",
+    "1h": "730d",
+}
+
+
+def resolution_period_for_interval(interval: str, *, requested_period: str) -> str:
+    """See `_INTRADAY_MAX_LOOKBACK_PERIOD`'s own docstring for the real,
+    empirically-confirmed Yahoo Finance limit this works around. Callers
+    of `evaluate_prediction` should pass THIS, not the raw CLI/default
+    `period`, as the `period=` argument."""
+    return _INTRADAY_MAX_LOOKBACK_PERIOD.get(interval, requested_period)
+
+
 ANOMALOUS_BAR_GAP_THRESHOLD = 0.5
 """Phase 36 -- this project integrates no stock-split/dividend
 adjustment source (YahooFinanceProvider fetches with auto_adjust=False).

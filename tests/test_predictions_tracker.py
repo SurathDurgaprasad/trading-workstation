@@ -7,7 +7,7 @@ from market.data_provider import OHLCV, MarketDataError, OHLCVBar
 from market_intelligence.models import CandidateScore
 from predictions.errors import PredictionUnavailableError
 from predictions.models import PredictionEvaluation, PredictionOutcomeState
-from predictions.tracker import create_prediction, evaluate_prediction, summarize_predictions
+from predictions.tracker import create_prediction, evaluate_prediction, resolution_period_for_interval, summarize_predictions
 from strategy.signal import ReasonCode, Side, Signal
 
 _START = datetime(2024, 1, 2)
@@ -63,8 +63,11 @@ def _signal(symbol: str = "AAPL", entry_price: float = 100.0, stop_price: float 
     )
 
 
-def _prediction(*, horizon_bars: int = 20, entry_price=100.0, stop_price=95.0, target_price=110.0):
-    return create_prediction(_decision(), _signal(entry_price=entry_price, stop_price=stop_price, target_price=target_price), horizon_bars=horizon_bars)
+def _prediction(*, horizon_bars: int = 20, entry_price=100.0, stop_price=95.0, target_price=110.0, interval: str = "1d"):
+    return create_prediction(
+        _decision(), _signal(entry_price=entry_price, stop_price=stop_price, target_price=target_price),
+        horizon_bars=horizon_bars, interval=interval,
+    )
 
 
 # --- create_prediction ------------------------------------------------------
@@ -420,3 +423,66 @@ def test_summarize_predictions_profit_factor_is_none_with_no_losses():
     evaluations = [_eval("p1", PredictionOutcomeState.TARGET_HIT, actual_return=0.10)]
     summary = summarize_predictions(evaluations)
     assert summary.profit_factor is None
+
+
+# Real-time strategy validation mission, Phase C -- these guard the real,
+# empirically-confirmed defect described in resolution_period_for_interval's
+# own docstring: `python main.py evaluate`'s default --period=1y silently
+# produces zero resolvable bars for every intraday-interval prediction
+# (real Yahoo Finance behavior, confirmed live against AAPL, not assumed).
+@pytest.mark.parametrize(
+    "interval,expected",
+    [
+        ("1m", "7d"),
+        ("2m", "60d"),
+        ("5m", "60d"),
+        ("15m", "60d"),
+        ("30m", "60d"),
+        ("60m", "60d"),
+        ("90m", "60d"),
+        ("1h", "730d"),
+    ],
+)
+def test_resolution_period_for_interval_overrides_intraday_intervals(interval, expected):
+    assert resolution_period_for_interval(interval, requested_period="1y") == expected
+
+
+@pytest.mark.parametrize("interval", ["1d", "1wk", "1mo"])
+def test_resolution_period_for_interval_passes_through_daily_or_longer_intervals(interval):
+    # The existing predict/shadow-run daily evidence path (interval="1d"
+    # by default) must be completely unaffected -- whatever --period the
+    # caller requested is exactly what evaluate_prediction receives.
+    assert resolution_period_for_interval(interval, requested_period="1y") == "1y"
+    assert resolution_period_for_interval(interval, requested_period="6mo") == "6mo"
+
+
+def test_resolution_period_for_interval_passes_through_an_unrecognized_interval():
+    # Fail open to the caller's own request rather than silently guessing
+    # at a period for an interval this table does not know about.
+    assert resolution_period_for_interval("3mo", requested_period="5y") == "5y"
+
+
+class _PeriodCapturingProvider:
+    """Records the exact `period` it was called with, so a test can prove
+    evaluate_prediction actually received the CORRECTED period, not just
+    that resolution_period_for_interval computes the right string in
+    isolation -- this is the guard against the fix being computed but
+    never actually wired into a real evaluate_prediction call."""
+
+    def __init__(self, ohlcv: OHLCV):
+        self._ohlcv = ohlcv
+        self.received_periods: list[str] = []
+
+    def fetch_ohlcv(self, symbol, *, period="1y", interval="1d"):
+        self.received_periods.append(period)
+        return self._ohlcv
+
+
+def test_evaluate_prediction_actually_receives_the_corrected_period_for_an_intraday_prediction():
+    provider = _PeriodCapturingProvider(_ohlcv("AAPL", [(101.0, 99.0), (112.0, 99.0)]))
+    prediction = _prediction(interval="1m")
+
+    period = resolution_period_for_interval(prediction.interval, requested_period="1y")
+    evaluate_prediction(prediction, provider=provider, period=period)
+
+    assert provider.received_periods == ["7d"]

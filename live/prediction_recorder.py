@@ -156,3 +156,60 @@ def record_prediction_for_signal(
     except Exception:  # noqa: BLE001 -- best-effort observability must never break the real trading loop
         logger.exception("prediction_recorder: failed to record a prediction for %s -- continuing the live session regardless.", signal.symbol)
         return None
+
+
+def evaluate_pending_predictions(
+    prediction_store: PredictionStore,
+    *,
+    provider,
+    requested_period: str = "1y",
+) -> int:
+    """Real-time strategy validation mission, Phase C -- closes the second
+    half of the gap this module's own docstring describes: recording a
+    prediction was only half of "predictions accumulate real evidence
+    without manual intervention" (mission Phase 13/Phase D §13 "resolve
+    previous predictions"). Before this, a recorded live prediction sat at
+    ACTIVE forever unless an operator remembered to separately run
+    `python main.py evaluate` -- this is the SAME batch-resolution logic
+    that command runs (predictions.tracker.evaluate_prediction, with
+    predictions.tracker.resolution_period_for_interval correcting the
+    fetch period for the live path's typically-intraday interval, see
+    that function's own docstring for the real, empirically-confirmed
+    Yahoo Finance limit it works around), called periodically from INSIDE
+    the paper-live loop itself instead of requiring a separate command.
+
+    Best-effort by construction, same posture as record_prediction_for_
+    signal above: a listing or per-prediction evaluation failure is
+    logged and isolated, never raised into the caller's real trading
+    loop, and never partially applied (each prediction's own save_
+    evaluation either fully succeeds or that one prediction is simply
+    skipped this cycle -- it stays ACTIVE and is retried the next time
+    this is called).
+
+    Returns the count of predictions successfully evaluated and
+    persisted this call (0 on a total listing failure), for the loop's
+    own status-line reporting -- never meaningful as a health signal on
+    its own (0 pending predictions is a completely normal steady state).
+    """
+    from predictions.tracker import evaluate_prediction, resolution_period_for_interval
+
+    try:
+        pending = prediction_store.list_predictions_needing_evaluation()
+    except Exception:  # noqa: BLE001 -- see module docstring: never break the real trading loop
+        logger.exception("prediction_recorder: failed to list pending predictions for periodic auto-evaluation -- skipping this cycle.")
+        return 0
+
+    evaluated = 0
+    for prediction in pending:
+        try:
+            period = resolution_period_for_interval(prediction.interval, requested_period=requested_period)
+            evaluation = evaluate_prediction(prediction, provider=provider, period=period)
+            prediction_store.save_evaluation(evaluation)
+            evaluated += 1
+        except Exception:  # noqa: BLE001 -- one prediction's failure must never abort the rest of the batch or the trading loop
+            logger.exception(
+                "prediction_recorder: periodic auto-evaluation failed for prediction %s (%s) -- continuing with the rest of the batch.",
+                prediction.prediction_id, prediction.symbol,
+            )
+            continue
+    return evaluated

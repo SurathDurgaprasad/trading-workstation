@@ -1049,13 +1049,26 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
     # observability bridge, never touching risk/sizing/approval/execution.
     processed = 0
     prediction_store = None
+    evaluation_provider = None
     try:
         if args.record_predictions:
             from predictions.store import PredictionStore
 
             prediction_store = PredictionStore(args.predictions_db or DEFAULT_PREDICTIONS_DB_PATH)
             print(f"PREDICTIONS: recording to {args.predictions_db or DEFAULT_PREDICTIONS_DB_PATH} (horizon={args.prediction_horizon_bars} bars)")
-        processed = _run_paper_live_loop(args, pipeline, engine, store, status_label, processed, prediction_store=prediction_store)
+            if args.evaluate_every_n_bars > 0:
+                # Phase C: a SEPARATE MarketDataProvider from the live bar
+                # feed above -- evaluate_pending_predictions fetches
+                # historical OHLCV (Yahoo, via the same _build_provider
+                # every research command uses) to resolve predictions
+                # against, regardless of what `--source` is driving the
+                # live loop itself (mock replay or Dhan).
+                evaluation_provider, _ = _build_provider(args)
+                print(f"PREDICTIONS: auto-evaluating every {args.evaluate_every_n_bars} bars.")
+        processed = _run_paper_live_loop(
+            args, pipeline, engine, store, status_label, processed,
+            prediction_store=prediction_store, evaluation_provider=evaluation_provider,
+        )
     except KeyboardInterrupt:
         print(f"\n[{status_label}] Interrupted by user (Ctrl+C) -- shutting down cleanly.")
     finally:
@@ -1084,7 +1097,11 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
     print("\nThis is still simulated trading. No real broker is connected. No real order can be placed.")
 
 
-def _run_paper_live_loop(args: argparse.Namespace, pipeline, engine, store, status_label: str, processed: int, *, prediction_store=None) -> int:
+def _run_paper_live_loop(
+    args: argparse.Namespace, pipeline, engine, store, status_label: str, processed: int,
+    *, prediction_store=None, evaluation_provider=None,
+) -> int:
+    bars_since_last_evaluation = 0
     while args.max_bars is None or processed < args.max_bars:
         result = pipeline.process_next()
         for expired_id in result.expired_signal_ids:
@@ -1116,6 +1133,16 @@ def _run_paper_live_loop(args: argparse.Namespace, pipeline, engine, store, stat
             continue  # feed alive, nothing new this poll -- not an error, don't spam output or count as a processed bar
 
         processed += 1
+
+        if prediction_store is not None and evaluation_provider is not None and args.evaluate_every_n_bars > 0:
+            bars_since_last_evaluation += 1
+            if bars_since_last_evaluation >= args.evaluate_every_n_bars:
+                bars_since_last_evaluation = 0
+                from live.prediction_recorder import evaluate_pending_predictions
+
+                evaluated = evaluate_pending_predictions(prediction_store, provider=evaluation_provider, requested_period=args.period)
+                if evaluated:
+                    print(f"  [PREDICTIONS] auto-evaluated {evaluated} outstanding prediction(s).")
 
         if result.kind == "KILL_SWITCH_ACTIVE":
             print(f"\n[{args.symbol}] bar#{processed:4d} {result.bar.timestamp}  KILL SWITCH ACTIVE -- signal suppressed, no order created.")
@@ -2066,7 +2093,7 @@ def run_predict_command(args: argparse.Namespace) -> None:
 
 def run_evaluate_command(args: argparse.Namespace) -> None:
     from predictions.store import PredictionStore
-    from predictions.tracker import evaluate_prediction, summarize_predictions
+    from predictions.tracker import evaluate_prediction, resolution_period_for_interval, summarize_predictions
 
     db_path = args.db or DEFAULT_PREDICTIONS_DB_PATH
     store = PredictionStore(db_path)
@@ -2082,7 +2109,8 @@ def run_evaluate_command(args: argparse.Namespace) -> None:
     for prediction in pending:
         logger.info("Evaluating prediction %s (%s)", prediction.prediction_id, prediction.symbol)
         try:
-            evaluation = evaluate_prediction(prediction, provider=provider, period=args.period)
+            period = resolution_period_for_interval(prediction.interval, requested_period=args.period)
+            evaluation = evaluate_prediction(prediction, provider=provider, period=period)
             store.save_evaluation(evaluation)
             print(f"{prediction.symbol:10s} {prediction.prediction_id[:12]}  {evaluation.outcome.value:18s} {evaluation.detail}")
         except Exception as exc:  # noqa: BLE001 -- one prediction's failure (an unexpected error beyond the MarketDataError evaluate_prediction already handles internally) must never abort evaluation of the rest of the batch, same posture as shadow-run's per-symbol isolation.
@@ -2122,6 +2150,7 @@ DEFAULT_FORECASTS_DB_PATH = PROJECT_ROOT / "data" / "direction_forecasts.db"
 def run_evaluate_forecasts_command(args: argparse.Namespace) -> None:
     from predictions.direction_forecast import evaluate_forecast, summarize_forecasts
     from predictions.direction_forecast_store import DirectionForecastStore
+    from predictions.tracker import resolution_period_for_interval
 
     db_path = args.db or DEFAULT_FORECASTS_DB_PATH
     store = DirectionForecastStore(db_path)
@@ -2137,7 +2166,17 @@ def run_evaluate_forecasts_command(args: argparse.Namespace) -> None:
     for forecast in pending:
         logger.info("Evaluating forecast %s (%s)", forecast.forecast_id, forecast.symbol)
         try:
-            evaluation = evaluate_forecast(forecast, provider=provider, period=args.period)
+            # Same Phase C fix as predictions/tracker.py's own evaluate
+            # commands (FINAL_FAILURE_MODE_ANALYSIS.md entry #41) -- this
+            # sibling forecast-evaluation path shares the identical
+            # provider.fetch_ohlcv(symbol, period=, interval=forecast.
+            # interval) shape, so it would hit the exact same real Yahoo
+            # Finance defect the moment any caller records a forecast at
+            # an intraday interval (create_forecast's own default is
+            # "1d" today, so this is currently latent, not active -- but
+            # defended proactively rather than left as a dormant trap).
+            period = resolution_period_for_interval(forecast.interval, requested_period=args.period)
+            evaluation = evaluate_forecast(forecast, provider=provider, period=period)
             store.save_evaluation(evaluation)
             status = "PENDING" if not evaluation.resolved else ("CORRECT" if evaluation.correct else ("N/A (NO_EDGE)" if evaluation.correct is None else "INCORRECT"))
             print(f"{forecast.symbol:10s} {forecast.forecast_id[:12]}  {forecast.direction.value:8s} {status:14s} {evaluation.detail}")
@@ -2520,7 +2559,7 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     from market_intelligence.store import ScanHistoryStore
     from predictions.errors import PredictionUnavailableError
     from predictions.store import PredictionStore
-    from predictions.tracker import create_prediction, evaluate_prediction, summarize_predictions
+    from predictions.tracker import create_prediction, evaluate_prediction, resolution_period_for_interval, summarize_predictions
     from research.news import YahooNewsProvider
     from research.sector import YahooSectorInfoProvider
     from research.store import ResearchStore
@@ -2770,7 +2809,8 @@ def run_shadow_run_command(args: argparse.Namespace) -> None:
     print(f"  {len(pending)} prediction(s) needing evaluation.")
     for prediction in pending:
         try:
-            evaluation = evaluate_prediction(prediction, provider=provider, period=args.period)
+            period = resolution_period_for_interval(prediction.interval, requested_period=args.period)
+            evaluation = evaluate_prediction(prediction, provider=provider, period=period)
             prediction_store.save_evaluation(evaluation)
             print(f"  {prediction.symbol:10s} {prediction.prediction_id[:12]}  {evaluation.outcome.value:18s} {evaluation.detail}")
         except Exception as exc:  # noqa: BLE001 -- one prediction's failure must never abort evaluation of the rest of the batch or skip the learning summary below, same posture as this run's own per-symbol scan/decide isolation above.
@@ -3814,6 +3854,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     paper_live_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-ledger path, only used with --record-predictions (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
     paper_live_parser.add_argument("--prediction-horizon-bars", type=int, default=20, help="Bars to monitor before an unresolved recorded prediction is marked EXPIRED (default: 20, matching predict/shadow-run's own default).")
+    paper_live_parser.add_argument(
+        "--evaluate-every-n-bars", type=int, default=20,
+        help="Only used with --record-predictions: automatically resolve outstanding predictions (same logic as `python main.py evaluate`) every N processed bars, so evidence accumulates without a separate manual step (default: 20; pass 0 to disable automatic evaluation and rely on a separate `evaluate` invocation instead).",
+    )
 
     dashboard_parser = subparsers.add_parser(
         "dashboard",

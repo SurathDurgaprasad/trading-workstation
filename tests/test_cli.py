@@ -1341,6 +1341,63 @@ def test_run_paper_live_command_without_the_flag_never_touches_predictions_db(tm
 
 
 @pytestmark_paper_live
+def test_run_paper_live_command_auto_evaluates_predictions_periodically_end_to_end(tmp_path, capsys):
+    """Real-time strategy validation mission, Phase C -- proves predictions
+    recorded during a paper-live run get resolved WITHOUT a separate
+    `python main.py evaluate` invocation, through the real CLI entrypoint
+    (--evaluate-every-n-bars, default 20). Real cached AAPL data end to
+    end; only network access is faked (cached data), matching every other
+    test in this file gated on pytestmark_paper_live."""
+    from predictions.store import PredictionStore
+
+    predictions_db = tmp_path / "predictions.db"
+    args = parse_args([
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--db", str(tmp_path / "paper.db"), "--state-db", str(tmp_path / "state.db"),
+        "--max-bars", "70", "--auto-approve", "--no-ai-explanation", "--freshness-multiplier", "1000000",
+        "--record-predictions", "--predictions-db", str(predictions_db), "--prediction-horizon-bars", "15",
+        "--evaluate-every-n-bars", "20",
+    ])
+    run_paper_live_command(args)
+    output = capsys.readouterr().out
+    assert "PREDICTIONS: auto-evaluating every 20 bars." in output
+
+    store = PredictionStore(predictions_db)
+    recorded = store.list_predictions()
+    all_evaluations = store.list_all_evaluations()
+    store.close()
+    assert len(recorded) >= 1
+    assert len(all_evaluations) >= 1, "at least one automatic evaluation must have been persisted without a separate `evaluate` invocation"
+
+
+@pytestmark_paper_live
+def test_run_paper_live_command_evaluate_every_n_bars_zero_disables_auto_evaluation(tmp_path, capsys):
+    """--evaluate-every-n-bars 0 is the documented opt-out -- predictions
+    are still recorded, but never automatically evaluated."""
+    from predictions.store import PredictionStore
+
+    predictions_db = tmp_path / "predictions.db"
+    args = parse_args([
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--db", str(tmp_path / "paper.db"), "--state-db", str(tmp_path / "state.db"),
+        "--max-bars", "70", "--auto-approve", "--no-ai-explanation", "--freshness-multiplier", "1000000",
+        "--record-predictions", "--predictions-db", str(predictions_db),
+        "--evaluate-every-n-bars", "0",
+    ])
+    run_paper_live_command(args)
+    output = capsys.readouterr().out
+    assert "auto-evaluating" not in output
+    assert "auto-evaluated" not in output
+
+    store = PredictionStore(predictions_db)
+    recorded = store.list_predictions()
+    all_evaluations = store.list_all_evaluations()
+    store.close()
+    assert len(recorded) >= 1, "recording itself must be unaffected by disabling auto-evaluation"
+    assert all_evaluations == []
+
+
+@pytestmark_paper_live
 def test_run_paper_live_command_kill_switch_activate_and_reset(tmp_path, capsys):
     state_db = tmp_path / "state.db"
 

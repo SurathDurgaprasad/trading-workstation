@@ -41,13 +41,13 @@ def _wire_fake_provider(monkeypatch):
     monkeypatch.setattr(cache_module, "CachedMarketDataProvider", lambda inner: inner)
 
 
-def _seed_forecast(db_path, *, label=DirectionLabel.UP, horizon_bars=3) -> str:
+def _seed_forecast(db_path, *, label=DirectionLabel.UP, horizon_bars=3, interval="1d") -> str:
     store = DirectionForecastStore(db_path)
     assessment = DirectionalAssessment(
         symbol="RELIANCE.NS", label=label, confidence=0.75,
         bullish_evidence=("Trend (+1.00)",), bearish_evidence=(), contradicting_evidence=(), unavailable_factors=(),
     )
-    forecast = DirectionForecastRecord.from_assessment(assessment, as_of=_AS_OF, reference_price=100.0, horizon_bars=horizon_bars)
+    forecast = DirectionForecastRecord.from_assessment(assessment, as_of=_AS_OF, reference_price=100.0, horizon_bars=horizon_bars, interval=interval)
     store.save_forecast(forecast)
     store.close()
     return forecast.forecast_id
@@ -77,3 +77,35 @@ def test_evaluate_forecasts_summarizes_no_edge_separately(tmp_path, capsys):
     assert "N/A (NO_EDGE)" in output
     assert "NO_EDGE resolved: 1" in output
     assert "Accuracy:         n/a" in output
+
+
+def test_evaluate_forecasts_uses_the_correct_period_for_an_intraday_forecast(tmp_path, monkeypatch):
+    """Phase C defensive fix (FINAL_FAILURE_MODE_ANALYSIS.md entry #41):
+    this sibling evaluation path shares predictions/tracker.py's real,
+    empirically-confirmed Yahoo Finance defect (period="1y" + an
+    intraday interval returns zero bars). create_forecast's own default
+    interval is "1d" today (this is currently a latent, not active,
+    defect) but the fix must still be genuinely wired, not merely
+    available -- proven here by seeding an intraday forecast directly."""
+    import backtesting.cache as cache_module
+    import market.data_provider as market_data_provider_module
+
+    class _CapturingProvider:
+        def __init__(self):
+            self.calls: list[tuple[str, str]] = []
+
+        def fetch_ohlcv(self, symbol, *, period="1y", interval="1d"):
+            self.calls.append((period, interval))
+            return OHLCV(symbol=symbol, interval=interval, bars=[])
+
+    capturing = _CapturingProvider()
+    monkeypatch.setattr(market_data_provider_module, "get_market_data_provider", lambda: capturing)
+    monkeypatch.setattr(cache_module, "CachedMarketDataProvider", lambda inner: inner)
+
+    db_path = tmp_path / "forecasts.db"
+    _seed_forecast(db_path, interval="1m")
+
+    args = parse_args(["evaluate-forecasts", "--db", str(db_path)])
+    run_evaluate_forecasts_command(args)
+
+    assert capturing.calls == [("7d", "1m")]
