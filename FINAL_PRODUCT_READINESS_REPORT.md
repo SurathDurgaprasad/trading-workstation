@@ -4,7 +4,7 @@ Branch: `final-product-hardening`, merged forward to `main` after every
 cycle (`main == origin/main` verified at every commit). Current HEAD:
 `4cba014`. Companion documents: `FINAL_PRODUCT_CAPABILITY_MATRIX.md`
 (the authoritative per-requirement evidence table this report
-summarizes), `FINAL_FAILURE_MODE_ANALYSIS.md` (46 numbered entries),
+summarizes), `FINAL_FAILURE_MODE_ANALYSIS.md` (48 numbered entries),
 `TRADING_STRATEGY_READINESS.md` (the seven-dimension strategy-readiness
 breakdown this report's Sections 7/11 summarize), `tests/
 failure_injection/failure_matrix.yaml` (110 executable rows),
@@ -16,7 +16,7 @@ content — clean-install proof, Claude-Code-independence proof, the
 original documentation suite — remains true and is not re-litigated
 here). Since that version, a **35-cycle autonomous adversarial
 hardening campaign** ran against this same codebase, followed by a
-further **"real-time strategy validation" mission** (entries #40-#46 of
+further **"real-time strategy validation" mission** (entries #40-#48 of
 `FINAL_FAILURE_MODE_ANALYSIS.md`) that built the missing bridge between
 the live/paper-live path and this project's existing prediction-ledger/
 outcome-resolution/statistical-evaluation machinery, and found and
@@ -95,7 +95,7 @@ default) was found and fixed. Cycle 34's own "accepted limitation"
 (`live/pipeline.py`'s unbounded indicator buffer) is now a genuine,
 proven-equivalent, benchmarked fix, not a documented limitation. Full
 detail: `FINAL_PRODUCT_CAPABILITY_MATRIX.md`, `FINAL_FAILURE_MODE_
-ANALYSIS.md` entries #40-#46.
+ANALYSIS.md` entries #40-#48.
 
 ## 3. What is actually verified?
 
@@ -135,6 +135,17 @@ ANALYSIS.md` entries #40-#46.
   reasoned about — a manually-abandoned mid-transaction write (the exact
   state a SIGKILL leaves) produces zero partial state, and a committed
   write survives an abrupt, non-graceful connection loss. See entry #46.
+- **Clean install**: re-verified for the first time since Cycle 18, this
+  mission — a genuinely independent `venv` (Python 3.12.10, a different
+  minor version than the dev venv's 3.14), `pip install -r
+  requirements.txt` unmodified, then a real end-to-end smoke run:
+  `health`, `readiness-check`, this mission's own 151 new/modified
+  tests, and a full `paper-live --record-predictions` → `evaluate` cycle
+  against real cached AAPL data (7 predictions recorded, all 7 resolved:
+  3 TARGET_HIT, 4 STOP_HIT). One real, precisely root-caused installation
+  artifact was found and correctly scoped as NOT an application defect
+  (a Windows `MAX_PATH` limitation in an unrelated transitive dependency,
+  triggered only by unusually deep install paths — see entry #48).
 - **Mutation testing**: systematic, repeated, and — critically —
   sometimes **failed on the first attempt and was caught**: cycle 24's
   17-mutant campaign against `risk/engine.py` (all killed); cycles 27
@@ -263,7 +274,7 @@ This conclusion is preserved unchanged.
 **READY.**
 
 35 adversarial hardening cycles, plus a further "real-time strategy
-validation" mission (entries #40-#46); 2420 passing tests (final
+validation" mission (entries #40-#48); 2421 passing tests (final
 regression, 0 failed); a 110-row executable failure-injection matrix; 46
 documented, evidence-graded failure-mode entries; systematic mutation
 testing throughout, including this mission's own new work (period-
@@ -359,7 +370,7 @@ make and did not make.
 | Dhan live tick reception never verified | MEDIUM (was: also REST/WebSocket connectivity, now closed) | Real-account tick-streaming behavior (real rate limits, real malformed frames, sustained-connection edge cases) unproven; REST auth + WebSocket connectivity ARE now live-verified (entry #45) | Extensive simulated-protocol testing; structurally cannot place real orders even if data misbehaves; a re-run during real market hours would close the remaining gap | Yes, for a paper-only deployment |
 | No demonstrated trading edge | HIGH (to any capital-deployment decision), N/A to engineering safety | A live/paper deployment expecting profit would be unsupported by evidence | Verdict is surfaced live by the CLI itself, not hidden; `TRADING_STRATEGY_READINESS.md` states it explicitly across every relevant dimension | Yes, as long as no capital is deployed on this basis |
 | Dashboard has no authentication | LOW–MEDIUM if exposed beyond loopback | Unauthorized access to a locally-reachable dashboard | Documented single-operator/loopback threat model | Yes, for the stated deployment model only |
-| Fresh clean-install not re-run this specific cycle | LOW | Small chance of an undetected install-time regression | `requirements.txt` confirmed unchanged since the last full clean-install verification (cycle 18); ~20+ full-suite runs on the existing venv across this campaign and this mission, all passing | Yes |
+| Clean install on an unusually deep Windows install path can hit a `langsmith`/`xxhash` `MAX_PATH` DLL-load failure | LOW | `ollama` reports DEGRADED via a DLL error instead of the normal "not reachable" message, and pytest's own plugin autoload can crash collection, ONLY when installed under an install path within a few characters of Windows' 260-char `MAX_PATH` limit | **Re-verified this mission with a genuine fresh install** (entry #48): root-caused to an unrelated `langsmith` transitive dependency, not this project's own code; the project's own real dev venv path (155 chars) is unaffected; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` works around it for tests specifically | Yes -- avoid extremely deep install paths; not a code defect |
 | Live prediction calibration sample size — research path (13, 0 resolved) AND live path (0 predictions, 0 sessions run) | N/A to safety, HIGH to any calibration claim | No live accuracy claim can currently be supported for either source | None needed — no such claim is made; the live-path machinery to accumulate this evidence is now complete and verified (entries #40/#41/#46) | Yes |
 | No GST/stamp duty in the India cost-model preset | LOW | `--cost-model india_nse_intraday_2026` slightly understates real costs even when explicitly opted into | Documented, disclosed in the preset's own docstring and every startup print | Yes |
 
@@ -432,6 +443,14 @@ not assumed from prior documentation:
 9. Live Dhan tick reception has not been verified end-to-end — REST
    authentication and WebSocket connectivity are now live-verified
    (entry #45), but the one real test ran outside market hours.
+10. Installing this project at an unusually deep Windows filesystem path
+    (within a few characters of the 260-char `MAX_PATH` limit) can
+    trigger a DLL-load failure in an unrelated `langsmith` transitive
+    dependency (`ollama` shows DEGRADED via a DLL error instead of the
+    normal message; pytest's plugin autoload can crash). Re-verified
+    this mission (entry #48) as NOT a defect in this project's own code
+    — the project's own real install path is well under the limit and
+    unaffected; disclosed as installation guidance.
 
 None of the above represent unsafe behavior. Live order execution
 remains structurally blocked; the deterministic risk/decision core is
