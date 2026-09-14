@@ -762,3 +762,17 @@
   test: tests/test_dhan_pipeline_integration.py::test_an_in_process_reconnect_rejects_a_replayed_tick_through_the_full_pipeline
   evidence_grade: B
   note: "Closes a real end-to-end coverage gap: the existing duplicate-bar test in this file simulated a BRAND NEW source object (a process restart), not an actual in-process WebSocket reconnect (verified via main.py that production constructs exactly one DhanMarketDataSource for the process lifetime, so reconnects happen within that same instance). Process note: mutation-testing this new test (disabling the late/out-of-order guard) revealed it initially survived -- the assertion only checked bar.open, which a corrupted late-tick merge never touches (open is seeded once, never revisited); high/low/close are what actually get corrupted. Strengthened to assert the full OHLC, with the replayed tick's price deliberately chosen to make any corruption unmissable; the identical mutation now reliably fails with the exact corrupted value visible in the assertion diff. The second instance in two consecutive cycles of this campaign's own mutation discipline catching an initially-too-weak test."
+
+- id: FI-SCHEDULER-RECLAIM-MID-FLIGHT-NEVER-DUPLICATES-REAL-ORDER
+  component: scheduler_runner
+  failure: "a scheduler run submits a REAL paper order via paper_execute=True, then is reclaimed mid-flight (another process/tick decides it is stale while it is still doing real work); a later retry of the SAME due slot regenerates the IDENTICAL deterministic signal from unchanged market data"
+  injection_method: "monkeypatches _execute_slot to call reclaim_stale_locks(staleness_seconds=0) from INSIDE itself before the real slot logic runs (the existing cycle-8 mid-flight-reclaim test pattern), now combined with paper_execute=True so a real submit_signal() call happens inside the reclaimed window; followed by a genuine second run_tick call for the same due slot"
+  expected:
+    detection: true
+    trade_authorization: N/A -- idempotency/duplicate-execution finding, not a new-trade-authorization one
+    safe_response: "NEGATIVE AUDIT, autonomous hardening cycle 29 -- exactly one JournalEntry exists after both calls, with the identical signal_id. submit_signal()'s own signal_id-keyed idempotency (cycle 15) composes correctly with the scheduler's own reclaim/retry mechanism (cycle 8) -- proven wired together end-to-end, not just separately."
+    recovery: N/A -- no duplicate ever occurs to recover from
+    safety_invariant: NO_UNAUTHORIZED_DUPLICATE_EXECUTION
+  test: tests/test_scheduler_runner.py::test_a_scheduler_run_reclaimed_mid_flight_after_submitting_a_real_order_is_never_duplicated_by_the_retry
+  evidence_grade: B
+  note: "Real execution through run_tick -> _execute_slot -> main.run_shadow_run_command -> submit_signal(), no mocking of the execution path itself (only market/news/sector data providers are faked, this test file's own pre-existing convention). Honest mutation-testing limitation: disabling submit_signal()'s front-door idempotency check did NOT make this test fail -- the DB-level UNIQUE constraint + exception-handling back door (cycle 15) independently prevented the duplicate, a genuine defense-in-depth finding. This test's real contribution is proving the SCHEDULER-LEVEL composition (deterministic signal regeneration + correct due-slot retry eligibility after RECLAIMED status), not re-proving submit_signal()'s own already-mutation-tested idempotency."

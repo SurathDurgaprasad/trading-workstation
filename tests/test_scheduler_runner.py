@@ -509,6 +509,77 @@ def test_paper_execute_is_threaded_through_and_submits_a_real_pending_order(tmp_
     assert len(entries) == 1  # a real paper order was actually submitted this tick
 
 
+def test_a_scheduler_run_reclaimed_mid_flight_after_submitting_a_real_order_is_never_duplicated_by_the_retry(tmp_path, run_store, monkeypatch):
+    """Autonomous hardening cycle 29 -- combines two SEPARATELY-proven
+    mechanisms (scheduler reclaim correctness, cycle 8; submit_signal
+    idempotency, cycle 15) into the ONE cross-system scenario neither
+    individual test covers: a scheduler run submits a REAL paper order,
+    then gets reclaimed mid-flight (process presumed crashed from
+    another tick's point of view) -- does a LATER retry of the SAME due
+    slot, which necessarily regenerates the IDENTICAL deterministic
+    signal from this fixture's fixed fake market data, create a SECOND
+    real order, or correctly recognize it as the same logical trade?
+
+    Mirrors test_run_tick_handles_being_reclaimed_mid_flight_on_the_
+    success_path's own monkeypatch technique (reclaim_stale_locks called
+    from INSIDE _execute_slot, simulating another process reclaiming
+    this run while it is still doing real work) but goes one step
+    further: paper_execute=True, so real signal generation and a real
+    submit_signal() call happen inside that reclaimed window, followed
+    by a genuine SECOND run_tick call for the same due slot."""
+    import scheduler.runner as runner_module
+
+    real_execute_slot = runner_module._execute_slot
+
+    def _execute_and_get_reclaimed(due, **kwargs):
+        run_store.reclaim_stale_locks(staleness_seconds=0, now=datetime.now(timezone.utc))
+        return real_execute_slot(due, **kwargs)
+
+    monkeypatch.setattr(runner_module, "_execute_slot", _execute_and_get_reclaimed)
+
+    paper_db = tmp_path / "paper.db"
+    state_db = tmp_path / "state.db"
+    first = run_tick(
+        schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", benchmark="",
+        initial_capital=20_000.0, paper_db=str(paper_db), paper_execute=True, state_db=str(state_db),
+        now=_TRADING_TIME, **_db_paths(tmp_path),
+    )
+    assert first.ran is True
+    assert run_store.get_run(first.run_id).status == RunStatus.RECLAIMED  # reclaimed mid-flight, not COMPLETED
+
+    from paper.store import PaperStore
+
+    store = PaperStore(paper_db)
+    entries_after_first = store.list_journal_entries()
+    store.close()
+    assert len(entries_after_first) == 1  # the real order still committed despite the mid-flight reclaim
+
+    # RECLAIMED (not COMPLETED) means has_completed_today() is still
+    # False for this slot/date -- a later tick correctly still considers
+    # it due, exactly the retry a real crashed-scheduler-run scenario
+    # would produce. Restore the normal (non-reclaiming) _execute_slot
+    # for this second call -- only the FIRST attempt simulates the
+    # mid-flight crash.
+    monkeypatch.setattr(runner_module, "_execute_slot", real_execute_slot)
+    second = run_tick(
+        schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", benchmark="",
+        initial_capital=20_000.0, paper_db=str(paper_db), paper_execute=True, state_db=str(state_db),
+        now=_TRADING_TIME + timedelta(minutes=1), **_db_paths(tmp_path),
+    )
+    assert second.ran is True
+    assert run_store.get_run(second.run_id).status == RunStatus.COMPLETED
+
+    store = PaperStore(paper_db)
+    entries_after_second = store.list_journal_entries()
+    store.close()
+    # The SAME fixed fake market data regenerates the IDENTICAL
+    # deterministic signal -- submit_signal()'s own signal_id-keyed
+    # idempotency (cycle 15) must recognize this as the SAME logical
+    # trade, not create a second real order.
+    assert len(entries_after_second) == 1, f"a scheduler retry after a mid-flight reclaim must never duplicate the real order: {entries_after_second}"
+    assert entries_after_second[0].signal_id == entries_after_first[0].signal_id
+
+
 def test_max_holding_bars_is_threaded_through_to_the_shadow_run_slot(tmp_path, run_store, monkeypatch):
     """--max-holding-bars passed to run_tick must reach the underlying
     shadow_run slot's `shadow-run --max-holding-bars` invocation, exactly
