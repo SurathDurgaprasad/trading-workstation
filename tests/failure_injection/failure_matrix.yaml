@@ -510,6 +510,32 @@
   test: tests/test_mcp_paper.py::test_paper_trade_signal_tool_rejects_a_non_finite_signal_cleanly
   evidence_grade: B
 
+- id: FI-CONFIG-SCHEDULE-MALFORMED
+  component: scheduler_config
+  failure: "a scheduler --config YAML file with a slot missing a required key, an unparseable time string, an unrecognized action, or a non-mapping slot entry"
+  injection_method: "write a real temp YAML file with each named malformation and call ScheduleConfig.from_yaml_file on it"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "REAL DEFECT found and fixed in autonomous hardening cycle 12: every one of these previously raised a raw, unwrapped KeyError/TypeError/ValueError straight out of from_yaml_file. Now every slot-construction failure raises the SAME SchedulerConfigurationError, naming the slot's position (slots[N]) and the underlying cause -- the same clear-diagnostic contract the pre-existing logical checks (inverted window, non-positive frequency_minutes) already had."
+    recovery: manual (operator fixes the YAML file)
+    safety_invariant: FAILED_STARTUP_GATE_NO_TRADE
+  test: tests/test_scheduler_config.py::test_from_yaml_file_rejects_a_slot_missing_the_after_key
+  evidence_grade: B
+
+- id: FI-CONFIG-SCHEDULE-CLI-SURFACE
+  component: main_cli
+  failure: "a malformed --config file's SchedulerConfigurationError reaching main()'s own top-level exception handler"
+  injection_method: "a real subprocess-equivalent call to main.main() (sys.argv monkeypatched) with a --config file containing an inverted before/after window"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "REAL DEFECT found and fixed in autonomous hardening cycle 12: SchedulerConfigurationError was not in main.py's _CONTROLLED_ERRORS tuple, so it crashed the ENTIRE CLI invocation with a full raw Python traceback instead of the clean 'Schedule failed: <message>' every other known configuration/input error type already receives. Now added to _CONTROLLED_ERRORS (a cheap, dependency-free import -- no import-cost regression)."
+    recovery: manual (operator fixes the YAML file)
+    safety_invariant: FAILED_STARTUP_GATE_NO_TRADE
+  test: tests/test_cli_schedule.py::test_a_malformed_schedule_config_file_produces_a_clean_cli_error_not_a_traceback
+  evidence_grade: B
+
 # --- Expand over subsequent cycles ------------------------------------------
 #
 # NOT yet in the matrix (deliberately -- honest about scope, not padded
@@ -520,8 +546,9 @@
 # test convention does -- FastMCP's own JSON-schema argument validation,
 # exercised over the real stdio transport, is a third-party library
 # concern already covered by that library's own test suite, not
-# re-verified here), configuration adversarial scenarios (missing/
-# invalid config values), and cache adversarial scenarios (stale/corrupt/
-# partial cache). Add one row at a time, each backed by a real test, in
-# priority order -- never pad this file with a row whose `test` field
-# does not point at real, passing, collectible coverage.
+# re-verified here), market_data.universe.MarketUniverse.from_yaml_file's
+# own adversarial-input coverage (a similar, not-yet-audited config-file
+# boundary), and cache adversarial scenarios (stale/corrupt/partial
+# cache). Add one row at a time, each backed by a real test, in priority
+# order -- never pad this file with a row whose `test` field does not
+# point at real, passing, collectible coverage.

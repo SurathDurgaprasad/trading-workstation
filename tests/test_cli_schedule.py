@@ -213,6 +213,43 @@ def test_schedule_tick_skip_prints_reason_not_a_traceback(tmp_path, capsys):
     assert "trading day" in output
 
 
+# --- autonomous hardening cycle 12: a malformed --config file must produce ---
+# --- a clean CLI error, not a raw traceback, all the way through main() -----
+
+
+def test_a_malformed_schedule_config_file_produces_a_clean_cli_error_not_a_traceback(tmp_path, capsys, monkeypatch):
+    """Real, reachable defect found via config-adversarial testing: a
+    malformed --config YAML file (here, an inverted before/after window)
+    raised SchedulerConfigurationError from _load_schedule_config --
+    called BEFORE schedule tick/loop ever reach the startup gate or
+    run_tick's own try/except, and (before this cycle's fix)
+    SchedulerConfigurationError was not in main.py's _CONTROLLED_ERRORS,
+    so it crashed the whole CLI invocation with a full raw traceback
+    instead of the same clean "<Command> failed: <message>" every other
+    known configuration/input error already gets."""
+    import main as main_module
+
+    config_path = tmp_path / "bad_schedule.yaml"
+    config_path.write_text(
+        "slots:\n"
+        "  - name: bad_slot\n"
+        "    after: '15:00'\n"
+        "    before: '09:00'\n"
+        "    action: shadow_run\n"
+    )
+    argv = ["schedule", "tick", "--symbols", "AAPL", "--config", str(config_path), *_db_args(tmp_path)]
+    monkeypatch.setattr("sys.argv", ["main.py", *argv])
+
+    with pytest.raises(SystemExit) as exc_info:
+        main_module.main()
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "Schedule failed" in err
+    assert "strictly after" in err  # the underlying, actionable message is preserved
+    assert "Traceback" not in err  # never a raw traceback for a known, controlled error
+
+
 def test_schedule_status_check_integrity_prints_ok_and_size(tmp_path, capsys):
     tick_args = parse_args(["schedule", "tick", "--symbols", "AAPL", "--benchmark", "", "--now", _TRADING_TIME, *_db_args(tmp_path)])
     run_schedule_command(tick_args)

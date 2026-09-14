@@ -29,6 +29,7 @@ from llm.errors import ModelNotAvailableError, OllamaUnavailableError
 from market.data_provider import MarketDataError
 from predictions.errors import PredictionUnavailableError
 from rag.errors import RagStoreNotFoundError
+from scheduler.errors import SchedulerConfigurationError
 from risk.config import RiskConfig
 from risk.sizing import SizingUnavailableError
 from state import TradingState
@@ -62,6 +63,17 @@ _CONTROLLED_ERRORS = (
     InstrumentNotFoundError,
     SizingUnavailableError,
     PredictionUnavailableError,
+    # Autonomous hardening cycle 12: a real, reachable gap found via
+    # config-adversarial testing -- a malformed `--config` YAML file
+    # (e.g. an inverted before/after window) raised
+    # SchedulerConfigurationError, a plain Exception subclass (not a
+    # ValueError), from _load_schedule_config -- called BEFORE `schedule
+    # tick`/`schedule loop` even reach the startup gate or run_tick's own
+    # try/except. Uncaught here, it crashed with a full raw traceback
+    # instead of this handler's clean "<Command> failed: <message>" --
+    # exactly the "clear diagnostic" contract every other known
+    # configuration/input error in this list already gets.
+    SchedulerConfigurationError,
 )
 
 

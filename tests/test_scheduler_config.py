@@ -191,3 +191,64 @@ def test_from_yaml_file_rejects_an_inverted_window_with_a_clear_error():
         )
         with pytest.raises(SchedulerConfigurationError, match="strictly after"):
             ScheduleConfig.from_yaml_file(path)
+
+
+# --- autonomous hardening cycle 12: structurally malformed YAML -------------
+#
+# Real, reachable gap found via config-adversarial testing: every scenario
+# below previously raised a raw KeyError/TypeError/ValueError straight out
+# of from_yaml_file, unwrapped -- and (see tests/test_cli.py's companion
+# test) was NOT in main.py's _CONTROLLED_ERRORS, so it crashed the CLI with
+# a full raw traceback instead of a clear "Schedule failed: ..." message.
+
+
+def test_from_yaml_file_rejects_a_slot_missing_the_name_key():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "schedule.yaml"
+        path.write_text("slots:\n  - after: '09:00'\n    action: shadow_run\n")
+        with pytest.raises(SchedulerConfigurationError, match="slots\\[0\\]"):
+            ScheduleConfig.from_yaml_file(path)
+
+
+def test_from_yaml_file_rejects_a_slot_missing_the_after_key():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "schedule.yaml"
+        path.write_text("slots:\n  - name: bad_slot\n    action: shadow_run\n")
+        with pytest.raises(SchedulerConfigurationError, match="slots\\[0\\]"):
+            ScheduleConfig.from_yaml_file(path)
+
+
+def test_from_yaml_file_rejects_a_malformed_time_string():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "schedule.yaml"
+        path.write_text("slots:\n  - name: bad_slot\n    after: 'not-a-time'\n    action: shadow_run\n")
+        with pytest.raises(SchedulerConfigurationError, match="slots\\[0\\]"):
+            ScheduleConfig.from_yaml_file(path)
+
+
+def test_from_yaml_file_rejects_an_unrecognized_action():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "schedule.yaml"
+        path.write_text("slots:\n  - name: bad_slot\n    after: '09:00'\n    action: launch_missiles\n")
+        with pytest.raises(SchedulerConfigurationError, match="slots\\[0\\]"):
+            ScheduleConfig.from_yaml_file(path)
+
+
+def test_from_yaml_file_rejects_a_slot_entry_that_is_not_a_mapping():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "schedule.yaml"
+        path.write_text("slots:\n  - 'just a string, not a mapping'\n")
+        with pytest.raises(SchedulerConfigurationError, match="slots\\[0\\]"):
+            ScheduleConfig.from_yaml_file(path)
+
+
+def test_from_yaml_file_names_the_correct_slot_index_when_a_later_one_is_bad():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "schedule.yaml"
+        path.write_text(
+            "slots:\n"
+            "  - name: good_slot\n    after: '09:00'\n    action: shadow_run\n"
+            "  - name: bad_slot\n    action: shadow_run\n"  # missing 'after'
+        )
+        with pytest.raises(SchedulerConfigurationError, match="slots\\[1\\]"):
+            ScheduleConfig.from_yaml_file(path)

@@ -149,15 +149,34 @@ class ScheduleConfig:
         if not raw_slots:
             return cls(holidays=holidays)
 
-        slots = tuple(
-            ScheduleSlot(
-                name=item["name"],
-                after=_parse_time(item["after"]),
-                before=_parse_time(item["before"]) if item.get("before") is not None else None,
-                frequency_minutes=item.get("frequency_minutes"),
-                action=SlotAction(item.get("action", SlotAction.SHADOW_RUN.value)),
-                enabled=item.get("enabled", True),
-            )
-            for item in raw_slots
-        )
-        return cls(slots=slots, holidays=holidays)
+        slots = []
+        for i, item in enumerate(raw_slots):
+            # Autonomous hardening cycle 12: a real, reachable config-
+            # adversarial gap -- a missing required key (a plain dict
+            # KeyError) or a slot entry that isn't a mapping at all (a
+            # TypeError) previously escaped this function entirely
+            # unwrapped, reaching main.py's top-level handler as an
+            # UNRECOGNIZED error type and crashing with a raw traceback
+            # instead of a clear, actionable configuration message --
+            # exactly the class of failure ScheduleSlot.__post_init__'s
+            # own logical-validation guard already exists to prevent for
+            # inverted windows/non-positive frequency, just not yet for
+            # structurally malformed YAML. Every parsing failure for one
+            # slot now raises the SAME SchedulerConfigurationError,
+            # naming the slot's position and the underlying cause.
+            try:
+                slots.append(ScheduleSlot(
+                    name=item["name"],
+                    after=_parse_time(item["after"]),
+                    before=_parse_time(item["before"]) if item.get("before") is not None else None,
+                    frequency_minutes=item.get("frequency_minutes"),
+                    action=SlotAction(item.get("action", SlotAction.SHADOW_RUN.value)),
+                    enabled=item.get("enabled", True),
+                ))
+            except SchedulerConfigurationError:
+                raise  # already a clear, typed error (e.g. from __post_init__) -- pass through unchanged
+            except (KeyError, TypeError, ValueError) as exc:
+                raise SchedulerConfigurationError(
+                    f"slots[{i}] ({item!r}) is malformed: {type(exc).__name__}: {exc}"
+                ) from exc
+        return cls(slots=tuple(slots), holidays=holidays)
