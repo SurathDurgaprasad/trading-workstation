@@ -165,6 +165,7 @@ class LiveSimPipeline:
 
         if self.state_store is not None:
             self._restore_pending_approvals()
+            self._reconcile_orphaned_claims()
 
     def _restore_pending_approvals(self) -> None:
         for record in self.state_store.list_pending():
@@ -179,6 +180,67 @@ class LiveSimPipeline:
                 requested_quantity=record.requested_quantity, strategy_version=record.strategy_version,
                 risk_config_version=record.risk_config_version,
             )
+
+    def _reconcile_orphaned_claims(self) -> None:
+        """Autonomous hardening cycle 26: closes the crash boundary
+        between approve_pending()'s CAS claim (update_decision, cycle 20)
+        and its own finalize_decision() call. If the process dies in that
+        window, the persisted row is stuck at HUMAN_APPROVED forever --
+        list_pending() deliberately excludes it (a decided row is not
+        "still pending"), so nothing would ever automatically re-run
+        approve_pending() on it. Left alone, this is an ambiguous,
+        unobservable orphan; this method makes the outcome explicit
+        instead, using the one fact that IS always determinable: whether
+        submit_signal()'s own atomic transaction committed.
+
+        Two cases, both closed WITHOUT ever calling submit_signal() again
+        -- this project's own standing rule is that a persisted
+        HUMAN_APPROVED state is never safe to replay into a NEW execution
+        attempt without a fresh human decision (see cycle 25's identical
+        posture for the kill-switch race, and this method's own
+        docstring below for why a second submit_signal() call would be
+        unsafe even though it happens to be idempotent by signal_id):
+
+        1. A JournalEntry for this signal_id already exists: submit_signal()
+           DID commit before the crash (PaperTradingEngine._submit_signal_
+           transaction is one atomic SQLite transaction -- a partial
+           commit is not possible) -- the execution outcome is not
+           ambiguous, only UNRECORDED here. Pure bookkeeping catch-up:
+           record the outcome that already, provably happened.
+        2. No JournalEntry exists: submit_signal() never committed. Marked
+           as a real, final, auditable RISK_REJECTED outcome (reusing the
+           existing legal HUMAN_APPROVED -> RISK_REJECTED transition, no
+           new state machine change) rather than left silently stuck --
+           an operator who wants this trade must generate and approve a
+           fresh signal, not have a crashed one silently resurrected."""
+        for record in self.state_store.list_orphaned_claims():
+            history = [(SignalLifecycleState(s), datetime.fromisoformat(ts)) for s, ts in record.history]
+            lifecycle = SignalLifecycle(
+                signal_id=record.signal_id, require_human_approval=True,
+                state=SignalLifecycleState(record.state), history=history,
+            )
+            now = self._clock()
+            existing = self.engine.store.find_journal_entry_by_signal_id(record.signal_id)
+            if existing is not None:
+                was_approved = existing.outcome.value.startswith("APPROVED")
+                final_state = SignalLifecycleState.EXECUTED if was_approved else SignalLifecycleState.RISK_REJECTED
+                lifecycle.transition_to(final_state, now=now)
+                approved_quantity = None
+                if existing.risk_decision_id:
+                    redecision = self.engine.store.get_risk_decision(existing.risk_decision_id)
+                    if redecision and redecision.position_size:
+                        approved_quantity = redecision.position_size.quantity
+                self.state_store.finalize_decision(
+                    record.signal_id, state=lifecycle.state.value, history=lifecycle.history,
+                    approved_quantity=approved_quantity, final_execution_result=existing.outcome.value,
+                )
+            else:
+                lifecycle.transition_to(SignalLifecycleState.RISK_REJECTED, now=now)
+                self.state_store.finalize_decision(
+                    record.signal_id, state=lifecycle.state.value, history=lifecycle.history,
+                    approved_quantity=None, final_execution_result="ORPHANED_CLAIM_ABANDONED_AFTER_CRASH_NO_ORDER_CREATED",
+                )
+            self.lifecycles[record.signal_id] = lifecycle
 
     # -- kill switch (delegates entirely to state_store; a no-op without one) ---
 

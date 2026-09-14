@@ -560,3 +560,170 @@ def test_a_real_concurrent_kill_switch_activation_during_approve_pending_never_c
     order_exists = final_store.get_pending_order("AAPL") is not None
     final_store.close()
     assert not order_exists, "a kill switch activated during approve_pending's own CAS-claim-to-execution window must never let an order through"
+
+
+def test_a_crash_after_submit_signal_commits_but_before_finalize_decision_is_reconciled_not_resurrected(tmp_path):
+    """Autonomous hardening cycle 26 -- the single most dangerous crash
+    boundary this campaign has attacked: submit_signal()'s own atomic
+    transaction commits (a REAL PaperOrder + JournalEntry now exist),
+    then the process dies BEFORE approve_pending()'s own follow-up
+    finalize_decision() call ever runs. The persisted pending_approvals
+    row is left stuck at HUMAN_APPROVED -- list_pending() deliberately
+    excludes it (a decided row is not "still pending"), so nothing would
+    ever automatically re-run approve_pending() on it (no duplicate-
+    execution risk), but nothing reconciled the record either, until this
+    cycle's LiveSimPipeline._reconcile_orphaned_claims.
+
+    Reproduced directly against real temp SQLite files, not mocks: the
+    persisted row is moved to HUMAN_APPROVED by direct SQL (simulating
+    the CAS claim having committed, exactly cycle 20's own precedent for
+    simulating this class of crash point), and submit_signal() is called
+    directly (simulating it having ALREADY run) -- finalize_decision() is
+    deliberately never called, simulating the crash. A genuinely FRESH
+    LiveSimPipeline (new engine, new state store, same underlying files
+    -- a real restart) is then built; its own __init__ must reconcile the
+    orphan automatically, recording the REAL outcome without ever calling
+    submit_signal() a second time."""
+    from datetime import datetime
+
+    from live.state_store import LiveStateStore
+    from paper.engine import PaperTradingEngine
+    from paper.store import PaperStore
+    from live.freshness import FreshnessPolicy
+    from live.mock_source import MockMarketDataSource
+    from strategy.baseline import TrendMomentumBaseline
+    from tests.conftest import AAPL_CACHE_PATH, real_aapl_mock_script
+
+    if not AAPL_CACHE_PATH.exists():
+        pytest.skip(f"No cached AAPL data at {AAPL_CACHE_PATH}")
+
+    paper_db = tmp_path / "p.db"
+    state_db = tmp_path / "s.db"
+
+    script = real_aapl_mock_script()
+    store = PaperStore(paper_db)
+    engine = PaperTradingEngine(store, initial_capital=100_000.0)
+    state_store = LiveStateStore(state_db)
+    pipeline = LiveSimPipeline(
+        source=MockMarketDataSource(script), engine=engine, strategy=TrendMomentumBaseline(), symbols=["AAPL"], interval="1d",
+        require_human_approval=True, state_store=state_store,
+        freshness_policy=FreshnessPolicy(multiplier=1_000_000.0), clock=lambda: datetime(2026, 8, 26),
+    )
+    result = None
+    while True:
+        result = pipeline.process_next()
+        if result.kind in ("PENDING_HUMAN_APPROVAL", "FEED_EXHAUSTED"):
+            break
+    assert result.kind == "PENDING_HUMAN_APPROVAL"
+    signal = result.signal
+    signal_id = signal.stable_id()
+
+    state_store._conn.execute("UPDATE pending_approvals SET state='HUMAN_APPROVED' WHERE signal_id=?", (signal_id,))
+
+    journal = engine.submit_signal(signal)  # simulates submit_signal() having ALREADY committed before the crash
+    assert journal.outcome.value == "APPROVED_PENDING"
+    assert store.get_pending_order("AAPL") is not None
+    assert len(store.list_journal_entries()) == 1
+    state_store.close()  # the crash -- finalize_decision() never runs
+
+    fresh_state_store = LiveStateStore(state_db)
+    fresh_engine = PaperTradingEngine(PaperStore(paper_db), initial_capital=100_000.0)
+    fresh_pipeline = LiveSimPipeline(
+        source=MockMarketDataSource([]), engine=fresh_engine, strategy=TrendMomentumBaseline(),
+        symbols=[], interval="1d", require_human_approval=True, state_store=fresh_state_store,
+    )
+
+    # Never resurrected as actionable -- structurally cannot be
+    # approved/executed a second time. ALREADY_DECIDED (not NOT_FOUND):
+    # reconciliation populates self.lifecycles with the real terminal
+    # state it just recorded, so _check_actionable correctly recognizes
+    # this signal_id as known-and-decided, not unknown.
+    assert signal_id not in fresh_pipeline.pending_approvals
+    outcome = fresh_pipeline.approve_pending(signal_id)
+    assert outcome.outcome.value == "ALREADY_DECIDED"
+
+    # The real outcome was reconciled automatically at fresh-pipeline
+    # startup -- no longer silently stuck at HUMAN_APPROVED.
+    record = fresh_state_store.get(signal_id)
+    assert record.state == "EXECUTED"
+    assert record.final_execution_result == "APPROVED_PENDING"
+
+    # Still exactly ONE journal entry / PaperOrder -- reconciliation is
+    # pure bookkeeping catch-up, never a second execution attempt.
+    fresh_store = PaperStore(paper_db)
+    assert len(fresh_store.list_journal_entries()) == 1
+    assert fresh_store.get_pending_order("AAPL") is not None
+
+
+def test_a_crash_before_submit_signal_ever_committed_is_marked_abandoned_never_auto_resumed(tmp_path):
+    """The other half of cycle 26's crash-boundary reconciliation: the
+    process dies between the CAS claim and submit_signal() ever actually
+    running (or its transaction never committed) -- no PaperOrder, no
+    JournalEntry exists at all. This project's own standing rule (named
+    explicitly by this cycle's own mission: "Do NOT assume a persisted
+    HUMAN_APPROVED state is safe to replay") means reconciliation must
+    NEVER attempt submit_signal() on restart to "finish the job" -- doing
+    so would silently execute a trade with no fresh human authorization
+    behind it. Instead the orphan is marked a real, final, auditable
+    RISK_REJECTED outcome, and the signal is permanently non-actionable
+    -- a genuinely new signal (and a fresh human Approve) is required if
+    the trade is still wanted."""
+    from datetime import datetime
+
+    from live.state_store import LiveStateStore
+    from paper.engine import PaperTradingEngine
+    from paper.store import PaperStore
+    from live.freshness import FreshnessPolicy
+    from live.mock_source import MockMarketDataSource
+    from strategy.baseline import TrendMomentumBaseline
+    from tests.conftest import AAPL_CACHE_PATH, real_aapl_mock_script
+
+    if not AAPL_CACHE_PATH.exists():
+        pytest.skip(f"No cached AAPL data at {AAPL_CACHE_PATH}")
+
+    paper_db = tmp_path / "p.db"
+    state_db = tmp_path / "s.db"
+
+    script = real_aapl_mock_script()
+    store = PaperStore(paper_db)
+    engine = PaperTradingEngine(store, initial_capital=100_000.0)
+    state_store = LiveStateStore(state_db)
+    pipeline = LiveSimPipeline(
+        source=MockMarketDataSource(script), engine=engine, strategy=TrendMomentumBaseline(), symbols=["AAPL"], interval="1d",
+        require_human_approval=True, state_store=state_store,
+        freshness_policy=FreshnessPolicy(multiplier=1_000_000.0), clock=lambda: datetime(2026, 8, 26),
+    )
+    result = None
+    while True:
+        result = pipeline.process_next()
+        if result.kind in ("PENDING_HUMAN_APPROVAL", "FEED_EXHAUSTED"):
+            break
+    assert result.kind == "PENDING_HUMAN_APPROVAL"
+    signal_id = result.signal.stable_id()
+
+    # Simulate the CAS claim having committed, but the crash happened
+    # BEFORE submit_signal() ever ran -- no journal entry, no order.
+    state_store._conn.execute("UPDATE pending_approvals SET state='HUMAN_APPROVED' WHERE signal_id=?", (signal_id,))
+    state_store.close()
+    assert store.list_journal_entries() == []
+
+    fresh_state_store = LiveStateStore(state_db)
+    fresh_engine = PaperTradingEngine(PaperStore(paper_db), initial_capital=100_000.0)
+    fresh_pipeline = LiveSimPipeline(
+        source=MockMarketDataSource([]), engine=fresh_engine, strategy=TrendMomentumBaseline(),
+        symbols=[], interval="1d", require_human_approval=True, state_store=fresh_state_store,
+    )
+
+    assert signal_id not in fresh_pipeline.pending_approvals
+    outcome = fresh_pipeline.approve_pending(signal_id)
+    assert outcome.outcome.value == "ALREADY_DECIDED"
+
+    record = fresh_state_store.get(signal_id)
+    assert record.state == "RISK_REJECTED"
+    assert record.final_execution_result == "ORPHANED_CLAIM_ABANDONED_AFTER_CRASH_NO_ORDER_CREATED"
+
+    # Never auto-resumed -- no order was ever created, by reconciliation
+    # or otherwise.
+    fresh_store = PaperStore(paper_db)
+    assert fresh_store.list_journal_entries() == []
+    assert fresh_store.get_pending_order("AAPL") is None

@@ -340,6 +340,26 @@ class LiveStateStore:
         rows = self._conn.execute("SELECT * FROM pending_approvals WHERE state = 'PENDING_HUMAN_APPROVAL'").fetchall()
         return [self._row_to_record(r) for r in rows]
 
+    def list_orphaned_claims(self) -> list[PendingApprovalRecord]:
+        """Autonomous hardening cycle 26: rows stuck at HUMAN_APPROVED --
+        approve_pending()'s CAS claim write (update_decision, cycle 20)
+        committed, but its own follow-up finalize_decision() call never
+        ran. In NORMAL operation this window is a single synchronous
+        Python call with no I/O wait in between (the claim write,
+        cycle-25's kill-switch re-check, submit_signal(), and
+        finalize_decision() all run back-to-back inside one
+        approve_pending() invocation) -- so a row observed here, from a
+        FRESH pipeline's restart, is strong evidence the process crashed
+        mid-approve_pending(), not a legitimate steady state a caller
+        could otherwise observe. list_pending() above deliberately
+        excludes these rows (a HUMAN_APPROVED row is not "still pending"
+        -- someone already decided it), so nothing would ever
+        automatically re-attempt approve_pending() on one; see
+        live/pipeline.py::LiveSimPipeline._reconcile_orphaned_claims for
+        what closes this gap instead."""
+        rows = self._conn.execute("SELECT * FROM pending_approvals WHERE state = 'HUMAN_APPROVED'").fetchall()
+        return [self._row_to_record(r) for r in rows]
+
     def list_all(self) -> list[PendingApprovalRecord]:
         rows = self._conn.execute("SELECT * FROM pending_approvals ORDER BY created_at").fetchall()
         return [self._row_to_record(r) for r in rows]

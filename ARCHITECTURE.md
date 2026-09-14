@@ -280,6 +280,24 @@ layers alongside the existing example-based suite:
   legal transition), never silently dropped. Proven both deterministically
   and with a real two-thread, two-connection race synchronized by a
   `threading.Event` pair.
+- **A decision orphaned by a crash between the CAS claim and
+  finalize_decision() is always reconciled at the next startup, never
+  silently stuck and never re-executed** — `LiveSimPipeline.
+  _reconcile_orphaned_claims()` runs automatically in `__init__`
+  (immediately after `_restore_pending_approvals()`), scanning
+  `LiveStateStore.list_orphaned_claims()` (rows at `state=
+  'HUMAN_APPROVED'`). If a `JournalEntry` for the signal already exists,
+  `submit_signal()`'s own atomic transaction DID commit before the
+  crash — the real outcome is recorded (`finalize_decision()`), never
+  by calling `submit_signal()` again. If no `JournalEntry` exists,
+  `submit_signal()` never committed — the decision is marked a final
+  `RISK_REJECTED`/abandoned outcome and is never automatically resumed
+  into a fresh execution attempt; a genuinely new signal and a fresh
+  human Approve are required. Found and fixed cycle 26. `list_pending()`
+  already structurally prevents the orphan from ever being re-approved
+  (it only returns `PENDING_HUMAN_APPROVAL` rows), so no duplicate
+  execution was ever possible — this closes the separate gap of the row
+  being unreconciled and operator-invisible.
 - **The MCP boundary cannot bypass or crash past risk evaluation** —
   `evaluate_risk_tool`/`paper_trade_signal_tool` inherit `RiskEngine`'s
   `NON_FINITE_VALUE` guard (proven with executable tests, not just
