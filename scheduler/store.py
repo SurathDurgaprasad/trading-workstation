@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from scheduler.errors import InvalidRunTransitionError
 from scheduler.models import RunRecord, RunStatus
 
 _SCHEMA = """
@@ -107,6 +108,14 @@ class SchedulerRunStore:
         return record
 
     def finish_run(self, *, run_id: str, status: RunStatus, detail: str = "", error: str | None = None, finished_at: datetime | None = None) -> RunRecord:
+        """Autonomous hardening cycle 8: guarded exactly like Position/
+        PaperOrder's own terminal-state transitions -- only a RUNNING row
+        may be finished. Found via a real state-machine attack: a "zombie"
+        caller that finishes late, after its own run was already RECLAIMED
+        by a newer process, must not be able to silently overwrite that
+        terminal RECLAIMED status back to COMPLETED/FAILED -- see
+        scheduler.errors.InvalidRunTransitionError's own docstring for the
+        full reasoning."""
         existing = self.get_run(run_id)
         if existing is None:
             raise ValueError(f"No scheduler run found with run_id={run_id!r} -- cannot finish a run that was never started.")
@@ -117,10 +126,12 @@ class SchedulerRunStore:
             "error": error,
         })
         with self.transaction():
-            self._conn.execute(
-                "UPDATE scheduler_runs SET status = ?, data_json = ? WHERE run_id = ?",
-                (updated.status.value, updated.model_dump_json(), run_id),
+            cursor = self._conn.execute(
+                "UPDATE scheduler_runs SET status = ?, data_json = ? WHERE run_id = ? AND status = ?",
+                (updated.status.value, updated.model_dump_json(), run_id, RunStatus.RUNNING.value),
             )
+            if cursor.rowcount == 0:
+                raise InvalidRunTransitionError(run_id=run_id, attempted_status=status.value)
         return updated
 
     def get_run(self, run_id: str) -> RunRecord | None:

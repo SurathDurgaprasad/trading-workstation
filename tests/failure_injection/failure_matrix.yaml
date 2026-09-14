@@ -323,19 +323,137 @@
   evidence_grade: C
   note: "SIMULATED / VERIFIED, not REAL PROVIDER / VERIFIED -- no Dhan credentials exist in this environment. See tests/test_dhan_market_data_source.py's 34 tests for the full depth of coverage this one row summarizes."
 
-- id: FI-DHAN-CONNECTING-STATE-NO-TIMEOUT
+- id: FI-DHAN-CONNECTING-STATE-TIMEOUT
   component: dhan_market_data_source
   failure: "a connection attempt that never calls on_open, on_close, or on_error at all (a genuinely silent hang)"
   injection_method: "a fake transport whose connect() registers callbacks but never invokes any of them"
   expected:
-    detection: false
-    health: N/A (this module itself never notices)
-    safe_response: "NONE at this layer -- DISCLOSED, UNFIXED GAP found by this audit (autonomous hardening cycle 7). No CONNECTING-state timeout watchdog exists; the real transport also runs ping_interval=0 (no protocol-level keepalive)."
-    recovery: "none from this module; the feed stays silently stuck in CONNECTING"
-    safety_invariant: "NOT a safety gap in practice -- live/freshness.py's FreshnessPolicy is an independent downstream layer keyed on bar-timestamp-vs-wall-clock, not on this module's own state, so STALE_DATA_NO_TRADE still engages once enough time passes with no fresh bar. This is an AVAILABILITY/liveness gap (undetected outage), not an unsafe-trade risk."
-  test: tests/failure_injection/test_dhan_reconnect_simulation.py::test_no_connecting_state_timeout_watchdog_exists_yet
+    detection: true
+    health: DEGRADED while RECONNECTING/FAILED
+    safe_response: "FIXED in autonomous hardening cycle 8 (disclosed as an unfixed gap in cycle 7, revisited per a structured 7-question re-audit): connect_timeout_seconds (default 30s) routes a stalled CONNECTING attempt through the SAME _report_connection_lost funnel every other failure already uses -- no new state machine, inherits the existing generation-based dedup and bounded-reconnect-then-FAILED behavior."
+    recovery: "automatic -- self-heals via the normal reconnect path instead of staying stuck in CONNECTING forever"
+    safety_invariant: "Was never a safety gap (live/freshness.py's FreshnessPolicy already enforced STALE_DATA_NO_TRADE regardless), but WAS a genuine recovery-failure gap -- a silent hang previously blocked this module's reconnect machinery from ever engaging, requiring a manual restart to recover."
+  test: tests/failure_injection/test_dhan_reconnect_simulation.py::test_connecting_state_timeout_watchdog_self_heals_from_a_silent_hang
   evidence_grade: C
-  note: "Intentionally asserts the CURRENT gap-having behavior, not a fix. A future cycle's fix (connect-attempt watchdog timer, or re-enabling ping_interval/ping_timeout) should invert this test's final assertion."
+  note: "SIMULATED / VERIFIED, not REAL PROVIDER / VERIFIED -- no Dhan credentials in this environment. See tests/test_dhan_market_data_source.py's 3 dedicated watchdog tests for the full unit-level proof (silent hang self-heals; a normal fast-opening connection is unaffected; connect_timeout_seconds=None preserves the exact pre-fix behavior)."
+
+- id: FI-PAPER-DUPLICATE-FILL
+  component: paper_store
+  failure: "the same PaperOrder filled a second time"
+  injection_method: "call update_order() with status=FILLED twice for the same order_id"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "InvalidOrderTransitionError -- FILLED is PaperOrder's one terminal state (paper/models.py::OrderStatus has exactly PENDING/FILLED, no CANCEL exists in this codebase), guarded at the store layer (WHERE status != 'FILLED') rather than trusting every caller to re-check first"
+    recovery: N/A (the first fill stands; the second call is simply rejected)
+    safety_invariant: CORRUPTED_STATE_NO_TRADE
+  test: tests/test_paper_store.py::test_update_order_rejects_a_second_fill_of_an_already_filled_order
+  evidence_grade: B
+
+- id: FI-PAPER-UPDATE-AFTER-TERMINAL
+  component: paper_store
+  failure: "a FILLED order reverted back to PENDING"
+  injection_method: "call update_order() with status=PENDING on an already-FILLED order"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "InvalidOrderTransitionError -- the same terminal-state guard rejects ANY further mutation of a FILLED order, not just a second fill"
+    recovery: N/A
+    safety_invariant: CORRUPTED_STATE_NO_TRADE
+  test: tests/test_paper_store.py::test_update_order_rejects_reverting_a_filled_order_to_pending
+  evidence_grade: B
+
+- id: FI-POSITION-CLOSE-TWICE
+  component: paper_store
+  failure: "the same Position closed a second time"
+  injection_method: "call update_position() with status=CLOSED twice for the same position_id"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "InvalidPositionTransitionError -- CLOSED is Position's one terminal state, guarded WHERE status != 'CLOSED'. CLOSED must never silently become OPEN again, on a duplicate close, a replay, or a restart."
+    recovery: N/A (the first close stands)
+    safety_invariant: CORRUPTED_STATE_NO_TRADE
+  test: tests/test_paper_store.py::test_update_position_rejects_a_second_close_of_an_already_closed_position
+  evidence_grade: B
+
+- id: FI-POSITION-UPDATE-AFTER-CLOSE
+  component: paper_store
+  failure: "a CLOSED position reopened"
+  injection_method: "call update_position() with status=OPEN on an already-CLOSED position"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "InvalidPositionTransitionError -- the same terminal-state guard rejects a reopen attempt, not just a second close"
+    recovery: N/A
+    safety_invariant: CORRUPTED_STATE_NO_TRADE
+  test: tests/test_paper_store.py::test_update_position_rejects_reopening_a_closed_position
+  evidence_grade: B
+
+- id: FI-CRASH-BEFORE-COMMIT
+  component: paper_engine
+  failure: "process killed mid-transaction, after a fill row would have been written but before the position row"
+  injection_method: "a real temp SQLite file; PaperStore.save_position monkeypatched to raise inside process_bar()'s single wrapping transaction"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "the entire transaction rolls back -- order still PENDING, no orphaned fill or position row, bar cursor unadvanced -- verified by re-opening a GENUINELY SEPARATE connection to the same file, not re-reading in-memory Python objects"
+    recovery: "automatic on retry -- a clean, fresh process replaying the identical bar fills exactly once with no leftover partial state"
+    safety_invariant: CORRUPTED_STATE_NO_TRADE
+  test: tests/failure_injection/test_paper_crash_boundary.py::test_a_crash_inside_the_fill_transaction_persists_nothing_at_all
+  evidence_grade: B
+
+- id: FI-CRASH-AFTER-COMMIT
+  component: paper_engine
+  failure: "process killed after a fill transaction commits, before the caller acts on the result"
+  injection_method: "a real temp SQLite file; process_bar() completes normally, then the store connection is closed (simulating termination) before a fresh process retries the identical bar"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "the retry is recognized as a duplicate via the persisted bar_cursor (BarOutcome.DUPLICATE_SKIPPED) -- exactly one position and one fill exist, never two"
+    recovery: automatic
+    safety_invariant: CORRUPTED_STATE_NO_TRADE
+  test: tests/failure_injection/test_paper_crash_boundary.py::test_a_crash_after_commit_but_before_the_caller_observes_the_result_is_safe_on_retry
+  evidence_grade: B
+
+- id: FI-SCHEDULER-RECLAIM-REPLAY
+  component: scheduler_store
+  failure: "a run finishes LATE, after it was already reclaimed as stale by another process (a zombie completion)"
+  injection_method: "start a run, reclaim it as stale, start a NEW run for the same slot, then call finish_run() on the ORIGINAL (now-reclaimed) run_id"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "REAL DEFECT found and fixed in autonomous hardening cycle 8: finish_run() previously had NO terminal-state guard at all and would silently overwrite RECLAIMED back to COMPLETED/FAILED, corrupting the audit trail. Now raises InvalidRunTransitionError and leaves the RECLAIMED row untouched. run_tick() itself catches this specific error on both its success and failure paths and returns a clear TickResult rather than crashing or propagating a confusing second exception."
+    recovery: "N/A for the zombie run (its outcome is simply not recorded); the newer, real run is completely unaffected"
+    safety_invariant: RECOVERY_NEVER_BLOCKED
+  test: tests/test_scheduler_store.py::test_finish_run_on_a_reclaimed_run_raises_and_does_not_overwrite_it
+  evidence_grade: B
+
+- id: FI-KILLSWITCH-RESTART
+  component: live_pipeline
+  failure: "kill switch activated, then the process restarts, then a fresh process attempts a trade"
+  injection_method: "activate the kill switch via one LiveStateStore connection, close it entirely (simulating process termination), then build a BRAND NEW LiveStateStore and a BRAND NEW LiveSimPipeline on the same db file and drive it against real cached market data"
+  expected:
+    detection: true
+    trade_authorization: false
+    health: N/A
+    safe_response: "the fresh pipeline still refuses to create any new order -- zero journal entries -- proving the persisted disk state, not an in-memory flag, is what enforces the block"
+    recovery: manual (explicit reset required, by design)
+    safety_invariant: KILL_SWITCH_AUTHORITATIVE
+  test: tests/test_kill_switch_pipeline.py::test_kill_switch_survives_a_restart_and_still_blocks_a_fresh_pipeline
+  evidence_grade: B
+
+- id: FI-PREDICTION-REPLAY
+  component: predictions_store
+  failure: "the same logical prediction (symbol, entry_time) saved twice"
+  injection_method: "save_prediction() twice for the identical (symbol, entry_time) pair"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "DuplicatePredictionError -- enforced by a real DB-level UNIQUE(symbol, entry_time) constraint, not just an application-level check-then-insert (which would itself be a non-atomic race between two concurrent callers)"
+    recovery: N/A (the first prediction stands)
+    safety_invariant: CORRUPTED_STATE_NO_TRADE
+  test: tests/test_predictions_store.py::test_saving_a_second_prediction_for_the_same_symbol_and_entry_time_raises
+  evidence_grade: B
 
 # --- Expand over subsequent cycles ------------------------------------------
 #

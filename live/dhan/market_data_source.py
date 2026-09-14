@@ -141,6 +141,25 @@ class DhanMarketDataSource:
     backoff_base_seconds: float = 1.0
     backoff_max_seconds: float = 30.0
     next_bar_timeout_seconds: float = 5.0
+    connect_timeout_seconds: float | None = 30.0
+    # Autonomous hardening cycle 8 (a disclosed gap from cycle 7's audit,
+    # revisited and now closed): a genuinely silent hang -- TCP connects,
+    # but the WebSocket handshake or all subsequent traffic is silently
+    # dropped by an intermediate network device with no RST/FIN, and no
+    # on_open/on_close/on_error callback EVER fires -- previously left
+    # this source stuck in CONNECTING forever, which specifically
+    # prevented the (otherwise well-tested) reconnect machinery from ever
+    # engaging: not just "the feed goes quiet" (already safely handled
+    # downstream by live/freshness.py's FreshnessPolicy, independent of
+    # this module) but "this module can never self-heal from this one
+    # specific failure mode without a manual restart" -- a genuine
+    # recovery-failure gap, not merely an undetected-outage one. `None`
+    # disables the watchdog entirely (kept, not removed, for a caller
+    # that wants the exact pre-cycle-8 behavior). Routed through the
+    # SAME _report_connection_lost funnel every other failure already
+    # uses, so it inherits the identical generation-based dedup and
+    # bounded-reconnect-then-FAILED behavior -- no new state machine.
+    #
     # Phase 16 addition (VERIFIED necessary against a real account -- see
     # _claim_reconnect_locked's docstring): a connection must stay open for
     # at least this long before a later failure is treated as the start of
@@ -330,6 +349,23 @@ class DhanMarketDataSource:
         )
         # state stays CONNECTING here -- do NOT declare CONNECTED until
         # _on_transport_open actually fires (see _Transport's docstring).
+        if self.connect_timeout_seconds is not None:
+            timer = threading.Timer(self.connect_timeout_seconds, self._on_connect_timeout, args=(generation,))
+            timer.daemon = True
+            timer.start()
+
+    def _on_connect_timeout(self, generation: int) -> None:
+        """Autonomous hardening cycle 8: fires connect_timeout_seconds
+        after _connect() was called. A no-op if this attempt already
+        resolved by then (opened, failed, or a newer attempt/close
+        superseded it) -- the SAME generation check every other callback
+        here already uses, so a connection that opens normally within the
+        timeout is entirely unaffected by this timer ever having been
+        scheduled."""
+        with self._lock:
+            if generation != self._connection_generation or self.state != DhanConnectionState.CONNECTING:
+                return  # already resolved -- nothing to do
+        self._report_connection_lost(generation, f"connect attempt timed out after {self.connect_timeout_seconds}s with no response")
 
     def _redact_secret(self, text: str) -> str:
         """Defense-in-depth (Phase 16 hardening -- no evidence of an actual

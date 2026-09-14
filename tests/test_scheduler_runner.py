@@ -229,6 +229,54 @@ def test_run_tick_records_a_failed_run_without_crashing_when_no_universe_is_give
     assert record.error is not None
 
 
+# --- autonomous hardening cycle 8: reclaimed-mid-flight race ----------------
+#
+# Real, if narrow, race found via a state-machine attack: this tick's own
+# run_id could be reclaimed as stale by ANOTHER process's tick while
+# _execute_slot is still genuinely running (e.g. a very slow provider
+# call exceeding the staleness window). finish_run() now refuses to
+# overwrite that terminal RECLAIMED status -- these tests prove run_tick
+# itself handles that gracefully (a clear TickResult, never a crash) on
+# both the success and failure paths.
+
+
+def test_run_tick_handles_being_reclaimed_mid_flight_on_the_success_path(tmp_path, run_store, monkeypatch):
+    import scheduler.runner as runner_module
+
+    real_execute_slot = runner_module._execute_slot
+
+    def _execute_and_get_reclaimed(due, **kwargs):
+        # Simulate another process's tick deciding THIS run is stale and
+        # reclaiming it, WHILE this tick's own _execute_slot is still
+        # "running" (from this tick's own point of view).
+        run_store.reclaim_stale_locks(staleness_seconds=0, now=datetime.now(timezone.utc))
+        return real_execute_slot(due, **kwargs)
+
+    monkeypatch.setattr(runner_module, "_execute_slot", _execute_and_get_reclaimed)
+
+    result = run_tick(schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", benchmark="", now=_TRADING_TIME, **_db_paths(tmp_path))
+
+    assert result.ran is True
+    assert "already reclaimed" in result.reason
+    assert run_store.get_run(result.run_id).status == RunStatus.RECLAIMED  # untouched, not silently COMPLETED
+
+
+def test_run_tick_handles_being_reclaimed_mid_flight_on_the_failure_path(tmp_path, run_store, monkeypatch):
+    import scheduler.runner as runner_module
+
+    def _fail_after_being_reclaimed(due, **kwargs):
+        run_store.reclaim_stale_locks(staleness_seconds=0, now=datetime.now(timezone.utc))
+        raise MarketDataError("simulated outage, discovered after this run was already reclaimed")
+
+    monkeypatch.setattr(runner_module, "_execute_slot", _fail_after_being_reclaimed)
+
+    result = run_tick(schedule_config=ScheduleConfig(), run_store=run_store, symbols="AAPL", now=_TRADING_TIME, **_db_paths(tmp_path))
+
+    assert result.ran is True
+    assert "already reclaimed" in result.reason
+    assert run_store.get_run(result.run_id).status == RunStatus.RECLAIMED  # untouched, not silently FAILED
+
+
 def test_run_tick_does_not_crash_on_a_market_data_failure(tmp_path, run_store, monkeypatch):
     """A provider outage during one tick must degrade to a FAILED
     RunRecord, not propagate and kill a long-lived scheduler loop."""

@@ -1,10 +1,10 @@
-"""Autonomous hardening cycle 7 -- Dhan WebSocket/live-feed reconnect
-audit (AUTONOMOUS LIMIT-PUSHING CONTROLLER mission, section 11).
+"""Dhan WebSocket/live-feed reconnect audit -- started cycle 7, gap closed
+cycle 8 (AUTONOMOUS LIMIT-PUSHING CONTROLLER mission, sections 11 and 17).
 
 live/dhan/market_data_source.py's reconnect state machine
 (DISCONNECTED -> CONNECTING -> CONNECTED -> RECONNECTING ->
 FAILED/CLOSED) is ALREADY exceptionally thoroughly tested --
-tests/test_dhan_market_data_source.py has 34 tests, several explicitly
+tests/test_dhan_market_data_source.py has 37 tests, several explicitly
 documented as fixes for real incidents against a live Dhan account
 (reconnect storms, concurrent on_error+on_close double-counting,
 flapping-connection bound evasion, credential leakage). This file does
@@ -19,13 +19,17 @@ mission's own instructions:
    transport, no real socket) -- NEVER REAL PROVIDER / VERIFIED. No
    Dhan credentials exist in this environment; upgrading this grade
    without a real account would be a false claim.
-3. Disclose the one genuine gap this audit found: there is no timeout
-   on the CONNECTING state itself, and the real transport is
-   configured with `ping_interval=0` (no protocol-level keepalive) --
-   see test_no_connecting_state_timeout_watchdog_exists_yet below for
-   the reasoning and why this is graded a disclosed limitation, not
-   silently ignored, and not upgraded to "fixed" without an actual fix.
+3. Cycle 7 disclosed one genuine gap: no timeout existed on the
+   CONNECTING state itself. Cycle 8 revisited it per a structured
+   7-question re-audit, determined it was a real recovery-failure gap
+   (not merely a cosmetic one -- it specifically prevented the
+   reconnect machinery from ever self-healing a silent hang), and
+   closed it with `connect_timeout_seconds` -- see
+   test_connecting_state_timeout_watchdog_self_heals_from_a_silent_hang
+   below.
 """
+import time
+
 import pytest
 
 from live.contracts import FeedDisconnectedError
@@ -108,56 +112,56 @@ def test_reconnect_success_simulated_verified(instrument_map, credentials):
     assert len(factory.current.sent_messages) >= 1  # and re-subscribed on it
 
 
-# --- Disclosed gap, found by this audit, NOT silently ignored ---------------
+# --- Cycle-7 disclosed gap, revisited and CLOSED in cycle 8 -----------------
 
 
-def test_no_connecting_state_timeout_watchdog_exists_yet(instrument_map, credentials):
-    """DISCLOSED, UNFIXED gap (autonomous hardening cycle 7 finding):
-    if the transport's connect() call never invokes on_open, on_close,
-    OR on_error at all -- a genuinely silent hang (e.g. a TCP connect
-    that succeeds but a WebSocket handshake or all subsequent traffic is
-    silently dropped by an intermediate network device, with no RST/FIN
-    ever received) -- DhanMarketDataSource has NO timeout on the
-    CONNECTING state itself to detect this and proactively reconnect.
-    The real transport (_WebsocketClientTransport) also runs
-    `ping_interval=0`, meaning websocket-client's own ping-based
-    keepalive/dead-connection detection is disabled too -- there is
-    currently no mechanism, at any layer THIS module owns, that would
-    ever notice a silent hang and trigger the (otherwise well-tested)
-    reconnect path.
+def test_connecting_state_timeout_watchdog_self_heals_from_a_silent_hang(instrument_map, credentials):
+    """FIXED in autonomous hardening cycle 8 (was a disclosed, unfixed gap
+    in cycle 7): if the transport's connect() call never invokes on_open,
+    on_close, OR on_error at all -- a genuinely silent hang (e.g. a TCP
+    connect that succeeds but a WebSocket handshake or all subsequent
+    traffic is silently dropped by an intermediate network device, with
+    no RST/FIN ever received) -- DhanMarketDataSource previously had NO
+    timeout on the CONNECTING state itself, which specifically prevented
+    the (otherwise well-tested) reconnect machinery from EVER engaging --
+    not merely "the feed goes quiet" (already safely handled downstream
+    by live/freshness.py's FreshnessPolicy regardless of the cause) but
+    "this module can never self-heal from this specific failure without a
+    manual restart," a genuine recovery-failure gap.
 
-    Severity, and why this is not a P0/P1 safety defect: this is an
-    AVAILABILITY/liveness gap, not a SAFETY gap. live/freshness.py's
-    FreshnessPolicy is a genuinely independent downstream layer -- it
-    compares the last bar's own timestamp against wall-clock "now"
-    regardless of WHY no fresh bar arrived, so once enough time passes
-    with no new bar, the existing "STALE DATA -> NO TRADE" invariant
-    still engages even if this module itself never notices the hang and
-    never reconnects on its own. No unsafe trade can result from this
-    gap; the cost is purely "the feed silently stops advancing for
-    longer than necessary before an operator notices via freshness/
-    health monitoring, instead of the system proactively reconnecting."
+    Revisited per the structured 7-question re-audit (autonomous
+    hardening cycle 8): no indirect timeout existed at any layer this
+    module owns (next_bar_timeout_seconds bounds the CALLER's wait, not
+    this state); websocket-client's own ping-based keepalive was
+    explicitly disabled (ping_interval=0); FreshnessPolicy prevents any
+    UNSAFE trade from this gap but does nothing to help the feed itself
+    recover; a silent hang does not leak unboundedly (one thread, one
+    socket, daemon=True) but DOES block reconnection indefinitely, which
+    is the concrete, real cost that justified the fix.
 
-    This test asserts the CURRENT (gap-having) behavior honestly, rather
-    than silently doing nothing: a transport that never calls back
-    leaves the source stuck in CONNECTING, and is_connected() correctly
-    reports False throughout (at least no FALSE claim of health) --
-    proving the one thing that IS already safe about this state, while
-    documenting the one thing that is not yet actively self-healing.
-    Fixing this (a connect-attempt watchdog timer, or re-enabling
-    websocket-client's own ping_interval/ping_timeout) is real, valuable
-    future work -- deliberately NOT attempted in this same cycle: this
-    is one of the most incident-hardened, concurrency-sensitive modules
-    in the codebase (see its own module docstring's "VERIFIED necessary
-    against a real account" history), and a watchdog-timer change here
-    deserves a dedicated cycle with room for careful, real-threading
-    verification, not a rushed addition alongside unrelated work."""
-    source, factory = _source(instrument_map, credentials)
-    factory.auto_open = False  # the transport will exist but never call any callback
+    Fix: `connect_timeout_seconds` (default 30.0s) routes a stalled
+    CONNECTING attempt through the SAME `_report_connection_lost` funnel
+    every other failure already uses -- no new state machine, inherits
+    the existing generation-based dedup and bounded-reconnect-then-FAILED
+    behavior. See tests/test_dhan_market_data_source.py's dedicated
+    watchdog tests for the full unit-level proof (including that a
+    normal, fast-opening connection is entirely unaffected, and that
+    `connect_timeout_seconds=None` preserves the exact pre-fix behavior
+    for a caller that wants it); this test proves the same property at
+    the failure-injection-matrix level, with a short timeout for speed."""
+    source, factory = _source(instrument_map, credentials, connect_timeout_seconds=0.05, max_reconnect_attempts=3, backoff_base_seconds=0.01, backoff_max_seconds=0.01)
+    factory.auto_open = False  # the transport will exist but never call any callback -- a silent hang
     source.subscribe(["RELIANCE"], "1m")
-
     assert source.state == DhanConnectionState.CONNECTING
     assert source.is_connected() is False  # no false claim of health while hung
-    # No assertion that the state ever changes -- it currently does NOT,
-    # which is exactly the disclosed gap. A future fix should invert this
-    # test to assert the state DOES eventually move to RECONNECTING/FAILED.
+
+    # Every reconnect attempt's transport ALSO never calls back, so
+    # reaching the terminal FAILED state (rather than merely polling for
+    # "no longer CONNECTING") is what proves the watchdog fired
+    # repeatedly, not just once.
+    deadline = time.monotonic() + 2.0
+    while source.state != DhanConnectionState.FAILED and time.monotonic() < deadline:
+        time.sleep(0.02)
+
+    assert source.state == DhanConnectionState.FAILED  # self-healed all the way to a clean terminal state, not stuck forever
+    assert len(factory.instances) >= 2  # the watchdog triggered real reconnect attempts

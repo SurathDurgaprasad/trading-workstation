@@ -395,6 +395,71 @@ def test_subscribe_after_failed_resets_the_retry_budget(instrument_map, credenti
     assert source.state == DhanConnectionState.CONNECTED  # reconnected -- had budget to do so
 
 
+# --- Autonomous hardening cycle 8: CONNECTING-state watchdog timeout -------
+#
+# Disclosed, unfixed gap from cycle 7's audit, revisited and closed: a
+# genuinely silent hang (transport.connect() registers callbacks but NEVER
+# invokes any of them -- no on_open, no on_close, no on_error) previously
+# left the source stuck in CONNECTING forever, specifically preventing the
+# reconnect machinery from ever engaging. connect_timeout_seconds now
+# routes a stalled CONNECTING attempt through the same
+# _report_connection_lost funnel every other failure already uses.
+
+
+def test_a_silent_hang_during_connecting_eventually_triggers_a_reconnect(instrument_map, credentials):
+    """Every transport this factory creates also never calls back
+    (auto_open stays False for every reconnect attempt too), so each
+    successive attempt needs its own watchdog firing before the NEXT
+    reconnect attempt's transport is even created -- polling for the
+    terminal FAILED state (rather than merely "no longer CONNECTING")
+    avoids a race against exactly when factory.instances grows."""
+    source, factory = _source(
+        instrument_map, credentials, connect_timeout_seconds=0.05,
+        max_reconnect_attempts=3, backoff_base_seconds=0.01, backoff_max_seconds=0.01,
+    )
+    factory.auto_open = False  # the transport will exist but never call any callback -- a silent hang
+    source.subscribe(["RELIANCE"], "1m")
+    assert source.state == DhanConnectionState.CONNECTING
+
+    deadline = time.monotonic() + 2.0
+    while source.state != DhanConnectionState.FAILED and time.monotonic() < deadline:
+        time.sleep(0.02)
+
+    # The watchdog fired repeatedly and routed through the normal
+    # reconnect path each time -- multiple fresh transports were created,
+    # exactly like any other detected, persistent failure.
+    assert source.state == DhanConnectionState.FAILED
+    assert len(factory.instances) >= 2
+
+
+def test_a_connection_that_opens_before_the_timeout_is_entirely_unaffected(instrument_map, credentials):
+    """The watchdog must never fire for a connection that opens normally
+    -- proves the timer scheduled at the end of _connect() does not
+    interfere with the ordinary, fast, successful path at all."""
+    source, factory = _source(instrument_map, credentials, connect_timeout_seconds=0.05)
+    source.subscribe(["RELIANCE"], "1m")  # auto_open=True (default) -- opens synchronously
+    assert source.state == DhanConnectionState.CONNECTED
+
+    time.sleep(0.15)  # let the (already-superseded, harmless) watchdog timer fire and no-op
+
+    assert source.state == DhanConnectionState.CONNECTED  # unaffected
+    assert len(factory.instances) == 1  # no spurious reconnect was ever triggered
+
+
+def test_connect_timeout_none_disables_the_watchdog_entirely(instrument_map, credentials):
+    """`None` preserves the exact pre-cycle-8 behavior for a caller that
+    deliberately wants it -- a silent hang stays stuck in CONNECTING with
+    no watchdog-triggered reconnect."""
+    source, factory = _source(instrument_map, credentials, connect_timeout_seconds=None)
+    factory.auto_open = False
+    source.subscribe(["RELIANCE"], "1m")
+
+    time.sleep(0.1)
+
+    assert source.state == DhanConnectionState.CONNECTING  # still stuck -- no watchdog was armed
+    assert len(factory.instances) == 1  # no reconnect was ever triggered
+
+
 def test_connect_refuses_to_create_a_transport_if_already_closed(instrument_map, credentials):
     """Hardening fix, precise/white-box version (found via offline code
     review, no live network involved): _connect() now re-checks CLOSED

@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 from live.dhan.market_session import IST, current_market_session
 from scheduler.config import ScheduleConfig, ScheduleSlot
-from scheduler.errors import SchedulerConfigurationError
+from scheduler.errors import InvalidRunTransitionError, SchedulerConfigurationError
 from scheduler.models import RunRecord, RunStatus, SlotAction, TickResult
 from scheduler.store import SchedulerRunStore
 
@@ -254,8 +254,33 @@ def run_tick(
         # In real production use `now` is freshly read at tick-start anyway,
         # so this is at most a few seconds "early" relative to actual
         # completion -- an accepted, documented tradeoff for determinism.
-        run_store.finish_run(run_id=run_id, status=RunStatus.FAILED, detail=f"{type(exc).__name__}: {exc}", error=str(exc), finished_at=now_utc)
+        # Autonomous hardening cycle 8: a real, if narrow, race -- this
+        # tick's own run_id may have been reclaimed as stale by ANOTHER
+        # process's tick (staleness_seconds elapsed) while _execute_slot
+        # above was still genuinely running (e.g. a very slow provider
+        # call). finish_run() now refuses to overwrite that terminal
+        # RECLAIMED status -- see InvalidRunTransitionError's own
+        # docstring. Caught here specifically (not just left to propagate)
+        # so this tick still returns a clear TickResult explaining what
+        # happened, rather than crashing the tick with a second, confusing
+        # exception on top of the original failure this except block was
+        # already handling.
+        try:
+            run_store.finish_run(run_id=run_id, status=RunStatus.FAILED, detail=f"{type(exc).__name__}: {exc}", error=str(exc), finished_at=now_utc)
+        except InvalidRunTransitionError:
+            return TickResult(
+                ran=True,
+                reason=f"Slot {due.name!r} FAILED ({exc}), but run_id={run_id[:12]} was already reclaimed as stale by another process before this tick could record its own outcome -- audit trail left as RECLAIMED, not overwritten.",
+                slot_name=due.name, run_id=run_id, reclaimed_run_ids=reclaimed_ids,
+            )
         return TickResult(ran=True, reason=f"Slot {due.name!r} FAILED: {exc}", slot_name=due.name, run_id=run_id, reclaimed_run_ids=reclaimed_ids)
 
-    run_store.finish_run(run_id=run_id, status=RunStatus.COMPLETED, detail=detail, finished_at=now_utc)
+    try:
+        run_store.finish_run(run_id=run_id, status=RunStatus.COMPLETED, detail=detail, finished_at=now_utc)
+    except InvalidRunTransitionError:
+        return TickResult(
+            ran=True,
+            reason=f"Slot {due.name!r} completed ({detail}), but run_id={run_id[:12]} was already reclaimed as stale by another process before this tick could record its own outcome -- audit trail left as RECLAIMED, not overwritten.",
+            slot_name=due.name, run_id=run_id, reclaimed_run_ids=reclaimed_ids,
+        )
     return TickResult(ran=True, reason=f"Slot {due.name!r} completed: {detail}", slot_name=due.name, run_id=run_id, reclaimed_run_ids=reclaimed_ids)

@@ -96,6 +96,44 @@ def test_kill_switch_does_not_touch_existing_positions(tmp_path):
     assert store.get_open_position("AAPL") is not None or len(store.list_trades()) > 0
 
 
+def test_kill_switch_survives_a_restart_and_still_blocks_a_fresh_pipeline(tmp_path):
+    """Autonomous hardening cycle 8: every existing kill-switch-blocks-
+    trading test above builds the pipeline from the SAME LiveStateStore
+    instance that activated the switch, within one process -- proving the
+    block works, but not that it survives a genuine restart. This test
+    activates the switch, closes that connection entirely (simulating
+    process termination), then builds a BRAND NEW LiveStateStore and a
+    BRAND NEW LiveSimPipeline on top of it (a fresh "process") and proves
+    the fresh pipeline still refuses to create any new order -- the
+    persisted disk state, not any in-memory flag, is what enforces this."""
+    script = real_aapl_mock_script()
+    paper_store = PaperStore(tmp_path / "p.db")
+    engine = PaperTradingEngine(paper_store, initial_capital=100_000.0)
+
+    activating_store = LiveStateStore(tmp_path / "s.db")
+    activating_store.activate_kill_switch(reason="test halt before restart")
+    activating_store.close()  # simulates the process that activated it terminating
+
+    fresh_state_store = LiveStateStore(tmp_path / "s.db")  # a genuinely new connection, new "process"
+    assert fresh_state_store.is_kill_switch_active() is True  # persisted, not lost
+
+    fresh_pipeline = LiveSimPipeline(
+        source=MockMarketDataSource(script), engine=engine, strategy=TrendMomentumBaseline(), symbols=["AAPL"], interval="1d",
+        require_human_approval=False, state_store=fresh_state_store,
+        freshness_policy=_GENEROUS_FRESHNESS, clock=lambda: datetime(2026, 8, 26),
+    )
+
+    saw_kill_switch = False
+    while True:
+        result = fresh_pipeline.process_next()
+        if result.kind == "FEED_EXHAUSTED":
+            break
+        if result.kind == "KILL_SWITCH_ACTIVE":
+            saw_kill_switch = True
+    assert saw_kill_switch
+    assert len(paper_store.list_journal_entries()) == 0  # NO TRADE, even after a real restart
+
+
 def test_kill_switch_state_visible_and_requires_explicit_reset(tmp_path):
     state_store = LiveStateStore(tmp_path / "s.db")
     assert state_store.is_kill_switch_active() is False

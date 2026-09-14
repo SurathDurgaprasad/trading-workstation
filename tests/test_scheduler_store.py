@@ -43,6 +43,59 @@ def test_finish_run_raises_for_unknown_run_id(store):
         store.finish_run(run_id="does-not-exist", status=RunStatus.COMPLETED)
 
 
+# --- autonomous hardening cycle 8: finish_run terminal-state guard ----------
+#
+# Real defect found via a state-machine attack: finish_run() previously had
+# NO guard at all -- a "zombie" caller that finishes late, after its own
+# run was already reclaimed as stale by another process, could silently
+# overwrite RECLAIMED back to COMPLETED/FAILED, corrupting the audit trail.
+
+
+def test_finish_run_on_a_reclaimed_run_raises_and_does_not_overwrite_it(store):
+    from scheduler.errors import InvalidRunTransitionError
+
+    started_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    store.start_run(run_id="r1", slot_name="intraday", run_date="2026-09-14", started_at=started_at)
+    reclaimed = store.reclaim_stale_locks(staleness_seconds=1800, now=datetime.now(timezone.utc))
+    assert reclaimed[0].status == RunStatus.RECLAIMED
+
+    # A NEW run legitimately starts for the same slot once reclaim frees the lock.
+    store.start_run(run_id="r2", slot_name="intraday", run_date="2026-09-14", started_at=datetime.now(timezone.utc))
+
+    # The "zombie" original process (r1) finally wakes up and tries to report success.
+    with pytest.raises(InvalidRunTransitionError, match="r1"):
+        store.finish_run(run_id="r1", status=RunStatus.COMPLETED, detail="zombie process finished late")
+
+    # r1's audit trail is untouched -- still RECLAIMED, not silently COMPLETED.
+    assert store.get_run("r1").status == RunStatus.RECLAIMED
+    # r2 (the real, current run) is completely unaffected.
+    assert store.active_lock().run_id == "r2"
+
+
+def test_finish_run_on_an_already_completed_run_raises(store):
+    from scheduler.errors import InvalidRunTransitionError
+
+    store.start_run(run_id="r1", slot_name="intraday", run_date="2026-09-14", started_at=datetime.now(timezone.utc))
+    store.finish_run(run_id="r1", status=RunStatus.COMPLETED)
+
+    with pytest.raises(InvalidRunTransitionError):
+        store.finish_run(run_id="r1", status=RunStatus.FAILED, error="a duplicate/late finish_run call")
+
+    assert store.get_run("r1").status == RunStatus.COMPLETED  # first result stands
+
+
+def test_finish_run_on_an_already_failed_run_raises(store):
+    from scheduler.errors import InvalidRunTransitionError
+
+    store.start_run(run_id="r1", slot_name="intraday", run_date="2026-09-14", started_at=datetime.now(timezone.utc))
+    store.finish_run(run_id="r1", status=RunStatus.FAILED, error="boom")
+
+    with pytest.raises(InvalidRunTransitionError):
+        store.finish_run(run_id="r1", status=RunStatus.COMPLETED)
+
+    assert store.get_run("r1").status == RunStatus.FAILED
+
+
 def test_active_lock_is_none_when_nothing_running(store):
     assert store.active_lock() is None
 

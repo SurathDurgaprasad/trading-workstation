@@ -187,6 +187,20 @@ layers alongside the existing example-based suite:
   caller, CLI or dashboard, goes through) emits a `logger.warning`, so
   the event is visible in a `--log-file`-backed log stream, not only by
   actively polling `health`/`readiness-check`.
+- **A scheduler run's terminal status can never be silently overwritten**
+  — `SchedulerRunStore.finish_run` guards its UPDATE with `WHERE status =
+  'RUNNING'`, raising `InvalidRunTransitionError` otherwise. Found via a
+  state-machine attack (autonomous hardening cycle 8): a "zombie"
+  process finishing late, after its own run was already reclaimed as
+  stale by another process, previously silently overwrote the RECLAIMED
+  status back to COMPLETED/FAILED, corrupting the audit trail.
+  `scheduler/runner.py::run_tick` catches this specific error on both
+  its success and failure paths.
+- **A Dhan feed connection can never hang in CONNECTING forever** —
+  `connect_timeout_seconds` (default 30s) routes a stalled connection
+  attempt through the same reconnect funnel every other failure already
+  uses. Found and fixed cycle 8, revisiting a gap cycle 7 had explicitly
+  disclosed but left unfixed pending a dedicated re-audit.
 - **NaN/Infinity can never authorize a trade** — `RiskEngine.evaluate`
   runs an explicit `math.isfinite()` guard across every safety-relevant
   numeric input (`reference_price`/`stop_price`/`target_price`/
