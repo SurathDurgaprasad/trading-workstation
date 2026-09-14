@@ -169,11 +169,25 @@ class DhanMarketDataSource:
     # the bound never actually engages.
     min_stable_connection_seconds: float = 10.0
     transport_factory: type = _WebsocketClientTransport
+    max_queued_bars: int = 2000
+    """Autonomous hardening cycle 21 (closes the disclosed gap from
+    cycle 16's resource-exhaustion audit, FINAL_FAILURE_MODE_ANALYSIS.md
+    entry #29): `_bar_queue` was previously an unbounded `queue.Queue()`
+    -- if the consumer (`next_bar()`) falls behind the live feed for an
+    extended period (most plausibly `paper-live`'s own interactive
+    human-approval prompt blocking while the market keeps ticking),
+    completed-but-unconsumed bars accumulated with no upper bound.
+    2000 is deliberately generous for this project's actual deployment
+    scale (a handful of symbols, minute-or-coarser candles) -- ordinary
+    consumption lag should never come close to it; it exists purely as
+    a hard backstop, not a normal-operation throttle. See
+    `_enqueue_bar`'s own docstring for why the overflow policy is
+    drop-oldest via `put_nowait()`, never a blocking `put()`."""
 
     def __post_init__(self):
         self.state: str = DhanConnectionState.DISCONNECTED
         self._transport: _Transport | None = None
-        self._bar_queue: "queue.Queue[MarketBarEvent]" = queue.Queue()
+        self._bar_queue: "queue.Queue[MarketBarEvent]" = queue.Queue(maxsize=self.max_queued_bars)
         self._candle_builders: dict[str, CandleBuilder] = {}
         self._security_id_to_symbol: dict[str, str] = {}
         self._subscribed_symbols: set[str] = set()
@@ -559,8 +573,45 @@ class DhanMarketDataSource:
         if bar is None:
             return None
         event = MarketBarEvent(symbol=symbol, bar=bar)
-        self._bar_queue.put(event)
+        self._enqueue_bar(event)
         return event
+
+    def _enqueue_bar(self, event: MarketBarEvent) -> None:
+        """Autonomous hardening cycle 21: bounded, NEVER-BLOCKING enqueue.
+        This always runs on the WebSocket library's own background
+        receive thread -- a blocking `Queue.put()` here (the default
+        behavior once a queue has a maxsize and is full) could stall
+        message processing, miss pings, and destabilize the connection
+        itself, a worse failure mode than the unbounded-memory-growth
+        risk this replaces (see cycle 16/entry #29's own disclosure of
+        exactly this tradeoff, and cycle 7/8's precedent of not rushing
+        a change into this file without it). `put_nowait()` never
+        blocks; on backpressure (the consumer has fallen behind by
+        `max_queued_bars` events), the OLDEST queued bar is dropped to
+        make room for the newest -- appropriate for LIVE data, where a
+        consumer that has fallen this far behind needs the most recent
+        state once it catches up, not an ever-growing backlog of stale
+        history it would otherwise process bar-by-bar regardless. Only
+        one producer (this method, always called from the same receive
+        thread) ever exists, so the retry after dropping the oldest
+        cannot itself race against another producer -- only against the
+        consumer's own `get()`, which can only ever make MORE room, never
+        less."""
+        try:
+            self._bar_queue.put_nowait(event)
+            return
+        except queue.Full:
+            pass
+        try:
+            self._bar_queue.get_nowait()  # drop the oldest to make room
+        except queue.Empty:
+            pass  # the consumer's own get() just drained it first -- fine
+        self._bar_queue.put_nowait(event)
+        logger.warning(
+            "Dhan feed bar queue was full (%d events) -- dropped the oldest queued bar to make room for %s. "
+            "The consumer (next_bar()) has fallen behind the live feed.",
+            self.max_queued_bars, event.symbol,
+        )
 
     @staticmethod
     def _extract_tick(packet) -> tuple[float | None, float, int]:

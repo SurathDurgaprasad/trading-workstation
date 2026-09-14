@@ -217,6 +217,19 @@ layers alongside the existing example-based suite:
   attempt through the same reconnect funnel every other failure already
   uses. Found and fixed cycle 8, revisiting a gap cycle 7 had explicitly
   disclosed but left unfixed pending a dedicated re-audit.
+- **A Dhan feed consumer that falls behind can never grow memory
+  without bound** — `DhanMarketDataSource._bar_queue` is a bounded
+  `queue.Queue(maxsize=max_queued_bars)` (default 2000); the wire
+  callback enqueues via a `put_nowait()`-based `_enqueue_bar()` that
+  NEVER blocks the WebSocket library's own receive thread, dropping the
+  OLDEST queued bar (and logging a warning) to make room on overflow.
+  Found and disclosed cycle 16 (a naive `maxsize` fix was deliberately
+  deferred, since a blocking `put()` once full would have traded the
+  original risk for a worse one — a stalled receive thread); fixed
+  cycle 21 with the deliberate drop-oldest/never-blocking design,
+  proven by five dedicated tests (cap never exceeded, never blocks,
+  oldest dropped not newest, warning names the dropped symbol, a
+  keeping-up consumer never drops).
 - **The MCP boundary cannot bypass or crash past risk evaluation** —
   `evaluate_risk_tool`/`paper_trade_signal_tool` inherit `RiskEngine`'s
   `NON_FINITE_VALUE` guard (proven with executable tests, not just

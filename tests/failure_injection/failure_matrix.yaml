@@ -337,6 +337,20 @@
   evidence_grade: C
   note: "SIMULATED / VERIFIED, not REAL PROVIDER / VERIFIED -- no Dhan credentials in this environment. See tests/test_dhan_market_data_source.py's 3 dedicated watchdog tests for the full unit-level proof (silent hang self-heals; a normal fast-opening connection is unaffected; connect_timeout_seconds=None preserves the exact pre-fix behavior)."
 
+- id: FI-DHAN-BAR-QUEUE-UNBOUNDED-GROWTH
+  component: dhan_market_data_source
+  failure: "the consumer (next_bar()) falls behind the live feed for an extended period (e.g. paper-live's own interactive human-approval prompt blocking while the market keeps ticking) while completed bars keep arriving"
+  injection_method: "call _handle_packet() directly with a series of ticks that each cross a new 1m bucket boundary, producing more completed bars than max_queued_bars, without ever draining via next_bar()"
+  expected:
+    detection: true
+    health: N/A (a producer/consumer backpressure fix, not a connection-health state)
+    safe_response: "FIXED in autonomous hardening cycle 21 (disclosed as an unfixed gap in cycle 16, FINAL_FAILURE_MODE_ANALYSIS.md entry #29): _bar_queue is now a bounded queue.Queue(maxsize=max_queued_bars, default 2000). Overflow uses put_nowait() (NEVER a blocking put -- this method always runs on the WebSocket library's own background receive thread, and a blocking put here could stall message processing and destabilize the connection itself) with a drop-oldest policy: the oldest queued bar is evicted to make room for the newest, and a warning is logged naming the dropped event's symbol."
+    recovery: "automatic and continuous -- the feed keeps accepting new bars and self-corrects once the consumer catches up; no manual intervention, no crash, no unbounded memory growth"
+    safety_invariant: "Was never a trade-authorization gap (a dropped stale bar is strictly safer than an ever-growing unconsumed backlog processed bar-by-bar once the consumer catches up), but WAS a genuine resource-exhaustion gap -- unbounded memory growth under sustained consumer lag."
+  test: tests/test_dhan_market_data_source.py::test_the_bar_queue_never_exceeds_max_queued_bars_even_when_the_consumer_never_drains_it
+  evidence_grade: C
+  note: "Deterministic simulation via direct _handle_packet() calls, no real network. See tests/test_dhan_market_data_source.py's 5 dedicated bounded-queue tests for the full proof: the cap is never exceeded, put_nowait() never blocks/raises once full, the OLDEST bar (not newest) is the one dropped, a warning names the dropped symbol, and a consumer that keeps up never triggers a single drop."
+
 - id: FI-PAPER-DUPLICATE-FILL
   component: paper_store
   failure: "the same PaperOrder filled a second time"

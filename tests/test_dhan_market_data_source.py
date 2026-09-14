@@ -726,3 +726,96 @@ def test_subscribe_with_all_valid_symbols_still_works_after_the_fix(instrument_m
     source.subscribe(["RELIANCE.NS"], "1m")
     assert source.is_connected() is True
     assert source._subscribed_symbols == {"RELIANCE.NS"}
+
+
+# -- Autonomous hardening cycle 21: bounded _bar_queue / drop-oldest backpressure --
+
+def _feed_n_completed_bars(source, factory, n: int, *, start_price: float = 1400.0):
+    """Drives `n` completed bars through `_handle_packet` directly (bypassing
+    a real background thread, matching this file's own convention of testing
+    `_handle_packet` synchronously -- see its own docstring). Each tick lands
+    61 seconds after the last, guaranteeing it crosses into a fresh 1m bucket
+    and closes the previous one. Never calls `next_bar()`, so nothing drains
+    the queue: this isolates the producer-side bounded/drop-oldest behavior
+    from the consumer."""
+    for i in range(n + 1):  # n+1 ticks close n bars: the first tick only opens the first bucket
+        source._handle_packet(_ticker_packet(2885, start_price + i, epoch=60 + i * 61))
+
+
+def test_the_bar_queue_never_exceeds_max_queued_bars_even_when_the_consumer_never_drains_it(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials, max_queued_bars=3)
+    source.subscribe(["RELIANCE.NS"], "1m")
+
+    _feed_n_completed_bars(source, factory, n=10)  # far more completed bars than the cap
+
+    assert source._bar_queue.qsize() == 3
+    assert source._bar_queue.full()
+
+
+def test_put_nowait_never_blocks_or_raises_once_the_queue_is_already_full(instrument_map, credentials):
+    """The entire point of cycle 21's fix: even once full, the WebSocket
+    receive thread (which _handle_packet always runs on) must never block
+    inside a Queue.put(). A blocking put would hang this test forever if the
+    fix regressed back to an unbounded/blocking design; pytest's own default
+    per-test behavior (no hang for a bounded loop of plain calls) is itself
+    the proof here, alongside the explicit non-exception assertion."""
+    source, factory = _source(instrument_map, credentials, max_queued_bars=2)
+    source.subscribe(["RELIANCE.NS"], "1m")
+
+    _feed_n_completed_bars(source, factory, n=2)  # fills the queue exactly to capacity, no overflow yet
+    assert source._bar_queue.qsize() == 2
+
+    # One more completed bar, now genuinely past capacity -- must not raise.
+    source._handle_packet(_ticker_packet(2885, 1500.0, epoch=60 + 3 * 61))
+    assert source._bar_queue.qsize() == 2
+
+
+def test_overflow_drops_the_oldest_queued_bar_not_the_newest(instrument_map, credentials):
+    """LIVE data semantics: once the consumer has fallen behind, the most
+    RECENT state is what matters on catch-up, not an ever-growing backlog of
+    stale history. Feeds exactly one bar past capacity and asserts the
+    survivors are the newest `max_queued_bars` bars, oldest-first order
+    preserved (FIFO queue, only the head was evicted)."""
+    source, factory = _source(instrument_map, credentials, max_queued_bars=3)
+    source.subscribe(["RELIANCE.NS"], "1m")
+
+    _feed_n_completed_bars(source, factory, n=5)  # 5 completed bars, 2 over the cap of 3
+
+    remaining = []
+    while not source._bar_queue.empty():
+        remaining.append(source._bar_queue.get_nowait())
+
+    # Bars close in price-ascending order (start_price + i); the two oldest
+    # (lowest-priced) must have been dropped, leaving the three newest.
+    assert [round(event.bar.open) for event in remaining] == [1402, 1403, 1404]
+
+
+def test_overflow_logs_a_warning_naming_the_dropped_bars_symbol(instrument_map, credentials, caplog):
+    source, factory = _source(instrument_map, credentials, max_queued_bars=1)
+    source.subscribe(["RELIANCE.NS"], "1m")
+
+    with caplog.at_level("WARNING", logger="live.dhan.market_data_source"):
+        _feed_n_completed_bars(source, factory, n=3)  # 2 overflow events past the cap of 1
+
+    warnings = [record for record in caplog.records if record.levelname == "WARNING"]
+    assert len(warnings) == 2
+    assert all("RELIANCE.NS" in record.getMessage() for record in warnings)
+    assert all("dropped the oldest queued bar" in record.getMessage() for record in warnings)
+
+
+def test_a_consumer_that_keeps_up_never_triggers_any_drop(instrument_map, credentials, caplog):
+    """Control case: normal operation (consumer draining via next_bar() as
+    bars complete) must never come near the cap or emit a single warning,
+    even though the cap itself is tiny here."""
+    source, factory = _source(instrument_map, credentials, max_queued_bars=2)
+    source.subscribe(["RELIANCE.NS"], "1m")
+
+    with caplog.at_level("WARNING", logger="live.dhan.market_data_source"):
+        for i in range(5):
+            event = source._handle_packet(_ticker_packet(2885, 1400.0 + i, epoch=60 + i * 61))
+            if event is not None:
+                drained = source.next_bar()
+                assert drained is event
+
+    assert source._bar_queue.qsize() == 0
+    assert not any(record.levelname == "WARNING" for record in caplog.records)
