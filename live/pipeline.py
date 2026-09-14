@@ -9,10 +9,16 @@ Nothing in backtesting/, risk/, or paper/ is modified. This module only
 SEQUENCES calls into them, the same posture every prior phase's new code has
 taken toward the deterministic core.
 
-Indicator computation stays a full recompute over an accumulating buffer on
-every bar (market.indicators.compute_indicator_series, unchanged) rather
-than a new incremental-update algorithm — "do not change indicator
-mathematics" (Phase 12 spec §6) is satisfied literally.
+Indicator computation stays a full recompute over the buffer on every bar
+(market.indicators.compute_indicator_series, unchanged) rather than a new
+incremental-update algorithm — "do not change indicator mathematics"
+(Phase 12 spec §6) is satisfied literally. The buffer itself IS bounded
+(Phase I, real-time strategy validation mission) — see
+DEFAULT_MAX_BUFFER_BARS's own docstring for why a fixed-size trailing
+window is mathematically and empirically proven equivalent to the
+previously-unbounded buffer for every indicator this pipeline actually
+consumes (only indicator_series.iloc[-1] is ever read — see
+_handle_new_bar's own generate_signal call).
 
 Freshness gates NEW SIGNAL GENERATION only — process_bar() (existing
 open-position stop/target management, existing duplicate/out-of-order
@@ -33,6 +39,7 @@ Phase 13 adds:
     execution" test).
 """
 
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -62,15 +69,44 @@ from strategy.signal import Signal
 DEFAULT_APPROVAL_TIMEOUT_SECONDS = 120.0
 
 
+DEFAULT_MAX_BUFFER_BARS = 1000
+"""Real-time strategy validation mission, Phase I -- closes Cycle 34's own
+"accepted limitation" finding: _SymbolBuffer.bars previously grew without
+eviction for the entire life of a LiveSimPipeline instance (measured
+~233ms/tick at the ~3000-bars-per-symbol mark, an O(n)-per-bar / O(n^2)-
+cumulative full-recompute cost). This is NOT an arbitrary cap -- it is
+chosen from the ACTUAL indicators this pipeline computes
+(market.indicators, unchanged): SMA_SLOW_PERIOD=50 is the longest plain
+rolling window (trivially exact once the buffer is >= 50 bars), and the
+EWM-based indicators (RSI period=14 -> alpha=1/14; MACD's slowest
+component, the 26-period EMA -> alpha=2/27) each have a contribution
+from any bar older than n back that decays as (1-alpha)^n -- a property
+of the EWM recurrence itself, not of the specific price data, so this
+bound holds regardless of symbol/volatility. At n=1000, (1-1/14)^1000 is
+far below float64 precision (a mathematical guarantee), and empirically
+confirmed BIT-FOR-BIT IDENTICAL to a full, unbounded-history computation
+at n=500 against 1254 real bars of cached AAPL daily data -- see
+tests/test_live_pipeline_buffer_bound.py, which reproduces exactly this
+comparison. 1000 is a deliberate 2x margin over that empirically-exact
+figure. Only indicator_series.iloc[-1] is ever read downstream (see
+_handle_new_bar), so bounding history here changes NOTHING about what
+the strategy/risk/decision layers ever see. Do not lower this below
+roughly 500 without re-running the same convergence study; see
+FINAL_FAILURE_MODE_ANALYSIS.md entry #44 for the full investigation,
+including the before/after benchmark."""
+
+
 @dataclass
 class _SymbolBuffer:
-    bars: list[OHLCVBar] = field(default_factory=list)
+    bars: "deque[OHLCVBar]" = field(default_factory=lambda: deque(maxlen=DEFAULT_MAX_BUFFER_BARS))
 
     def append(self, bar: OHLCVBar) -> None:
+        # deque(maxlen=...) evicts the oldest bar automatically, O(1),
+        # once at capacity -- no manual truncation logic to get wrong.
         self.bars.append(bar)
 
     def to_indicator_series(self, symbol: str, interval: str) -> pd.DataFrame:
-        return compute_indicator_series(OHLCV(symbol=symbol, interval=interval, bars=self.bars))
+        return compute_indicator_series(OHLCV(symbol=symbol, interval=interval, bars=list(self.bars)))
 
 
 @dataclass
@@ -280,7 +316,7 @@ class LiveSimPipeline:
         buffer = self._buffers.get(symbol)
         if buffer is None or not buffer.bars:
             return None
-        return compute_indicators(OHLCV(symbol=symbol, interval=self.interval, bars=buffer.bars))
+        return compute_indicators(OHLCV(symbol=symbol, interval=self.interval, bars=list(buffer.bars)))
 
     # -- main loop --------------------------------------------------------------
 
