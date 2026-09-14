@@ -39,6 +39,63 @@ def test_submit_signal_creates_a_pending_order(engine):
     assert order.status == OrderStatus.PENDING
 
 
+def test_submit_signal_is_idempotent_sequentially(engine):
+    signal = _signal()
+    first = engine.submit_signal(signal)
+    second = engine.submit_signal(signal)
+    assert first.journal_entry_id == second.journal_entry_id
+    assert len(engine.store.list_journal_entries()) == 1
+
+
+def test_submit_signal_is_idempotent_under_real_concurrent_contention(tmp_path):
+    """Autonomous hardening cycle 15: a real, reproduced race -- found via
+    a genuine multi-threaded test, not theoretical. submit_signal()'s own
+    "does a journal entry already exist" check and the transaction that
+    inserts a new one are two separate steps (a classic check-then-act
+    TOCTOU): two SEPARATE connections/engines on the SAME db file (the
+    faithful simulation of two independent processes -- e.g. a manually
+    triggered shadow-run racing an independent scheduler tick, or two
+    concurrent MCP paper_trade_signal_tool calls) racing on the IDENTICAL
+    signal previously left the LOSER with a raw, uncaught
+    sqlite3.IntegrityError instead of gracefully returning the winner's
+    own already-committed JournalEntry -- violating this method's own
+    documented idempotency contract under real contention, even though
+    the DB-level UNIQUE constraints already prevented an actual duplicate
+    row from ever being created."""
+    import threading
+
+    db_path = tmp_path / "race.db"
+    PaperStore(db_path).close()  # create the schema before threads race on it
+    signal = _signal()
+
+    results: dict[str, object] = {}
+    barrier = threading.Barrier(2)
+
+    def _attempt(key: str) -> None:
+        store = PaperStore(db_path)
+        engine_instance = PaperTradingEngine(store, initial_capital=100_000.0)
+        try:
+            barrier.wait()
+            journal = engine_instance.submit_signal(signal)
+            results[key] = journal.journal_entry_id
+        finally:
+            store.close()
+
+    t1 = threading.Thread(target=_attempt, args=("a",))
+    t2 = threading.Thread(target=_attempt, args=("b",))
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+
+    assert set(results.keys()) == {"a", "b"}, f"one side crashed instead of returning gracefully: {results}"
+    assert results["a"] == results["b"], "both racing callers must agree on the SAME journal entry"
+
+    verify_store = PaperStore(db_path)
+    assert len(verify_store.list_journal_entries()) == 1  # never a duplicate row
+    verify_store.close()
+
+
 # --- decision_id correlation (LIVE SYSTEM HARDENING mission, Issue 3) -------
 
 

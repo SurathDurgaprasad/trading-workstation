@@ -588,6 +588,20 @@
   test: tests/test_backtest_cache.py::test_an_empty_cache_file_raises_a_clear_market_data_error_not_a_raw_pandas_error
   evidence_grade: B
 
+- id: FI-CONCURRENCY-DUPLICATE-SIGNAL-SUBMIT
+  component: paper_engine
+  failure: "two independent processes/connections both call submit_signal() with the IDENTICAL signal at the same instant (e.g. a manually triggered shadow-run --paper-execute racing an independent scheduler tick, or two concurrent MCP paper_trade_signal_tool calls)"
+  injection_method: "a real temp SQLite file, two real OS threads each with their OWN PaperStore/PaperTradingEngine connection, synchronized with a threading.Barrier so both submit_signal() calls genuinely overlap"
+  expected:
+    detection: true
+    trade_authorization: N/A (idempotency, not a risk-approval question)
+    health: N/A
+    safe_response: "REAL RACE found and fixed in autonomous hardening cycle 15: submit_signal()'s own 'does a journal entry already exist' check and the transaction that inserts a new one are two separate steps (a classic check-then-act TOCTOU). The DB-level signals.signal_id PRIMARY KEY / journal_entries.signal_id UNIQUE constraint already prevented an actual DUPLICATE ROW from ever being created, but the LOSER of the race previously got a raw, uncaught sqlite3.IntegrityError instead of the documented 'return the existing result unchanged' idempotent behavior. Now caught and resolved: the loser re-reads and returns the winner's own already-committed JournalEntry."
+    recovery: N/A -- both callers now correctly observe the SAME single result
+    safety_invariant: CORRUPTED_STATE_NO_TRADE
+  test: tests/test_paper_engine.py::test_submit_signal_is_idempotent_under_real_concurrent_contention
+  evidence_grade: B
+
 # --- Expand over subsequent cycles ------------------------------------------
 #
 # NOT yet in the matrix (deliberately -- honest about scope, not padded
@@ -598,12 +612,17 @@
 # test convention does -- FastMCP's own JSON-schema argument validation,
 # exercised over the real stdio transport, is a third-party library
 # concern already covered by that library's own test suite, not
-# re-verified here), and further cache adversarial scenarios (duplicate-
-# timestamp cache rows -- investigated this cycle, found to already be
+# re-verified here), further cache adversarial scenarios (duplicate-
+# timestamp cache rows -- investigated cycle 14, found to already be
 # defended-in-depth downstream by paper/engine.py's own bar_cursor
 # idempotency for the live-trading path, not a new gap worth a
 # dedicated fix; a missing-schema-column cache file, already correctly
-# handled via OHLCV.from_dataframe's existing MarketDataError). Add one
-# row at a time, each backed by a real test, in priority order -- never
-# pad this file with a row whose `test` field does not point at real,
+# handled via OHLCV.from_dataframe's existing MarketDataError), and
+# further concurrency surfaces (dashboard.app.py's approve/reject POST
+# handlers, live/pipeline.py's approve_pending/reject_pending -- not yet
+# concurrency-attacked this campaign; live/pipeline.py is one of the 8
+# live-execution-safety files, so any change there deserves its own
+# careful, dedicated cycle rather than a rushed addition). Add one row
+# at a time, each backed by a real test, in priority order -- never pad
+# this file with a row whose `test` field does not point at real,
 # passing, collectible coverage.

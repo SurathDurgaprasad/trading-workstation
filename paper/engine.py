@@ -30,6 +30,7 @@ so EVERY caller gets them for free — historical replay, PaperSession
 """
 
 import logging
+import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -135,13 +136,42 @@ class PaperTradingEngine:
     def submit_signal(self, signal: Signal, *, strategy_version: str = "1.0") -> JournalEntry:
         """Idempotent: resubmitting the same Signal (same stable_id()) never
         creates a second order/journal row — the existing result is
-        returned unchanged (spec §8)."""
+        returned unchanged (spec §8).
+
+        Autonomous hardening cycle 15 (a real race found via a genuine
+        multi-threaded concurrency test, not theoretical): the `existing`
+        check below and the transaction that inserts a NEW signal/journal
+        are two separate steps, not one atomic operation -- a classic
+        check-then-act TOCTOU. Two callers racing on the IDENTICAL signal
+        (e.g. a manually-triggered `shadow-run --paper-execute` and an
+        independent scheduler tick, or two concurrent MCP
+        paper_trade_signal_tool calls) could both pass the `existing is
+        None` check before either had inserted. The `signals.signal_id`
+        PRIMARY KEY and `journal_entries.signal_id` UNIQUE constraint
+        already prevented a genuine DUPLICATE ROW from ever being
+        created -- that part of the idempotency contract always held --
+        but the LOSER of the race previously got a raw, uncaught
+        sqlite3.IntegrityError instead of "the existing result returned
+        unchanged," which is what this method's own docstring promises.
+        Caught here and resolved into the real idempotent behavior: the
+        loser re-reads and returns the WINNER's own committed
+        JournalEntry, exactly as if it had simply arrived a moment
+        later and found `existing` already present."""
         signal_id = signal.stable_id()
 
         existing = self.store.find_journal_entry_by_signal_id(signal_id)
         if existing is not None:
             return existing
 
+        try:
+            return self._submit_signal_transaction(signal, signal_id, strategy_version)
+        except sqlite3.IntegrityError:
+            existing = self.store.find_journal_entry_by_signal_id(signal_id)
+            if existing is not None:
+                return existing
+            raise  # a genuinely unexpected integrity failure, not the duplicate-signal race -- never swallow this
+
+    def _submit_signal_transaction(self, signal: Signal, signal_id: str, strategy_version: str) -> JournalEntry:
         with self.store.transaction():
             self.store.save_signal(signal, strategy_version=strategy_version)
 

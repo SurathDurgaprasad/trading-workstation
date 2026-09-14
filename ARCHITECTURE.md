@@ -187,6 +187,14 @@ layers alongside the existing example-based suite:
   caller, CLI or dashboard, goes through) emits a `logger.warning`, so
   the event is visible in a `--log-file`-backed log stream, not only by
   actively polling `health`/`readiness-check`.
+- **Submitting the same signal from two racing processes is genuinely
+  idempotent** — `PaperTradingEngine.submit_signal` catches the
+  `sqlite3.IntegrityError` a real check-then-act race can produce
+  (found via a genuine multi-threaded test, cycle 15) and returns the
+  winner's already-committed `JournalEntry` to the loser, instead of
+  letting it crash. The DB-level `UNIQUE` constraint already prevented
+  an actual duplicate row; this closes the "loser crashes instead of
+  returning gracefully" gap in that same guarantee.
 - **A scheduler run's terminal status can never be silently overwritten**
   — `SchedulerRunStore.finish_run` guards its UPDATE with `WHERE status =
   'RUNNING'`, raising `InvalidRunTransitionError` otherwise. Found via a
