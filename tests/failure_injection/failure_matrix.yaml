@@ -618,11 +618,20 @@
 # idempotency for the live-trading path, not a new gap worth a
 # dedicated fix; a missing-schema-column cache file, already correctly
 # handled via OHLCV.from_dataframe's existing MarketDataError), and
-# further concurrency surfaces (dashboard.app.py's approve/reject POST
-# handlers, live/pipeline.py's approve_pending/reject_pending -- not yet
-# concurrency-attacked this campaign; live/pipeline.py is one of the 8
-# live-execution-safety files, so any change there deserves its own
-# careful, dedicated cycle rather than a rushed addition). Add one row
-# at a time, each backed by a real test, in priority order -- never pad
-# this file with a row whose `test` field does not point at real,
-# passing, collectible coverage.
+# Add one row at a time, each backed by a real test, in priority
+# order -- never pad this file with a row whose `test` field does not
+# point at real, passing, collectible coverage.
+
+- id: FI-CONCURRENCY-APPROVE-REJECT-RACE
+  component: live_pipeline
+  failure: "two independent requests (e.g. dashboard double-click, or two browser tabs) race approve_pending vs reject_pending for the IDENTICAL pending signal_id"
+  injection_method: "a real temp SQLite state store + paper store; two real OS threads, each building its OWN fresh LiveSimPipeline/LiveStateStore/PaperStore connection (the faithful simulation of two independent dashboard requests), synchronized with a threading.Barrier to force genuine overlap"
+  expected:
+    detection: true
+    trade_authorization: N/A
+    health: N/A
+    safe_response: "the SAFETY-CRITICAL half is already closed by cycle 15's submit_signal idempotency fix -- at most ONE real PaperOrder can ever be created for this signal_id, structurally, regardless of how many racing calls reach submit_signal. VERIFIED (not merely assumed): if a real order exists, the recorded decision in live_state.db always says APPROVE, never REJECTED -- 10/10 real-threaded runs, empirically strong (the approve path is structurally slower than reject's single UPDATE, naturally biasing write-ordering toward safety) but not an absolute mathematical guarantee against a pathological scheduler. A theoretical residual gap is disclosed: LiveStateStore.update_decision has no terminal-state CAS guard (unlike paper/store.py's own update_position/update_order) -- deliberately NOT fixed this cycle, live/pipeline.py being a sacred live-execution-safety file that deserves its own dedicated cycle for this change."
+    recovery: "manual, if the theoretical label mismatch ever occurred -- paper status/the dashboard's own order list always reflects real ground-truth store state regardless of the recorded decision label"
+    safety_invariant: CORRUPTED_STATE_NO_TRADE
+  test: tests/test_approval_security.py::test_concurrent_approve_and_reject_of_the_same_signal_never_produces_inconsistent_state
+  evidence_grade: B

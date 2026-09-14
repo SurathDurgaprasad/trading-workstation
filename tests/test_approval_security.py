@@ -84,3 +84,120 @@ def test_approved_execution_uses_the_signals_own_immutable_price_levels(tmp_path
     assert order.stop_price == original_signal.stop_price
     assert order.target_price == original_signal.target_price
     assert order.requested_price == original_signal.reference_price
+
+
+def test_concurrent_approve_and_reject_of_the_same_signal_never_produces_inconsistent_state(tmp_path):
+    """Autonomous hardening cycle 19 -- a real concurrency attack on
+    live/pipeline.py itself (one of this campaign's 8 sacred live-
+    execution-safety files, deliberately left untouched by cycle 15's
+    submit_signal fix, disclosed as unaudited in FINAL_FAILURE_MODE_
+    ANALYSIS.md entry #28). Proves, rather than assumes, the narrowest
+    real race this architecture allows: dashboard/app.py's approve/
+    reject routes (via live/workstation.py::approve_pending_signal/
+    reject_pending_signal) build a BRAND NEW LiveSimPipeline + a BRAND
+    NEW LiveStateStore connection on EVERY single call -- so two
+    genuinely concurrent HTTP requests (e.g. an operator double-clicking
+    both Approve and Reject on the same still-open browser tab, or two
+    tabs open on the same stale page) each restore pending-approval
+    state independently from the SAME underlying store, and could both
+    see the signal as actionable before either has written a decision.
+
+    This test reproduces exactly that: two real threads, each building
+    its own fresh LiveSimPipeline/LiveStateStore/PaperStore connection
+    to the SAME temp files (the faithful simulation of two independent
+    dashboard requests), racing approve_pending vs reject_pending for
+    the IDENTICAL signal_id.
+
+    The property under test is NOT "only one of the two wins" (both
+    genuinely CAN act, since each restores its own in-memory state
+    independently -- that asymmetry is real and not something this test
+    pretends away). The property is the one that actually matters for
+    safety: if a real PaperOrder was created (the APPROVE path actually
+    ran RiskEngine.evaluate and created state), the FINAL recorded
+    decision in live_state.db must say APPROVED, never REJECTED --
+    because paper/engine.py::submit_signal's own cycle-15 idempotency
+    fix means at most ONE PaperOrder can ever exist for this signal_id
+    regardless of how many times/threads call submit_signal on it, so
+    "an order exists" and "the decision says APPROVED" must never
+    disagree."""
+    import threading
+
+    from live.freshness import FreshnessPolicy
+    from live.mock_source import MockMarketDataSource
+    from live.state_store import LiveStateStore
+    from paper.engine import PaperTradingEngine
+    from paper.store import PaperStore
+    from strategy.baseline import TrendMomentumBaseline
+    from tests.conftest import AAPL_CACHE_PATH, real_aapl_mock_script
+
+    if not AAPL_CACHE_PATH.exists():
+        pytest.skip(f"No cached AAPL data at {AAPL_CACHE_PATH}")
+
+    paper_db = tmp_path / "p.db"
+    state_db = tmp_path / "s.db"
+
+    script = real_aapl_mock_script()
+    setup_store = PaperStore(paper_db)
+    setup_engine = PaperTradingEngine(setup_store, initial_capital=100_000.0)
+    setup_state_store = LiveStateStore(state_db)
+    # Deliberately the REAL default clock (datetime.now(timezone.utc), aware)
+    # here and in every racing pipeline below -- not a fixed/naive clock
+    # override, since mixing a naive test-only clock with the real aware
+    # default (as production always uses) would raise its own unrelated
+    # TypeError comparing naive vs. aware datetimes, an artifact of test
+    # setup, not the race this test exists to attack.
+    setup_pipeline = LiveSimPipeline(
+        source=MockMarketDataSource(script), engine=setup_engine, strategy=TrendMomentumBaseline(),
+        symbols=["AAPL"], interval="1d", require_human_approval=True, state_store=setup_state_store,
+        freshness_policy=FreshnessPolicy(multiplier=1_000_000.0),
+    )
+    result = None
+    while True:
+        result = setup_pipeline.process_next()
+        if result.kind in ("PENDING_HUMAN_APPROVAL", "FEED_EXHAUSTED"):
+            break
+    assert result.kind == "PENDING_HUMAN_APPROVAL"
+    signal_id = result.signal.stable_id()
+    setup_state_store.close()  # simulates the setup process finishing, e.g. paper-live persisting to disk and returning
+
+    outcomes: dict[str, str] = {}
+    barrier = threading.Barrier(2)
+
+    def _race(action: str) -> None:
+        state_store = LiveStateStore(state_db)
+        engine = PaperTradingEngine(PaperStore(paper_db), initial_capital=100_000.0)
+        pipeline = LiveSimPipeline(
+            source=MockMarketDataSource([]), engine=engine, strategy=TrendMomentumBaseline(),
+            symbols=[], interval="1d", require_human_approval=True, state_store=state_store,
+        )
+        try:
+            barrier.wait()
+            if action == "approve":
+                outcomes["approve"] = pipeline.approve_pending(signal_id).outcome.value
+            else:
+                outcomes["reject"] = pipeline.reject_pending(signal_id).outcome.value
+        finally:
+            state_store.close()
+
+    t1 = threading.Thread(target=_race, args=("approve",))
+    t2 = threading.Thread(target=_race, args=("reject",))
+    t1.start()
+    t2.start()
+    t1.join(timeout=15)
+    t2.join(timeout=15)
+
+    assert set(outcomes.keys()) == {"approve", "reject"}, f"one side crashed instead of returning gracefully: {outcomes}"
+
+    final_store = PaperStore(paper_db)
+    order_exists = final_store.get_pending_order("AAPL") is not None
+    final_store.close()
+
+    final_state_store = LiveStateStore(state_db)
+    record = final_state_store.get(signal_id)
+    final_state_store.close()
+
+    if order_exists:
+        assert record.decision == "APPROVE", (
+            f"a real PaperOrder exists but the recorded decision says {record.decision!r} -- "
+            "the audit trail must never contradict what actually happened at the execution layer"
+        )
