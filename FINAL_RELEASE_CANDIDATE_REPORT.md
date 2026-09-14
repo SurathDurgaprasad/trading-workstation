@@ -179,6 +179,26 @@ fatal to a fresh install. Fixed by pinning the actual tested version
 82 skipped cleanly**. Further smoke-tested `health`, `universe`,
 `scan` (real Yahoo data), and `paper status` in that same environment.
 
+**Re-verified, autonomous hardening cycle 18** (this original snapshot
+predates the entire "AUTONOMOUS EXTREME HARDENING" and subsequent
+campaigns -- `requirements.txt` has since gained `hypothesis` (cycle
+7) among other changes, so a fresh clean-install proof was overdue).
+Identical methodology, a genuine `git clone` of `main` at `acad1c8`
+into an isolated directory (a short path was required -- the default
+scratchpad path exceeded Windows' `MAX_PATH` for git's own internal
+object paths, an environment artifact, not a project defect), a
+brand-new venv, `pip install -r requirements.txt` (clean resolution,
+`hypothesis==6.168.0` installed exactly at its pinned version, zero
+conflicts), one single-pass `pytest` run: **2246 passed, 0 failed, 83
+skipped cleanly** (skips are the same cache-dependent tests that
+correctly skip without a pre-populated `data/market/` cache; the total
+2246+83=2329 exactly matches the dev-venv full regression count at
+this same commit). Further smoke-tested `health`, `readiness-check`,
+and `paper status` in that same fresh environment -- all correct
+(DEGRADED overall from the expected missing Ollama/Dhan credentials in
+this environment, never a crash; a fresh paper account initializes
+cleanly with `Reconciliation: OK`).
+
 **Claude Code runtime dependency: NONE.** Proven by removal, not just
 static analysis: `.claude/`, `.cursor/`, `.cursorignore`, and
 `.mcp.json` were deleted from the clean-install clone, and every
