@@ -45,7 +45,7 @@ from live.approval import SignalLifecycle, SignalLifecycleState
 from live.contracts import NO_NEW_BAR, FeedDisconnectedError, MarketDataSource
 from live.critic_gate import CriticGate
 from live.freshness import DEFAULT_FRESHNESS_POLICY, FreshnessPolicy, FreshnessResult
-from live.state_store import LiveStateStore
+from live.state_store import InvalidDecisionTransitionError, LiveStateStore
 from market.data_provider import OHLCV, OHLCVBar
 from market.indicators import TechnicalIndicators, compute_indicators, compute_indicator_series
 from paper.engine import Bar, BarOutcome, PaperTradingEngine
@@ -386,10 +386,20 @@ class LiveSimPipeline:
             if now > pending.expires_at:
                 pending.lifecycle.transition_to(SignalLifecycleState.APPROVAL_EXPIRED, now=now)
                 if self.state_store is not None:
-                    self.state_store.update_decision(
-                        signal_id, state=pending.lifecycle.state.value, history=pending.lifecycle.history,
-                        decision="EXPIRED", decision_reason="approval_timeout_seconds exceeded", decided_at=now,
-                    )
+                    try:
+                        self.state_store.update_decision(
+                            signal_id, state=pending.lifecycle.state.value, history=pending.lifecycle.history,
+                            decision="EXPIRED", decision_reason="approval_timeout_seconds exceeded", decided_at=now,
+                        )
+                    except InvalidDecisionTransitionError:
+                        # Someone else's approve/reject already won this
+                        # race before the expiry check reached it -- this
+                        # entry was never truly "expired" in the persisted
+                        # record, so it is NOT counted below. Still remove
+                        # it from THIS pipeline's own in-memory backlog --
+                        # it is no longer actionable here either way.
+                        del self.pending_approvals[signal_id]
+                        continue
                 del self.pending_approvals[signal_id]
                 expired_ids.append(signal_id)
         return expired_ids
@@ -409,11 +419,35 @@ class LiveSimPipeline:
         now = self._clock()
         pending.lifecycle.transition_to(SignalLifecycleState.HUMAN_APPROVED, now=now)
 
+        if self.state_store is not None:
+            try:
+                # Autonomous hardening cycle 20, corrected after cycle 19's
+                # own concurrency test caught a first, INCOMPLETE attempt
+                # at this fix (guarding only the later write, below, was
+                # too late -- submit_signal had already run unconditionally
+                # by then). This CLAIM write happens FIRST, before
+                # submit_signal (the real state-mutating call) ever runs:
+                # only the first caller to move this signal_id OUT of
+                # PENDING_HUMAN_APPROVAL wins it. Once this succeeds, this
+                # call holds EXCLUSIVE ownership of signal_id -- no other
+                # racing caller could also reach this point for it.
+                self.state_store.update_decision(
+                    signal_id, state=pending.lifecycle.state.value, history=pending.lifecycle.history,
+                    decision="APPROVE", decision_reason=reason, decided_at=now,
+                )
+            except InvalidDecisionTransitionError:
+                # Someone else's decision for this SAME signal_id already
+                # won the race. submit_signal has NOT been called yet --
+                # no order was created by this losing attempt.
+                return ApprovalActionResult(outcome=ApprovalActionOutcome.ALREADY_DECIDED, signal_id=signal_id, reason=reason)
+
         # THE mandatory second risk check — re-derives everything from
         # CURRENT account state via the real RiskEngine, inside
         # submit_signal(). The signal's own price levels are immutable
         # (frozen Pydantic, set at generation time); only account-dependent
-        # sizing/approval is re-evaluated here.
+        # sizing/approval is re-evaluated here. Safe to call unconditionally
+        # now: the claim above already guarantees exclusive ownership of
+        # signal_id for this call.
         journal = self.engine.submit_signal(pending.signal)
         was_approved = journal.outcome.value.startswith("APPROVED")
         final_state = SignalLifecycleState.EXECUTED if was_approved else SignalLifecycleState.RISK_REJECTED
@@ -426,9 +460,11 @@ class LiveSimPipeline:
                 approved_quantity = redecision.position_size.quantity
 
         if self.state_store is not None:
-            self.state_store.update_decision(
-                signal_id, state=pending.lifecycle.state.value, history=pending.lifecycle.history, decision="APPROVE",
-                decision_reason=reason, approved_quantity=approved_quantity, final_execution_result=journal.outcome.value, decided_at=now,
+            # The follow-up write, recording submit_signal's own outcome --
+            # no CAS guard needed (see finalize_decision's own docstring).
+            self.state_store.finalize_decision(
+                signal_id, state=pending.lifecycle.state.value, history=pending.lifecycle.history,
+                approved_quantity=approved_quantity, final_execution_result=journal.outcome.value,
             )
 
         result_outcome = ApprovalActionOutcome.APPROVED if was_approved else ApprovalActionOutcome.REJECTED
@@ -444,10 +480,15 @@ class LiveSimPipeline:
         pending.lifecycle.transition_to(SignalLifecycleState.HUMAN_REJECTED, now=now)
 
         if self.state_store is not None:
-            self.state_store.update_decision(
-                signal_id, state=pending.lifecycle.state.value, history=pending.lifecycle.history,
-                decision="REJECT", decision_reason=reason, decided_at=now,
-            )
+            try:
+                self.state_store.update_decision(
+                    signal_id, state=pending.lifecycle.state.value, history=pending.lifecycle.history,
+                    decision="REJECT", decision_reason=reason, decided_at=now,
+                )
+            except InvalidDecisionTransitionError:
+                # See the identical comment in approve_pending above --
+                # another caller's decision for this signal_id already won.
+                return ApprovalActionResult(outcome=ApprovalActionOutcome.ALREADY_DECIDED, signal_id=signal_id, reason=reason)
         return ApprovalActionResult(outcome=ApprovalActionOutcome.REJECTED, signal_id=signal_id, reason=reason)
 
     def _check_actionable(self, signal_id: str) -> ApprovalActionResult | None:

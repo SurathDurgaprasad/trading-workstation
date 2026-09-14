@@ -86,6 +86,74 @@ def test_approved_execution_uses_the_signals_own_immutable_price_levels(tmp_path
     assert order.requested_price == original_signal.reference_price
 
 
+def test_approve_pending_never_calls_submit_signal_when_the_claim_is_already_lost(tmp_path):
+    """Autonomous hardening cycle 20 -- a DETERMINISTIC proof of the actual
+    fix mechanism, complementing the probabilistic thread-race test below.
+
+    The real bug this pins: a first attempt at this fix only guarded the
+    LATER write (recording EXECUTED/RISK_REJECTED) -- but by the time that
+    write ran, submit_signal() had ALREADY executed unconditionally,
+    already creating a real PaperOrder regardless of who "won." Cycle 19's
+    own concurrent-thread test caught this the moment it was implemented
+    (a genuinely useful regression, not a hypothetical one). The corrected
+    fix moves the guarded CLAIM write to happen FIRST, before
+    submit_signal runs at all -- this test proves that ordering directly,
+    deterministically, without depending on real thread-scheduling luck:
+    pre-set the persisted state to already-decided (simulating "someone
+    else's decision already won"), then call approve_pending and assert
+    submit_signal was never reached."""
+    from datetime import datetime
+    from unittest.mock import MagicMock
+
+    from live.state_store import LiveStateStore
+    from paper.engine import PaperTradingEngine
+    from paper.store import PaperStore
+    from live.freshness import FreshnessPolicy
+    from live.mock_source import MockMarketDataSource
+    from strategy.baseline import TrendMomentumBaseline
+    from tests.conftest import AAPL_CACHE_PATH, real_aapl_mock_script
+
+    if not AAPL_CACHE_PATH.exists():
+        pytest.skip(f"No cached AAPL data at {AAPL_CACHE_PATH}")
+
+    script = real_aapl_mock_script()
+    store = PaperStore(tmp_path / "p.db")
+    engine = PaperTradingEngine(store, initial_capital=100_000.0)
+    state_store = LiveStateStore(tmp_path / "s.db")
+    pipeline = LiveSimPipeline(
+        source=MockMarketDataSource(script), engine=engine, strategy=TrendMomentumBaseline(), symbols=["AAPL"], interval="1d",
+        require_human_approval=True, state_store=state_store,
+        freshness_policy=FreshnessPolicy(multiplier=1_000_000.0), clock=lambda: datetime(2026, 8, 26),
+    )
+    result = None
+    while True:
+        result = pipeline.process_next()
+        if result.kind in ("PENDING_HUMAN_APPROVAL", "FEED_EXHAUSTED"):
+            break
+    assert result.kind == "PENDING_HUMAN_APPROVAL"
+    signal_id = result.signal.stable_id()
+
+    # Simulate "someone else's reject already won" by directly moving the
+    # persisted row out of PENDING_HUMAN_APPROVAL, exactly as reject_pending
+    # itself would have -- without going through the pipeline's own
+    # in-memory pending_approvals dict at all (that dict still (wrongly, in
+    # a real race) believes the signal is actionable, matching the real
+    # multi-process scenario this defends against).
+    state_store._conn.execute("UPDATE pending_approvals SET state='HUMAN_REJECTED' WHERE signal_id=?", (signal_id,))
+
+    original_submit_signal = engine.submit_signal
+    mock_submit_signal = MagicMock(side_effect=AssertionError("submit_signal must never be called once the claim is already lost"))
+    engine.submit_signal = mock_submit_signal
+    try:
+        action = pipeline.approve_pending(signal_id)
+    finally:
+        engine.submit_signal = original_submit_signal
+
+    assert action.outcome.value == "ALREADY_DECIDED"
+    mock_submit_signal.assert_not_called()
+    assert store.get_pending_order("AAPL") is None  # no order was ever created
+
+
 def test_concurrent_approve_and_reject_of_the_same_signal_never_produces_inconsistent_state(tmp_path):
     """Autonomous hardening cycle 19 -- a real concurrency attack on
     live/pipeline.py itself (one of this campaign's 8 sacred live-

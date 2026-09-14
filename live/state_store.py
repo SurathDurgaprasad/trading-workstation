@@ -53,6 +53,37 @@ from strategy.signal import Signal
 
 logger = logging.getLogger(__name__)
 
+
+class InvalidDecisionTransitionError(Exception):
+    """Autonomous hardening cycle 20 -- mirrors paper/store.py's
+    InvalidPositionTransitionError/InvalidOrderTransitionError and
+    scheduler/store.py's InvalidRunTransitionError: update_decision()
+    now guards its UPDATE the same way (WHERE the row's CURRENT state
+    is still PENDING_HUMAN_APPROVAL), closing the one remaining store
+    in this project's live-trading path that still allowed an
+    unconditional overwrite of an already-decided row. Found via a real
+    concurrency attack (autonomous hardening cycle 19,
+    tests/test_approval_security.py): two independent dashboard
+    requests (each building its own fresh LiveSimPipeline/
+    LiveStateStore connection) racing approve_pending vs reject_pending
+    for the SAME signal_id could each, in principle, have their
+    decision recorded depending on write-ordering timing alone -- never
+    a duplicated real trade (paper/engine.py::submit_signal's own
+    cycle-15 idempotency guard already prevents that), but a real gap
+    in "the audit trail must never contradict what actually happened."
+    Raised when a caller tries to record a decision for a signal_id
+    whose persisted state has already moved past PENDING_HUMAN_APPROVAL
+    -- i.e. someone else's decision already won."""
+
+    def __init__(self, *, signal_id: str, attempted_state: str):
+        self.signal_id = signal_id
+        self.attempted_state = attempted_state
+        super().__init__(
+            f"Cannot record decision {attempted_state!r} for signal {signal_id!r} -- its persisted state is no "
+            "longer PENDING_HUMAN_APPROVAL (another caller's decision already won this race). Not overwritten."
+        )
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS pending_approvals (
     signal_id TEXT PRIMARY KEY,
@@ -250,11 +281,51 @@ class LiveStateStore:
         decision_reason: str | None = None, approved_quantity: int | None = None, final_execution_result: str | None = None,
         decided_at: datetime | None = None,
     ) -> None:
-        self._conn.execute(
+        """Autonomous hardening cycle 20: guarded exactly like every other
+        terminal-state transition in this project's stores (Position,
+        PaperOrder, SchedulerRun) -- a decision can only ever be recorded
+        FROM PENDING_HUMAN_APPROVAL, never overwriting an already-decided
+        row. `WHERE state = 'PENDING_HUMAN_APPROVAL'` rather than trusting
+        every caller to have re-checked first; see
+        InvalidDecisionTransitionError's own docstring for the real race
+        this closes."""
+        cursor = self._conn.execute(
             "UPDATE pending_approvals SET state=?, history_json=?, decision=?, decision_reason=?, "
-            "approved_quantity=?, final_execution_result=?, decided_at=?, updated_at=? WHERE signal_id=?",
+            "approved_quantity=?, final_execution_result=?, decided_at=?, updated_at=? "
+            "WHERE signal_id=? AND state='PENDING_HUMAN_APPROVAL'",
             (state, _serialize_history(history), decision, decision_reason, approved_quantity, final_execution_result,
              decided_at.isoformat() if decided_at else None, _now(), signal_id),
+        )
+        if cursor.rowcount == 0:
+            existing = self._conn.execute("SELECT 1 FROM pending_approvals WHERE signal_id = ?", (signal_id,)).fetchone()
+            if existing is None:
+                raise ValueError(f"Cannot record a decision for signal_id={signal_id!r}: no such pending approval exists.")
+            raise InvalidDecisionTransitionError(signal_id=signal_id, attempted_state=state)
+
+    def finalize_decision(
+        self, signal_id: str, *, state: str, history: list[tuple],
+        approved_quantity: int | None = None, final_execution_result: str | None = None,
+    ) -> None:
+        """Autonomous hardening cycle 20: the SECOND write of
+        approve_pending()'s own two-phase sequence -- `update_decision`
+        above is the CLAIM (guarded: only the first caller to move a
+        signal_id OUT of PENDING_HUMAN_APPROVAL wins it), called BEFORE
+        submit_signal ever runs; this is the follow-up write recording
+        submit_signal's own outcome (EXECUTED vs RISK_REJECTED from the
+        SECOND risk check, and the resulting approved_quantity), called
+        only by whichever caller already won the claim above. No CAS
+        guard needed here -- by construction, at most one caller can ever
+        reach this method for a given signal_id (the claim already made
+        that exclusive), so an unconditional update is genuinely safe,
+        not merely convenient. `decision`/`decision_reason`/`decided_at`
+        are deliberately NOT touched here -- those were already recorded
+        correctly by the claim write above, at the moment the human
+        actually decided; this call only ever refines state/history/the
+        execution outcome fields."""
+        self._conn.execute(
+            "UPDATE pending_approvals SET state=?, history_json=?, approved_quantity=?, final_execution_result=?, updated_at=? "
+            "WHERE signal_id=?",
+            (state, _serialize_history(history), approved_quantity, final_execution_result, _now(), signal_id),
         )
 
     def get(self, signal_id: str) -> PendingApprovalRecord | None:

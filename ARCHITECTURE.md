@@ -187,6 +187,14 @@ layers alongside the existing example-based suite:
   caller, CLI or dashboard, goes through) emits a `logger.warning`, so
   the event is visible in a `--log-file`-backed log stream, not only by
   actively polling `health`/`readiness-check`.
+- **Approving and rejecting the same pending signal from two racing
+  requests can never create a duplicate order or a misleading audit
+  label** — `LiveStateStore.update_decision` CLAIMS a `signal_id`
+  (`WHERE state='PENDING_HUMAN_APPROVAL'`) before `submit_signal` ever
+  runs, not after; the losing caller returns `ALREADY_DECIDED` without
+  ever reaching `submit_signal`. Found and fixed cycle 20 after a
+  first, guard-too-late fix attempt was itself caught by cycle 19's
+  own concurrency test.
 - **Submitting the same signal from two racing processes is genuinely
   idempotent** — `PaperTradingEngine.submit_signal` catches the
   `sqlite3.IntegrityError` a real check-then-act race can produce
