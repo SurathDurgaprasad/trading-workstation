@@ -26,7 +26,7 @@ run against a live external service).
 | Yahoo Finance intraday (5-min bars, ~60-day window) | IMPLEMENTED, VERIFIED | `market_data/providers/yahoo.py`, exercised throughout `tests/`, this campaign's own `_ScriptedStrategy`/`TrendMomentumBaseline` tests | Delayed data, not tick-level real-time |
 | India VIX + NSE sector indices | IMPLEMENTED, VERIFIED | `market_intelligence/regime.py` (per prior-cycle memory, re-affirmed unchanged this campaign) | Sourced via Yahoo, not an official NSE feed |
 | NSE/BSE/SEBI direct feed | NOT_IMPLEMENTED | — | No official public API exists; documented, unchanged limitation across the whole campaign |
-| Dhan WebSocket live market data | IMPLEMENTED, live-capable; **NOT live-verified** | `live/dhan/market_data_source.py::_WebsocketClientTransport` (verified this session: real `websocket-client==1.9.0` library, real `WebSocketApp`, not mocked in production code) | Never run against a real Dhan account/credentials in this environment — every existing test uses `transport_factory` dependency injection with a fake transport. Evidence grade: SIMULATED / VERIFIED throughout this campaign's own failure matrix, never REAL PROVIDER / VERIFIED |
+| Dhan WebSocket live market data | IMPLEMENTED; **REST auth + WebSocket connectivity LIVE-VERIFIED this cycle; live tick reception NOT LIVE-VERIFIED** | `live/dhan/market_data_source.py::_WebsocketClientTransport` (real `websocket-client==1.9.0` library, real `WebSocketApp`). **Real credentials became available this cycle** (`.env`, user-authorized read-only use) — ran the existing `python main.py readiness-check --deep` unmodified against the REAL Dhan API: `[PASS]` real HTTP 200 from `/fundlimit` (0.78s round-trip), `[PASS]` WebSocket reached `CONNECTED` and subscribed to RELIANCE.NS. See `FINAL_FAILURE_MODE_ANALYSIS.md` entry #45. | No live tick was received within the 25s check window because markets were CLOSED at test time (19:22 IST, ~4h after the 15:30 IST close) -- not a defect, an expected consequence of running outside trading hours. A re-run during real NSE market hours on a trading day would be needed to verify end-to-end tick reception. Order placement remains completely untouched -- this check contains no order-path code at all. |
 | Data validation (HEALTHY/DEGRADED/INVALID) | IMPLEMENTED, VERIFIED | `market_data/validation.py::validate_ohlcv`, wired into `market_intelligence/scanner.py`; end-to-end test proves INVALID symbols produce zero decisions/orders | — |
 | Duplicate-bar rejection | IMPLEMENTED, VERIFIED | `paper/engine.py::process_bar` (Phase 7A), cycle 22/23/28 hardening; process-level and cross-source proof (cycle 28) | — |
 | Out-of-order-bar rejection | IMPLEMENTED, VERIFIED | `OutOfOrderBarError`, `CandleBuilder`'s late/out-of-order guard (cycle 28's own full-pipeline proof) | — |
@@ -73,7 +73,7 @@ run against a live external service).
 | Paper order idempotency | IMPLEMENTED, VERIFIED, mutation-tested | Cycle 15 (TOCTOU fix), cycle 29 (composition with scheduler reclaim proven) | Effectively-once, not mathematically exactly-once — explicitly the honest characterization this campaign settled on (cycle 26) |
 | Real broker order placement | **DISABLED_BY_DESIGN** | `live/dhan/broker_adapter.py::DisabledDhanOrderExecutor.place_order` unconditionally raises `RealOrderPlacementDisabledError`; verified fresh this session by reading the actual source, not documentation; not wired into any execution path anywhere | No configuration flag, environment variable, or subclass override can change this without a source-code change |
 | `MockBrokerAdapter` | IMPLEMENTED, MOCKED (paper-only) | `live/broker.py` — delegates entirely to `PaperTradingEngine`, verified fresh this session | Not a broker connection of any kind — the name is a Protocol-conformance rehearsal, not real broker access |
-| `DhanAccountReader` (real fund/position/holding read access) | IMPLEMENTED, live-capable, **NOT live-verified** | `live/dhan/broker_adapter.py` — genuine read-only REST calls, no mutation methods exist | Never exercised against a real Dhan account in this environment |
+| `DhanAccountReader` (real fund/position/holding read access) | IMPLEMENTED, live-capable, **NOT live-verified directly** | `live/dhan/broker_adapter.py` — genuine read-only REST calls, no mutation methods exist. Wraps the SAME `live.dhan.rest_client.DhanRestClient` this cycle's `readiness-check --deep` proved authenticates successfully against the real Dhan API (entry #45) — the underlying authenticated transport is live-proven, but `DhanAccountReader`'s own specific position/holding methods were not themselves called this cycle. | This class's own methods (not just its shared REST client) have never been directly exercised against a real Dhan account |
 | Cost model (slippage, brokerage) | IMPLEMENTED, VERIFIED | `backtesting/costs.py::CostModel`, genuinely applied at every `paper/engine.py::PaperTradingEngine` fill (`slippage_adjusted_price`/`cost_for_fill`). **Real defect found and closed this cycle (Phase 8, FINAL_FAILURE_MODE_ANALYSIS.md entry #43)**: `paper`/`live-sim`/`paper-live` (including the real-time paper-live command this mission centers on) previously always defaulted to the generic, explicitly-non-market-specific `CostModel()` -- ZERO STT/exchange charges for every NSE symbol, silently. Now have the same explicit, disclosed `--cost-model {default, india_nse_intraday_2026}` opt-in `backtest-universe` already had; default unchanged for backward compatibility, choice printed at startup. 7 new mutation-tested tests. | GST and stamp duty remain NOT modeled even under `india_nse_intraday_2026` (a documented, disclosed approximation -- small relative to STT/brokerage at this level). Default behavior is STILL the zero-STT generic model unless `--cost-model india_nse_intraday_2026` is explicitly passed -- a real NSE-realistic paper-live run requires the operator to pass this flag. |
 
 ## 6. Persistence / recovery / concurrency
@@ -157,17 +157,27 @@ this document.
 
 ## Live verdict (established this cycle from direct source inspection)
 
-- **Market data**: live-capable (Dhan WebSocket, real library), **not
-  live-verified** (no credentials exercised in this environment). Yahoo
-  Finance intraday is the actually-exercised data path.
+- **Market data**: REST authentication and WebSocket connectivity
+  **LIVE-VERIFIED this cycle** (real Dhan credentials became available;
+  see `FINAL_FAILURE_MODE_ANALYSIS.md` entry #45) via the existing,
+  unmodified `readiness-check --deep` — real HTTP 200 from `/fundlimit`,
+  real WebSocket `CONNECTED` state, clean subscribe/close. Live TICK
+  RECEPTION specifically remains **not live-verified** — the test ran
+  outside NSE market hours (markets closed), so no tick data existed to
+  receive regardless of connection health; a re-run during real trading
+  hours would be needed for that specific claim. Yahoo Finance intraday
+  is still the actually-exercised data path for every OTHER live/paper
+  command in this campaign.
 - **Paper execution**: real, integrated, the sole execution path.
 - **Broker execution**: implemented-and-disabled by explicit design
-  (`RealOrderPlacementDisabledError`, no bypass exists).
+  (`RealOrderPlacementDisabledError`, no bypass exists) — untouched by
+  the above; `readiness-check --deep` contains no order-path code.
 - **Live-money operation**: not enabled, not authorized, not attempted.
 
 ## Can it actually trade?
 
 - **Paper**: YES.
-- **Broker-connected (data only)**: YES (Dhan WebSocket data, unverified
-  against a live account).
+- **Broker-connected (data only)**: YES — REST auth + WebSocket connect
+  now LIVE-VERIFIED against a real account; live tick reception specifically
+  still unverified (tested outside market hours).
 - **Real-money**: NO — structurally disabled.
