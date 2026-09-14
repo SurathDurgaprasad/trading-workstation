@@ -1042,9 +1042,20 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
               f"{state_db_path}` to clear it.")
     print("=" * 60)
 
+    # Autonomous hardening cycle 36: --record-predictions, explicit opt-in,
+    # default off -- byte-for-byte unaffected behavior for every existing
+    # caller that omits it. See live/prediction_recorder.py's own module
+    # docstring for the full architectural reasoning; this is a pure
+    # observability bridge, never touching risk/sizing/approval/execution.
     processed = 0
+    prediction_store = None
     try:
-        processed = _run_paper_live_loop(args, pipeline, engine, store, status_label, processed)
+        if args.record_predictions:
+            from predictions.store import PredictionStore
+
+            prediction_store = PredictionStore(args.predictions_db or DEFAULT_PREDICTIONS_DB_PATH)
+            print(f"PREDICTIONS: recording to {args.predictions_db or DEFAULT_PREDICTIONS_DB_PATH} (horizon={args.prediction_horizon_bars} bars)")
+        processed = _run_paper_live_loop(args, pipeline, engine, store, status_label, processed, prediction_store=prediction_store)
     except KeyboardInterrupt:
         print(f"\n[{status_label}] Interrupted by user (Ctrl+C) -- shutting down cleanly.")
     finally:
@@ -1053,6 +1064,8 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
         # the real WebSocket connection open, relying entirely on daemon-thread/process teardown rather
         # than a deliberate close(). Must run regardless of how the loop above exits.
         source.close()
+        if prediction_store is not None:
+            prediction_store.close()
 
     print(f"\n[{status_label}] Bars processed: {processed}")
     _print_account_block(engine.account)
@@ -1071,11 +1084,25 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
     print("\nThis is still simulated trading. No real broker is connected. No real order can be placed.")
 
 
-def _run_paper_live_loop(args: argparse.Namespace, pipeline, engine, store, status_label: str, processed: int) -> int:
+def _run_paper_live_loop(args: argparse.Namespace, pipeline, engine, store, status_label: str, processed: int, *, prediction_store=None) -> int:
     while args.max_bars is None or processed < args.max_bars:
         result = pipeline.process_next()
         for expired_id in result.expired_signal_ids:
             print(f"\n[EXPIRED] signal {expired_id[:12]} -- approval window elapsed without a decision.")
+
+        # Autonomous hardening cycle 36: fires for EVERY result carrying a
+        # signal, regardless of what happened to it next (PENDING_HUMAN_
+        # APPROVAL, CRITIC_REJECTED, KILL_SWITCH_ACTIVE, or an auto-mode
+        # BAR_PROCESSED) -- see live/prediction_recorder.py's own
+        # docstring. Best-effort by construction: never raises, never
+        # affects processed/result below.
+        if prediction_store is not None and result.signal is not None:
+            from live.prediction_recorder import record_prediction_for_signal
+
+            record_prediction_for_signal(
+                result, pipeline=pipeline, engine=engine, prediction_store=prediction_store,
+                horizon_bars=args.prediction_horizon_bars,
+            )
 
         if result.kind == "FEED_EXHAUSTED":
             print(f"\n[{status_label}] Feed exhausted -- replay complete.")
@@ -3772,6 +3799,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "refreshing every live tick would be wasted network calls, not extra safety)."
         ),
     )
+    paper_live_parser.add_argument(
+        "--record-predictions", action="store_true",
+        help=(
+            "Explicit opt-in, default off: record every signal this session generates (whether it becomes "
+            "PENDING_HUMAN_APPROVAL, CRITIC_REJECTED, KILL_SWITCH_ACTIVE, or auto-approved) as an immutable "
+            "PredictionRecord in the SAME predictions.db `python main.py predict`/`shadow-run`/`evaluate` already "
+            "use (see live/prediction_recorder.py) -- bridges this project's existing outcome-resolution engine "
+            "to the live/paper-live path for the first time. Recording is best-effort observability only: it "
+            "never influences risk, sizing, approval, or execution, and a recording failure never stops the "
+            "session. Run `python main.py evaluate` later (or on a schedule) to resolve these against real "
+            "subsequent market data, same as any other prediction."
+        ),
+    )
+    paper_live_parser.add_argument("--predictions-db", type=str, default=None, help=f"SQLite prediction-ledger path, only used with --record-predictions (default: {DEFAULT_PREDICTIONS_DB_PATH}).")
+    paper_live_parser.add_argument("--prediction-horizon-bars", type=int, default=20, help="Bars to monitor before an unresolved recorded prediction is marked EXPIRED (default: 20, matching predict/shadow-run's own default).")
 
     dashboard_parser = subparsers.add_parser(
         "dashboard",

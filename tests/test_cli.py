@@ -1291,6 +1291,56 @@ def test_run_paper_live_command_auto_approve_end_to_end(tmp_path, capsys):
 
 
 @pytestmark_paper_live
+def test_run_paper_live_command_records_predictions_end_to_end(tmp_path, capsys):
+    """Autonomous hardening cycle 36 -- proves the new --record-predictions
+    wiring through the REAL CLI entrypoint (parse_args -> run_paper_live_
+    command -> _run_paper_live_loop -> live/prediction_recorder.py), not
+    just live/prediction_recorder.py's own unit tests. Real cached AAPL
+    data, the real strategy, the real risk engine, the real
+    PredictionStore -- only network access is faked (cached data)."""
+    from predictions.store import PredictionStore
+
+    predictions_db = tmp_path / "predictions.db"
+    args = parse_args([
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--db", str(tmp_path / "paper.db"), "--state-db", str(tmp_path / "state.db"),
+        "--max-bars", "70", "--auto-approve", "--no-ai-explanation", "--freshness-multiplier", "1000000",
+        "--record-predictions", "--predictions-db", str(predictions_db), "--prediction-horizon-bars", "15",
+    ])
+    run_paper_live_command(args)
+    output = capsys.readouterr().out
+    assert f"PREDICTIONS: recording to {predictions_db}" in output
+
+    store = PredictionStore(predictions_db)
+    recorded = store.list_predictions()
+    store.close()
+    assert len(recorded) >= 1, "at least one BUY signal over 70 real AAPL bars must have been recorded as a prediction"
+    for prediction in recorded:
+        assert prediction.symbol == "AAPL"
+        assert prediction.horizon_bars == 15
+        assert prediction.interval == "1d"
+        assert prediction.risk_decision is not None  # a real, freshly-computed RiskEngine snapshot
+        assert prediction.stop_price < prediction.entry_price < prediction.target_price
+
+
+@pytestmark_paper_live
+def test_run_paper_live_command_without_the_flag_never_touches_predictions_db(tmp_path, capsys):
+    """Control case: --record-predictions is explicit opt-in -- omitting
+    it must leave existing paper-live behavior byte-for-byte unaffected,
+    including never creating a predictions.db file at all."""
+    predictions_db = tmp_path / "predictions.db"
+    args = parse_args([
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--db", str(tmp_path / "paper.db"), "--state-db", str(tmp_path / "state.db"),
+        "--max-bars", "70", "--auto-approve", "--no-ai-explanation", "--freshness-multiplier", "1000000",
+    ])
+    run_paper_live_command(args)
+    output = capsys.readouterr().out
+    assert "PREDICTIONS:" not in output
+    assert not predictions_db.exists()
+
+
+@pytestmark_paper_live
 def test_run_paper_live_command_kill_switch_activate_and_reset(tmp_path, capsys):
     state_db = tmp_path / "state.db"
 
