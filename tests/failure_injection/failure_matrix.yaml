@@ -455,17 +455,28 @@
   test: tests/test_predictions_store.py::test_saving_a_second_prediction_for_the_same_symbol_and_entry_time_raises
   evidence_grade: B
 
+- id: FI-INDICATOR-BOUNDED-PROPERTIES
+  component: market_indicators
+  failure: "adversarially generated price/volume series (short, constant, monotonic, extreme, zero-volume) driving RSI/ATR/volume-ratio outside their documented bounds, or producing NaN/Inf leakage/an unexpected exception"
+  injection_method: "bounded Hypothesis property sweep (max_examples=100, derandomize=True) over generated close/volume series, including named edge cases (empty, one-bar, all-zero-volume, strictly-increasing, perfectly-constant) as explicit deterministic examples"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "RSI stays in [0,100] wherever defined; ATR/volume_ratio never negative wherever defined; MACD histogram=macd-signal exactly; no function raises for any series length from 0 upward; no Inf ever leaks through (market/indicators.py's own explicit inf->nan replacement in compute_rsi, and the zero-volume-denominator guard in compute_volume_analysis, are what this property sweep actually proves hold, not merely assumes)"
+    recovery: N/A (pure functions, no state)
+    safety_invariant: INVALID_DATA_NO_TRADE
+  test: tests/test_market_indicators_properties.py::test_compute_rsi_is_always_bounded_zero_to_hundred_or_nan
+  evidence_grade: B
+
 # --- Expand over subsequent cycles ------------------------------------------
 #
 # NOT yet in the matrix (deliberately -- honest about scope, not padded
 # for row count): Ollama timeout/unavailable (covered qualitatively in
-# TROUBLESHOOTING.md but no dedicated failure-injection test yet), Dhan
-# WebSocket/live-feed reconnect scenarios (see
-# tests/failure_injection/test_dhan_reconnect_simulation.py's own module
-# docstring for why these are graded SIMULATED, not REAL PROVIDER --
-# added cycle 7), MCP boundary scenarios (malformed args, tool timeout,
-# unavailable server), configuration adversarial scenarios (missing/
-# invalid config values), and cache adversarial scenarios (stale/corrupt/
-# partial cache). Add one row at a time, each backed by a real test, in
-# priority order -- never pad this file with a row whose `test` field
-# does not point at real, passing, collectible coverage.
+# TROUBLESHOOTING.md but no dedicated failure-injection test yet), MCP
+# boundary scenarios (malformed args, tool timeout, unavailable server --
+# currently a negative audit by inspection only, not executable-tested),
+# configuration adversarial scenarios (missing/invalid config values),
+# and cache adversarial scenarios (stale/corrupt/partial cache). Add one
+# row at a time, each backed by a real test, in priority order -- never
+# pad this file with a row whose `test` field does not point at real,
+# passing, collectible coverage.
