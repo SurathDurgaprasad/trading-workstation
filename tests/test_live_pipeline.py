@@ -155,6 +155,97 @@ def test_fresh_bar_is_not_suppressed():
     assert result.kind == "BAR_PROCESSED"
 
 
+def test_a_stale_bar_never_fills_an_already_pending_order():
+    """Autonomous hardening cycle 22 -- a real cross-component/time defect,
+    found and fixed this cycle: before the fix, live/pipeline.py computed
+    its own freshness check ONLY AFTER already calling
+    PaperTradingEngine.process_bar() -- which fills any PENDING order at
+    the CURRENT bar's open, or checks an OPEN position's stop/target
+    against it. STALE_SIGNAL_SUPPRESSED (the outcome the stale check then
+    returned) only ever suppressed generating a NEW signal FROM that bar;
+    it never stopped an entry fill or exit already in flight from
+    completing on data the pipeline itself had just judged too stale to
+    trust -- a direct violation of this project's own "STALE MARKET DATA
+    -> NO TRADE" invariant.
+
+    Reproduced here exactly as it would happen live: bar 1 arrives while
+    genuinely fresh and fires a signal via a strategy that always signals,
+    which gets risk-approved into a PENDING order (require_human_approval
+    defaults to False, so submit_signal() runs immediately). The wall
+    clock then jumps forward by an hour -- simulating the feed/consumer
+    falling far behind (exactly cycle 21's own bounded-queue scenario, or
+    Dhan reconnect churn) -- before bar 2 arrives, which would normally
+    fill that pending order at its open. Bar 2 must be suppressed, and the
+    order must remain pending rather than being silently filled."""
+    bar1 = _qualifying_bar(1, minute=15)
+    bar2 = _qualifying_bar(1, minute=16)
+    script = [MockScriptEvent.bar_event("TEST", bar1), MockScriptEvent.bar_event("TEST", bar2)]
+
+    clock_state = {"now": bar1.timestamp + timedelta(seconds=5)}
+    pipeline, engine, store = _pipeline(
+        script, interval="1m", strategy=_ScriptedStrategy(), clock=lambda: clock_state["now"],
+        freshness_policy=FreshnessPolicy(multiplier=2.0, minimum_threshold=timedelta(seconds=30)),
+    )
+
+    first = pipeline.process_next()
+    assert first.kind == "BAR_PROCESSED"
+    pending = store.get_pending_order("TEST")
+    assert pending is not None, "the scripted strategy's signal should have been risk-approved into a PENDING order"
+
+    clock_state["now"] = bar1.timestamp + timedelta(hours=1)  # the consumer/feed falls far behind before bar 2 is processed
+    second = pipeline.process_next()
+
+    assert second.kind == "STALE_SIGNAL_SUPPRESSED"
+    assert store.get_open_position("TEST") is None, "a stale bar must never be allowed to fill a pending order (STALE DATA -> NO TRADE)"
+    assert store.get_pending_order("TEST") is not None, "the order must remain pending, re-evaluated against the next (hopefully fresh) bar instead of being silently dropped"
+
+
+def test_a_stale_bar_never_closes_an_already_open_position():
+    """The same fix's other half: an OPEN position's stop/target must not
+    be checked against a bar the pipeline has itself judged too stale to
+    trust, even though an exit is nominally protective -- this project's
+    own invariant is unconditional ("STALE MARKET DATA -> NO TRADE", no
+    carve-out for exits), and a stale bar's price data may not reflect
+    anything close to the current real market. Bar 1 fills the entry
+    (fresh); bar 2 -- whose low would otherwise hit the scripted
+    strategy's stop_price=95.0 -- arrives stale and must not close it."""
+    bar1 = _qualifying_bar(1, minute=15)
+    bar2 = _qualifying_bar(1, minute=16, low=90.0, close=91.0)  # would hit stop_price=95.0 if actually checked
+    bar3 = _qualifying_bar(1, minute=17, low=90.0, close=91.0)  # fresh repeat -- proves the check still fires once trusted again
+    script = [
+        MockScriptEvent.bar_event("TEST", bar1), MockScriptEvent.bar_event("TEST", bar2), MockScriptEvent.bar_event("TEST", bar3),
+    ]
+
+    clock_state = {"now": bar1.timestamp + timedelta(seconds=5)}
+    pipeline, engine, store = _pipeline(
+        script, interval="1m", strategy=_ScriptedStrategy(), clock=lambda: clock_state["now"],
+        freshness_policy=FreshnessPolicy(multiplier=2.0, minimum_threshold=timedelta(seconds=30)),
+    )
+
+    first = pipeline.process_next()
+    assert first.kind == "BAR_PROCESSED"
+    pending = store.get_pending_order("TEST")
+    assert pending is not None
+
+    clock_state["now"] = bar1.timestamp + timedelta(hours=1)  # bar 2 will be stale relative to this
+    second = pipeline.process_next()
+    assert second.kind == "STALE_SIGNAL_SUPPRESSED"
+    # The fill that bar 2 would otherwise have triggered (entering AND
+    # immediately stopping out in the same call, per process_bar's own
+    # same-bar-exit-check behavior) must not have happened at all.
+    assert store.get_open_position("TEST") is None
+    assert store.get_pending_order("TEST") is not None
+
+    clock_state["now"] = bar1.timestamp + timedelta(minutes=3, seconds=5)  # bar 3 is fresh again
+    third = pipeline.process_next()
+    assert third.kind == "BAR_PROCESSED"
+    # Now genuinely trusted: the order fills AND immediately stops out on
+    # the same (now-fresh) bar 3, exactly like process_bar's existing
+    # same-bar-exit-check behavior for any other fresh bar.
+    assert store.get_open_position("TEST") is None
+    assert store.get_pending_order("TEST") is None
+
+
 # --- 5/6. feed disconnect / reconnect ------------------------------------------
 
 

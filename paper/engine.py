@@ -86,6 +86,11 @@ def _naive(ts: datetime) -> datetime:
 class BarOutcome(str, Enum):
     PROCESSED = "PROCESSED"
     DUPLICATE_SKIPPED = "DUPLICATE_SKIPPED"
+    STALE_SKIPPED = "STALE_SKIPPED"
+    """Autonomous hardening cycle 22: returned when `is_fresh=False` is
+    passed to process_bar (see that parameter's own docstring) -- bar
+    dedup/ordering bookkeeping still ran, but no position-affecting
+    action (entry fill or stop/target check) was taken."""
 
 
 @dataclass
@@ -232,7 +237,7 @@ class PaperTradingEngine:
 
     # -- bar processing ----------------------------------------------------------
 
-    def process_bar(self, symbol: str, bar: Bar) -> BarOutcome:
+    def process_bar(self, symbol: str, bar: Bar, *, is_fresh: bool = True) -> BarOutcome:
         """Advance time for `symbol` by one bar: check any OPEN position's
         stop/target against this bar (same conservative same-bar-ambiguity
         rule as the backtester), then fill any PENDING order at this bar's
@@ -245,6 +250,30 @@ class PaperTradingEngine:
         call again with the identical bar, e.g. after a retried delivery. A
         bar strictly OLDER than the last one processed raises
         OutOfOrderBarError instead of silently reordering history.
+
+        `is_fresh` (autonomous hardening cycle 22): defaults to True so
+        every non-live caller of this primitive (backtest replay via
+        paper/replay.py, paper/advance.py's catch-up fills, direct test
+        calls) is completely unaffected -- "freshness relative to wall-
+        clock now" is a LIVE-pipeline-only concept, meaningless for
+        replayed historical data. live/pipeline.py is the one caller that
+        passes is_fresh=False, for a genuinely live bar whose own
+        FreshnessPolicy check failed. A real gap this closes: previously,
+        live/pipeline.py computed its freshness check ONLY AFTER already
+        calling process_bar (which fills any PENDING order at this bar's
+        open, or checks an OPEN position's stop/target against it) --
+        the STALE_SIGNAL_SUPPRESSED outcome it then returned only ever
+        suppressed generating a NEW signal from THIS bar; it never
+        prevented an entry fill or exit that was already in flight from
+        completing on data judged too stale to trust, a direct violation
+        of this project's own "STALE MARKET DATA -> NO TRADE" invariant.
+        When is_fresh=False, this method still runs its dedup/out-of-order
+        checks and its own bookkeeping (roll_to_day, save_account,
+        set_last_bar_timestamp) exactly as before — only the position-
+        affecting entry-fill/stop-target block is skipped, returning
+        BarOutcome.STALE_SKIPPED. The skipped action is not lost, only
+        deferred: the SAME still-PENDING order or still-OPEN position is
+        re-evaluated against the next bar that arrives, fresh or not.
         """
         incoming_ts = _naive(bar.timestamp)
 
@@ -264,32 +293,33 @@ class PaperTradingEngine:
 
             self.account.roll_to_day(bar.timestamp.date())
 
-            open_position = self.store.get_open_position(symbol)
-            if open_position is not None:
-                self._process_open_position(open_position, bar)
-            else:
-                pending_order = self.store.get_pending_order(symbol)
-                if pending_order is not None:
-                    new_position = self._fill_pending_order(pending_order, bar)
-                    # The bar that just filled this order must ALSO be
-                    # checked against the new stop/target — matches the
-                    # backtester exactly: entry uses bar i+1's open, and the
-                    # very next backtester loop iteration (i+1) checks exit
-                    # using that same bar's full OHLC. Skipping this delays
-                    # a legitimate same-bar exit by one bar (found via real
-                    # AAPL replay diverging from the backtester — Phase 6).
-                    self._process_open_position(new_position, bar)
+            if is_fresh:
+                open_position = self.store.get_open_position(symbol)
+                if open_position is not None:
+                    self._process_open_position(open_position, bar)
+                else:
+                    pending_order = self.store.get_pending_order(symbol)
+                    if pending_order is not None:
+                        new_position = self._fill_pending_order(pending_order, bar)
+                        # The bar that just filled this order must ALSO be
+                        # checked against the new stop/target — matches the
+                        # backtester exactly: entry uses bar i+1's open, and the
+                        # very next backtester loop iteration (i+1) checks exit
+                        # using that same bar's full OHLC. Skipping this delays
+                        # a legitimate same-bar exit by one bar (found via real
+                        # AAPL replay diverging from the backtester — Phase 6).
+                        self._process_open_position(new_position, bar)
 
             # Always persisted, even when this bar had nothing to do for
-            # `symbol` (no open position, no pending order) — previously
-            # only saved on the two branches above, which meant an
+            # `symbol` (no open position, no pending order, or is_fresh=False)
+            # — previously only saved on the two branches above, which meant an
             # in-memory-only roll_to_day() (daily_start_equity reset) could
             # be lost if the process were killed before a later bar
             # happened to touch a position. Found while hardening the
             # restart guarantee for Phase 7A's continuous ingestion.
             self.store.save_account(self.account)
             self.store.set_last_bar_timestamp(symbol, incoming_ts)
-            return BarOutcome.PROCESSED
+            return BarOutcome.PROCESSED if is_fresh else BarOutcome.STALE_SKIPPED
 
     def close_at_end_of_data(self, symbol: str, bar: Bar) -> None:
         """Mirrors the backtester's end-of-data forced close — any position

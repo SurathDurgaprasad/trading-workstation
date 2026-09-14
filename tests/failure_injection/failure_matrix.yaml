@@ -649,3 +649,17 @@
     safety_invariant: CORRUPTED_STATE_NO_TRADE
   test: tests/test_approval_security.py::test_approve_pending_never_calls_submit_signal_when_the_claim_is_already_lost
   evidence_grade: B
+
+- id: FI-PIPELINE-STALE-BAR-FILLS-PENDING-ORDER
+  component: live_pipeline
+  failure: "a bar arrives whose own timestamp fails the pipeline's FreshnessPolicy check (e.g. the feed fell behind due to a Dhan reconnect stall or a bounded-queue backlog), while a PENDING order (from a PRIOR, genuinely fresh bar's risk-approved signal) or an OPEN position is still awaiting this bar's data"
+  injection_method: "a real LiveSimPipeline + PaperStore (no mocks on the safety-critical path): bar 1 (fresh) fires a signal via a strategy that always signals, creating a PENDING order; the wall clock is then advanced forward (a mutable clock closure) by an hour before bar 2 -- which would normally fill that order at its open, or check an existing OPEN position's stop/target -- is processed"
+  expected:
+    detection: true
+    trade_authorization: "no entry fill or exit occurs on a bar the pipeline's own freshness check has judged stale"
+    safe_response: "FIXED, autonomous hardening cycle 22. PaperTradingEngine.process_bar gained is_fresh: bool = True (default preserves every non-live caller byte-for-byte); live/pipeline.py now computes its FreshnessPolicy check BEFORE calling process_bar (previously after) and passes the result through. When is_fresh=False, process_bar still runs its dedup/out-of-order bookkeeping but skips the position-affecting fill/stop-target block entirely, returning BarOutcome.STALE_SKIPPED -- the deferred action is re-evaluated against the next bar, fresh or not."
+    recovery: "automatic -- the deferred fill/exit check runs normally against the next bar that passes freshness"
+    safety_invariant: STALE_DATA_NO_TRADE
+  test: tests/test_live_pipeline.py::test_a_stale_bar_never_fills_an_already_pending_order
+  evidence_grade: B
+  note: "A real LiveSimPipeline/PaperTradingEngine/PaperStore integration test (SQLite in-memory, no mocks on the trade-execution path), not a unit-level double. A companion test (test_a_stale_bar_never_closes_an_already_open_position) proves the OPEN-position half of the same fix, including that the stop/target check resumes correctly once a later bar is fresh again. Unit-level coverage one layer down in tests/test_paper_bar_ordering.py (3 tests). All 4 of the core new tests were mutation-tested: confirmed to FAIL against the pre-fix code (is_fresh gate forced to always-true) before confirming they pass against the real fix."

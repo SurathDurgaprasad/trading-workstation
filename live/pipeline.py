@@ -261,17 +261,31 @@ class LiveSimPipeline:
                 connection_state=self._connection_state_label(), last_price=bar.close,
             )
 
+        # Autonomous hardening cycle 22: freshness is now computed BEFORE
+        # process_bar (previously computed only after) and threaded through
+        # as is_fresh -- process_bar's own docstring explains exactly why:
+        # without this, a stale bar could still fill an already-PENDING
+        # order or trigger an OPEN position's stop/target before this
+        # method ever got a chance to suppress it, since STALE_SIGNAL_
+        # SUPPRESSED below only ever blocked generating a NEW signal from
+        # THIS bar, never an entry/exit already in flight from a PRIOR
+        # bar's decision. Moving the computation earlier does not change
+        # its own result (still bar.timestamp vs now, same formula) --
+        # only what process_bar does in response to it; dedup/out-of-order
+        # detection (immediately below) is unaffected and still takes
+        # priority in the returned PipelineStepResult.kind either way.
+        now = self._clock()
+        freshness = self.freshness_policy.check(bar.timestamp, interval=self.interval, now=now)
+
         engine_bar = Bar(timestamp=bar.timestamp, open=bar.open, high=bar.high, low=bar.low, close=bar.close, volume=bar.volume)
         try:
-            outcome = self.engine.process_bar(symbol, engine_bar)
+            outcome = self.engine.process_bar(symbol, engine_bar, is_fresh=freshness.is_fresh)
         except OutOfOrderBarError as exc:
             return PipelineStepResult(kind="OUT_OF_ORDER_REJECTED", symbol=symbol, bar=bar, detail=str(exc), expired_signal_ids=expired)
 
         if outcome == BarOutcome.DUPLICATE_SKIPPED:
             return PipelineStepResult(kind="DUPLICATE_SKIPPED", symbol=symbol, bar=bar, expired_signal_ids=expired)
 
-        now = self._clock()
-        freshness = self.freshness_policy.check(bar.timestamp, interval=self.interval, now=now)
         if not freshness.is_fresh:
             return PipelineStepResult(kind="STALE_SIGNAL_SUPPRESSED", symbol=symbol, bar=bar, freshness=freshness, expired_signal_ids=expired)
 

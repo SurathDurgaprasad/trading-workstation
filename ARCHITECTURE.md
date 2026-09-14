@@ -230,6 +230,19 @@ layers alongside the existing example-based suite:
   proven by five dedicated tests (cap never exceeded, never blocks,
   oldest dropped not newest, warning names the dropped symbol, a
   keeping-up consumer never drops).
+- **A stale bar can never fill a pending order or close an open
+  position** — `PaperTradingEngine.process_bar(..., is_fresh=...)`
+  skips its entry-fill/stop-target block entirely when the caller
+  passes `is_fresh=False`; `live/pipeline.py` computes its own
+  `FreshnessPolicy` check BEFORE calling `process_bar` (previously
+  after) and threads the result through. Found and fixed cycle 22: a
+  fresh bar could risk-approve a signal into a PENDING order, but the
+  LATER bar that actually filled it (or checked an OPEN position's
+  stop/target) was never itself subject to the same freshness gate —
+  `STALE_SIGNAL_SUPPRESSED` only ever blocked generating a *new*
+  signal, never an entry/exit already in flight. Every non-live caller
+  of `process_bar` (backtest replay, catch-up fills, direct tests)
+  defaults to `is_fresh=True`, completely unaffected.
 - **The MCP boundary cannot bypass or crash past risk evaluation** —
   `evaluate_risk_tool`/`paper_trade_signal_tool` inherit `RiskEngine`'s
   `NON_FINITE_VALUE` guard (proven with executable tests, not just
