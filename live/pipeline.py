@@ -245,7 +245,6 @@ class LiveSimPipeline:
 
         symbol, bar = event.symbol, event.bar
         buffer = self._buffers.setdefault(symbol, _SymbolBuffer())
-        buffer.append(bar)
 
         if self.state_store is not None:
             # Phase 15 §7/§22: the ONLY way a separate process (the
@@ -281,10 +280,37 @@ class LiveSimPipeline:
         try:
             outcome = self.engine.process_bar(symbol, engine_bar, is_fresh=freshness.is_fresh)
         except OutOfOrderBarError as exc:
+            # Autonomous hardening cycle 23: buffer.append() must NOT have
+            # already happened for this bar (see below) -- an out-of-order
+            # bar inserted into the indicator history out of chronological
+            # position would silently corrupt every rolling-window
+            # indicator (SMA/RSI/ATR/MACD) computed from this buffer for
+            # the rest of the session, since OHLCV.to_dataframe() trusts
+            # list order with no sort and pandas .rolling()/.ewm() operate
+            # on ROW POSITION, not the DatetimeIndex value.
             return PipelineStepResult(kind="OUT_OF_ORDER_REJECTED", symbol=symbol, bar=bar, detail=str(exc), expired_signal_ids=expired)
 
         if outcome == BarOutcome.DUPLICATE_SKIPPED:
+            # Same reasoning as the OutOfOrderBarError case just above --
+            # a duplicate bar must not be double-counted in the indicator
+            # history either (an extra row silently skews every
+            # rolling-window computation from here on), even though
+            # process_bar() above already correctly no-op'd it at the
+            # execution layer. This exact gap -- execution-layer dedup
+            # proven safe (see tests/test_live_pipeline.py's own duplicate-
+            # bar test), but the SEPARATE indicator-buffer append was never
+            # gated on the same outcome -- was found via cycle 23's
+            # cross-component audit (market data -> buffer -> indicators
+            # -> signal generation), not by re-testing process_bar's own,
+            # already-correct, already-tested dedup in isolation.
             return PipelineStepResult(kind="DUPLICATE_SKIPPED", symbol=symbol, bar=bar, expired_signal_ids=expired)
+
+        # Only reached for a genuinely NEW, in-order bar -- fresh or stale.
+        # A stale bar's OHLCV data is still real, chronologically-ordered
+        # market data (just arriving late); only its SIGNAL-GENERATION
+        # consequence is suppressed below, matching cycle 22's own
+        # "stale != corrupt" distinction.
+        buffer.append(bar)
 
         if not freshness.is_fresh:
             return PipelineStepResult(kind="STALE_SIGNAL_SUPPRESSED", symbol=symbol, bar=bar, freshness=freshness, expired_signal_ids=expired)

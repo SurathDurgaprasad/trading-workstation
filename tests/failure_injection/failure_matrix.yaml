@@ -663,3 +663,32 @@
   test: tests/test_live_pipeline.py::test_a_stale_bar_never_fills_an_already_pending_order
   evidence_grade: B
   note: "A real LiveSimPipeline/PaperTradingEngine/PaperStore integration test (SQLite in-memory, no mocks on the trade-execution path), not a unit-level double. A companion test (test_a_stale_bar_never_closes_an_already_open_position) proves the OPEN-position half of the same fix, including that the stop/target check resumes correctly once a later bar is fresh again. Unit-level coverage one layer down in tests/test_paper_bar_ordering.py (3 tests). All 4 of the core new tests were mutation-tested: confirmed to FAIL against the pre-fix code (is_fresh gate forced to always-true) before confirming they pass against the real fix."
+
+- id: FI-PIPELINE-DUPLICATE-BAR-POLLUTES-INDICATORS
+  component: live_pipeline
+  failure: "a duplicate (same-timestamp) or out-of-order (older-timestamp) bar is delivered to the pipeline -- correctly a no-op / rejection at the paper-execution layer, but the SEPARATE indicator-history buffer had no equivalent gate"
+  injection_method: "a real LiveSimPipeline processing a scripted sequence deliberately interleaving a duplicate and an out-of-order bar among three genuine bars; asserts on the actual to_indicator_series() DataFrame output (exact row count and chronological index), not just the execution-layer outcome"
+  expected:
+    detection: true
+    trade_authorization: N/A -- this is a data-integrity finding, not an execution-authorization one
+    safe_response: "FIXED, autonomous hardening cycle 23. buffer.append(bar) moved to occur only AFTER process_bar() confirms the bar is neither DUPLICATE_SKIPPED nor out-of-order. A stale-but-genuinely-new-and-in-order bar is still appended (real data, just late) -- only its signal-generation consequence is suppressed, matching cycle 22's own stale-vs-corrupt distinction."
+    recovery: N/A -- the corruption is prevented from occurring, not detected and repaired afterward
+    safety_invariant: SILENT_INCORRECT_DECISION_PREVENTED
+  test: tests/test_live_pipeline.py::test_duplicate_and_out_of_order_bars_never_pollute_the_indicator_series
+  evidence_grade: B
+  note: "Two existing tests (test_duplicate_bar_is_a_no_op_via_the_pipeline, test_out_of_order_bar_is_rejected_not_silently_applied) extended with a direct buffer-contents assertion; the new test above asserts the actual DataFrame generate_signal() reads from. All 3 mutation-tested: confirmed to FAIL when the old unconditional early buffer.append(bar) call was temporarily reintroduced, before confirming they pass against the real fix."
+
+- id: FI-CONCURRENCY-APPROVE-EXPIRE-RACE-ACROSS-RESTART
+  component: live_pipeline
+  failure: "approve_pending() races expire_pending_approvals() for the IDENTICAL signal_id across two independently-restored LiveSimPipeline instances (simulating a restart), where the signal is GENUINELY past its approval_timeout_seconds by real wall-clock time before either thread races"
+  injection_method: "a deliberately tiny approval_timeout_seconds plus a real time.sleep() to guarantee genuine expiry; two real OS threads, each building its OWN fresh LiveSimPipeline/LiveStateStore/PaperStore connection to the SAME temp files, synchronized with a threading.Barrier"
+  expected:
+    detection: true
+    trade_authorization: N/A
+    health: N/A
+    safe_response: "NEGATIVE AUDIT, autonomous hardening cycle 23 -- the same CAS guard built for the approve-vs-reject race (cycle 20, FI-CONCURRENCY-APPROVE-REJECT-RACE above) generalizes correctly to this third caller (expire) with no modification needed. This is a distinct SQLite-concurrency shape from the approve-vs-reject test: two writers both attempting to persist the SAME terminal APPROVAL_EXPIRED transition, not two different terminal states."
+    recovery: N/A -- no inconsistency is ever produced to recover from
+    safety_invariant: CORRUPTED_STATE_NO_TRADE
+  test: tests/test_approval_security.py::test_concurrent_approve_and_expire_of_the_same_signal_never_produces_inconsistent_state
+  evidence_grade: B
+  note: "Real threads, real independently-restored pipeline instances (restart simulation), real temp SQLite files, no mocks. Confirmed clean across 5 repeated runs (not a single lucky pass) -- no PaperOrder ever created for the already-expired signal, the persisted record always lands cleanly on APPROVAL_EXPIRED/decision=EXPIRED."

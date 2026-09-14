@@ -243,6 +243,17 @@ layers alongside the existing example-based suite:
   signal, never an entry/exit already in flight. Every non-live caller
   of `process_bar` (backtest replay, catch-up fills, direct tests)
   defaults to `is_fresh=True`, completely unaffected.
+- **A duplicate or out-of-order bar can never pollute the indicator
+  history** — `live/pipeline.py::process_next` only calls
+  `buffer.append(bar)` AFTER confirming `PaperTradingEngine.process_bar`
+  did not reject the bar as `DUPLICATE_SKIPPED` or out-of-order. Found
+  and fixed cycle 23: the execution layer's own dedup/ordering guarantee
+  was always correct, but a SEPARATE consumer of the same bar — the
+  indicator-history buffer `generate_signal()` reads from — had no such
+  gate, silently skewing every subsequent SMA/RSI/ATR/MACD computation
+  with an extra or misplaced row. A stale (but genuinely new, in-order)
+  bar is still appended — its data is real, just late; only its
+  signal-generation consequence is suppressed.
 - **The MCP boundary cannot bypass or crash past risk evaluation** —
   `evaluate_risk_tool`/`paper_trade_signal_tool` inherit `RiskEngine`'s
   `NON_FINITE_VALUE` guard (proven with executable tests, not just

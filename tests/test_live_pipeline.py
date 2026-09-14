@@ -115,13 +115,21 @@ def test_duplicate_bar_is_a_no_op_via_the_pipeline():
     assert second.kind == "DUPLICATE_SKIPPED"
     report = reconcile(store)
     assert report.ok, report.issues
+    # Autonomous hardening cycle 23: the execution layer's own dedup
+    # (proven above) is a SEPARATE concern from the indicator-history
+    # buffer -- a duplicate bar must not be double-counted there either,
+    # or every rolling-window indicator (SMA/RSI/ATR/MACD) computed from
+    # this buffer for the rest of the session would be silently skewed
+    # by the extra, redundant row.
+    assert [b.timestamp for b in pipeline._buffers["TEST"].bars] == [bar.timestamp]
 
 
 # --- 3. out-of-order bar -------------------------------------------------------
 
 
 def test_out_of_order_bar_is_rejected_not_silently_applied():
-    script = [MockScriptEvent.bar_event("TEST", _qualifying_bar(5)), MockScriptEvent.bar_event("TEST", _qualifying_bar(3))]
+    bar5, bar3 = _qualifying_bar(5), _qualifying_bar(3)
+    script = [MockScriptEvent.bar_event("TEST", bar5), MockScriptEvent.bar_event("TEST", bar3)]
     pipeline, engine, store = _pipeline(script, clock=lambda: datetime(2026, 1, 5, 9, 16))
     first = pipeline.process_next()
     second = pipeline.process_next()
@@ -129,6 +137,44 @@ def test_out_of_order_bar_is_rejected_not_silently_applied():
     assert second.kind == "OUT_OF_ORDER_REJECTED"
     report = reconcile(store)
     assert report.ok, report.issues
+    # Same cycle-23 finding as the duplicate-bar test above: an
+    # out-of-order bar inserted into the indicator history OUT OF
+    # CHRONOLOGICAL POSITION is worse than a duplicate -- OHLCV.
+    # to_dataframe() trusts list order with no sort, and pandas
+    # .rolling()/.ewm() operate on row POSITION, not the DatetimeIndex
+    # value, so a misplaced earlier bar would corrupt every subsequent
+    # indicator computation, not just add one redundant observation.
+    assert [b.timestamp for b in pipeline._buffers["TEST"].bars] == [bar5.timestamp]
+
+
+def test_duplicate_and_out_of_order_bars_never_pollute_the_indicator_series():
+    """End-to-end proof, one level above the raw buffer-list assertions in
+    the two tests above: the actual DataFrame generate_signal() reads from
+    must be exactly the genuinely-processed bars, in chronological order,
+    with no extra or misplaced rows -- verified against
+    to_indicator_series() output, not just internal buffer state."""
+    bar1 = _qualifying_bar(1, minute=15)
+    bar2 = _qualifying_bar(1, minute=16)
+    bar3 = _qualifying_bar(1, minute=17)
+    script = [
+        MockScriptEvent.bar_event("TEST", bar1),
+        MockScriptEvent.bar_event("TEST", bar1),  # duplicate of bar1
+        MockScriptEvent.bar_event("TEST", bar2),
+        MockScriptEvent.bar_event("TEST", bar1),  # out-of-order (older than bar2, already processed)
+        MockScriptEvent.bar_event("TEST", bar3),
+    ]
+    pipeline, engine, store = _pipeline(
+        script, interval="1m", clock=lambda: bar3.timestamp + timedelta(seconds=10),
+        freshness_policy=FreshnessPolicy(multiplier=2.0, minimum_threshold=timedelta(minutes=10)),
+    )
+    kinds = []
+    while (r := pipeline.process_next()).kind != "FEED_EXHAUSTED":
+        kinds.append(r.kind)
+    assert kinds == ["BAR_PROCESSED", "DUPLICATE_SKIPPED", "BAR_PROCESSED", "OUT_OF_ORDER_REJECTED", "BAR_PROCESSED"]
+
+    series = pipeline._buffers["TEST"].to_indicator_series("TEST", "1m")
+    assert list(series.index) == [bar1.timestamp, bar2.timestamp, bar3.timestamp]
+    assert len(series) == 3  # not 5 -- the duplicate and the out-of-order delivery contributed zero rows
 
 
 # --- 4. stale bar --------------------------------------------------------------

@@ -269,3 +269,118 @@ def test_concurrent_approve_and_reject_of_the_same_signal_never_produces_inconsi
             f"a real PaperOrder exists but the recorded decision says {record.decision!r} -- "
             "the audit trail must never contradict what actually happened at the execution layer"
         )
+
+
+def test_concurrent_approve_and_expire_of_the_same_signal_never_produces_inconsistent_state(tmp_path):
+    """Autonomous hardening cycle 23 -- the same architectural question as
+    the approve-vs-reject race above, attacked from the angle this cycle's
+    own mission named explicitly: approve() racing expire_pending_
+    approvals() across two independently-restored pipeline instances
+    (simulating a restart -- e.g. the continuously-running paper-live
+    process's own expiry check firing at the exact moment an operator
+    clicks Approve in the dashboard), each with its own fresh
+    LiveSimPipeline/LiveStateStore/PaperStore connection to the SAME
+    underlying files.
+
+    A deliberately tiny approval_timeout_seconds plus a real sleep means
+    the signal is GENUINELY past its expiry, by real wall-clock time,
+    before either thread races -- not a simulated/mocked clock. Both
+    threads independently restore the same still-PENDING_HUMAN_APPROVAL
+    persisted row (its expires_at is immutable, set once at signal-
+    approval time) and independently compute now > expires_at as True --
+    so this exercises TWO CONCURRENT WRITERS both attempting to persist
+    the SAME terminal APPROVAL_EXPIRED transition (approve_pending's own
+    _check_actionable calls expire_pending_approvals() internally the
+    moment it sees an expired pending entry), a genuinely different
+    SQLite-concurrency shape than the approve-vs-reject test above (two
+    DIFFERENT terminal states racing) even though the same CAS guard in
+    LiveStateStore.update_decision protects both.
+
+    Safety property: regardless of which write wins, no PaperOrder may
+    ever be created for an already-expired signal, and the final
+    persisted record must land on APPROVAL_EXPIRED, not be left corrupted
+    or duplicated by the losing writer's InvalidDecisionTransitionError
+    path."""
+    import threading
+    import time
+
+    from live.freshness import FreshnessPolicy
+    from live.mock_source import MockMarketDataSource
+    from live.state_store import LiveStateStore
+    from paper.engine import PaperTradingEngine
+    from paper.store import PaperStore
+    from strategy.baseline import TrendMomentumBaseline
+    from tests.conftest import AAPL_CACHE_PATH, real_aapl_mock_script
+
+    if not AAPL_CACHE_PATH.exists():
+        pytest.skip(f"No cached AAPL data at {AAPL_CACHE_PATH}")
+
+    paper_db = tmp_path / "p.db"
+    state_db = tmp_path / "s.db"
+
+    script = real_aapl_mock_script()
+    setup_store = PaperStore(paper_db)
+    setup_engine = PaperTradingEngine(setup_store, initial_capital=100_000.0)
+    setup_state_store = LiveStateStore(state_db)
+    setup_pipeline = LiveSimPipeline(
+        source=MockMarketDataSource(script), engine=setup_engine, strategy=TrendMomentumBaseline(),
+        symbols=["AAPL"], interval="1d", require_human_approval=True, state_store=setup_state_store,
+        freshness_policy=FreshnessPolicy(multiplier=1_000_000.0), approval_timeout_seconds=0.01,
+    )
+    result = None
+    while True:
+        result = setup_pipeline.process_next()
+        if result.kind in ("PENDING_HUMAN_APPROVAL", "FEED_EXHAUSTED"):
+            break
+    assert result.kind == "PENDING_HUMAN_APPROVAL"
+    signal_id = result.signal.stable_id()
+    setup_state_store.close()  # simulates the setup process finishing
+
+    time.sleep(0.1)  # guarantee genuine expiry by real wall-clock time before either thread races
+
+    outcomes: dict[str, object] = {}
+    barrier = threading.Barrier(2)
+
+    def _race(action: str) -> None:
+        state_store = LiveStateStore(state_db)
+        engine = PaperTradingEngine(PaperStore(paper_db), initial_capital=100_000.0)
+        pipeline = LiveSimPipeline(
+            source=MockMarketDataSource([]), engine=engine, strategy=TrendMomentumBaseline(),
+            symbols=[], interval="1d", require_human_approval=True, state_store=state_store,
+            approval_timeout_seconds=0.01,
+        )
+        try:
+            barrier.wait()
+            if action == "approve":
+                outcomes["approve"] = pipeline.approve_pending(signal_id).outcome.value
+            else:
+                outcomes["expire"] = pipeline.expire_pending_approvals()
+        finally:
+            state_store.close()
+
+    t1 = threading.Thread(target=_race, args=("approve",))
+    t2 = threading.Thread(target=_race, args=("expire",))
+    t1.start()
+    t2.start()
+    t1.join(timeout=15)
+    t2.join(timeout=15)
+
+    assert set(outcomes.keys()) == {"approve", "expire"}, f"one side crashed instead of returning gracefully: {outcomes}"
+    # The signal is already genuinely expired by real wall-clock time for
+    # BOTH independently-restored pipelines -- approve_pending's own
+    # _check_actionable must itself detect this (it is not required to
+    # "lose" against the other thread's explicit expire_pending_approvals()
+    # call to reach the correct outcome; either path reaching the
+    # persisted EXPIRED state first is a legitimate, safe result).
+    assert outcomes["approve"] == "EXPIRED"
+
+    final_store = PaperStore(paper_db)
+    order_exists = final_store.get_pending_order("AAPL") is not None
+    final_store.close()
+    assert not order_exists, "an already-expired signal must never result in a real PaperOrder, regardless of race timing"
+
+    final_state_store = LiveStateStore(state_db)
+    record = final_state_store.get(signal_id)
+    final_state_store.close()
+    assert record.state == "APPROVAL_EXPIRED"
+    assert record.decision == "EXPIRED"
