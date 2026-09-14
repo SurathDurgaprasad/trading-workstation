@@ -131,7 +131,7 @@ run against a live external service).
 | Bounded feed queue | IMPLEMENTED, VERIFIED | Cycle 21 | — |
 | Log rotation | IMPLEMENTED, VERIFIED | Cycle 16 audit: `core/logging.py::RotatingFileHandler`, 10MB × 5 backups | — |
 | Bounded retry loops | IMPLEMENTED, VERIFIED | Cycle 16 audit | — |
-| Finite soak test (this campaign) | **NOT YET PERFORMED** | — | Scheduled as this campaign's next deliverable (cycle 34 per the mission's own numbering) |
+| Finite soak test (this campaign) | IMPLEMENTED, VERIFIED | Cycle 34 — 9,000 ticks / 3 symbols through a real `DhanMarketDataSource` -> `LiveSimPipeline` -> `PaperTradingEngine` -> SQLite chain: no thread leak, bar queue held bounded at 0/200 throughout, DB growth proportional (78 KB), memory allocation proportional to work done (`tracemalloc`) | One accepted, documented, low-severity limitation found: `_SymbolBuffer.bars` (the indicator-history buffer) has no eviction policy and grew unbounded (2,999 entries/symbol by test end); acceptable at this project's actual per-session operating scale, would only matter for a multi-month continuously-running process. See `FINAL_FAILURE_MODE_ANALYSIS.md` entry #39 |
 
 ## 12. Security
 
