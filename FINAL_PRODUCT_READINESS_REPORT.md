@@ -1,259 +1,376 @@
 # Final Product Readiness Report
 
-Branch: `final-product-hardening` (not yet merged to `main` as of this
-report; commits `30242e5` through `339e16a` and onward). Companion
-documents: `FINAL_PRODUCT_AUDIT.md`, `FINAL_FAILURE_MODE_ANALYSIS.md`,
-`FINAL_RELEASE_REMAINING_WORK.md` (the live, itemized punch list this
-report summarizes, in the mission's own required CLOSED/EXTERNALLY
-BLOCKED/ACCEPTED LIMITATION format).
+Branch: `final-product-hardening`, merged forward to `main` after every
+cycle (`main == origin/main` verified at every commit). Current HEAD:
+`c8fbc16`. Companion documents: `FINAL_PRODUCT_CAPABILITY_MATRIX.md`
+(the authoritative per-requirement evidence table this report
+summarizes), `FINAL_FAILURE_MODE_ANALYSIS.md` (39 numbered entries),
+`tests/failure_injection/failure_matrix.yaml` (110 executable rows),
+`ARCHITECTURE.md`, `SECURITY.md`.
 
-This report reflects three sequential hardening passes on top of the
-completed Phase 1 quantitative foundation. It is deliberately honest
-about scope: this is a genuine, large production-hardening campaign.
-What follows states plainly what is done, with evidence, and what
-remains open, rather than overstating completion.
+This report supersedes the version of itself written at the end of an
+earlier three-pass hardening campaign (that version's own historical
+content — clean-install proof, Claude-Code-independence proof, the
+original documentation suite — remains true and is not re-litigated
+here). Since that version, a further **35-cycle autonomous adversarial
+hardening campaign** ran against this same codebase: systematic
+mutation testing, real OS-subprocess and multi-thread concurrency
+attacks, crash/restart/recovery injection against real temporary SQLite
+files, and a full reality/profitability audit against the actual local
+databases. Two of the defects found and fixed in that campaign reached
+**CRITICAL** severity — both are described below, in full, because a
+report that omitted them would misrepresent what this system actually
+is.
 
----
-
-**Architecture**: Stable, layered (data -> features -> prediction ->
-decision -> risk -> execution -> persistence -> learning), unchanged in
-shape across all three passes. Datetime handling (`core/timeutil.py`),
-SQLite connection/integrity/schema-version handling
-(`core/sqlite_util.py`), and system health (`core/health.py`) are all
-now structurally consolidated, closing several real cross-cutting
-duplication risks without altering the architecture. See
-`ARCHITECTURE.md` for the full component map.
-
-**Data**: Yahoo Finance intraday (5-min bars, ~60-day window) plus
-India VIX and sector indices; NSE/BSE/SEBI have no official API (known,
-unchanged). A data-quality validation layer (`market_data/
-validation.py::validate_ohlcv`, HEALTHY/DEGRADED/INVALID) is wired into
-`market_intelligence/scanner.py` -- the actual scan -> decision ->
-paper-trade choke point -- so INVALID data (duplicate/non-chronological
-timestamps, symbol-identity mismatch) is excluded before any indicator
-or decision computation sees it. `market/data_provider.py::OHLCV.
-from_dataframe` drops individual rows with an impossible OHLC
-relationship at construction. **Proven end-to-end, not just at the unit
-level**: a dedicated test drives the real `shadow-run --paper-execute`
-CLI path across a mixed valid/invalid-data universe and confirms zero
-decisions/predictions/paper orders exist for the invalid symbol.
-
-**Prediction**: The Phase 1 ML baseline (`ml_research/`) remains a
-completed, isolated research artifact: ROC-AUC 0.575-0.615 across 4
-walk-forward folds plus a held-out test, both the model and the
-deterministic-rule benchmark scoring `PromotionVerdict.NEGATIVE` on
-every split -- **no demonstrated edge**, a settled, frozen research
-verdict, not revisited or reframed. The model remains a forecasting
-component, never a direct trading signal, by construction.
-
-**Decision / Risk**: `decision_engine/`, `risk/engine.py`,
-`risk/sizing.py` unmodified across all three passes -- independently
-re-verified via `git diff --stat` after every single commit in this
-campaign, with zero changes to any live-execution-safety file.
-
-**Paper trading**: The position state machine is guarded at the data
-layer (`PaperStore.update_position()` enforces CLOSED as a terminal
-state, raising `InvalidPositionTransitionError` on a double-close or
-reopen attempt). Restart-recovery of open positions, capital, and
-duplicate-bar rejection are all proven across a REAL process-restart
-boundary (a fresh store/engine instance on the same db file), including
-a newly-added test proving a bar replayed AFTER a restart does not
-duplicate a fill or position. Cross-store consistency is enforced by
-`paper/reconciliation.py::reconcile()` (equity/cash/position-value
-invariant, realized-P&L-matches-trade-ledger, no negative quantities),
-wired into 6 real production call sites, not just tests.
-
-**Dashboard**: A new `/health` route renders the same unified health
-model the CLI's `health` command reads. Otherwise unmodified. No
-authentication if exposed beyond loopback (accepted for the current
-single-operator threat model).
-
-**CLI**: A new `health` command (unified health check) alongside the
-existing ~30 subcommands.
-
-**Persistence**: All 12 SQLite stores use WAL mode + a 30s busy timeout,
-verified via a real threading-based concurrent-access test.
-`integrity_check()`/`db_size_bytes()`/`schema_version()` now cover
-**all 12 stores**. `predictions.db` and the direction-forecasts store
-enforce real DB-level `UNIQUE(symbol, entry_time|as_of)` constraints
-(migrated, backfilled from existing rows, gracefully soft-failing
-rather than crashing or deleting data if a pre-existing database
-already has duplicates). Schema-version tracking (`PRAGMA user_version`)
-is wired into every store's `__init__`; the additive-column migration
-primitive (`core.sqlite_util.ensure_column`) is shared and available to
-every store, used so far by the 3 that have ever needed a real column
-addition.
-
-**Recovery**: Scheduler lock reclamation (`reclaim_stale_locks`) is
-proven across a REAL process restart (a new `SchedulerRunStore`
-instance on the same db file, not the same instance that started the
-run). Tick-setup-phase exception safety prevents a scheduler crash from
-an unexpected failure before any slot starts. `schedule status` shows a
-per-slot last-success/last-failure summary. Kill-switch state is read
-fresh from disk on every check (zero caching). Per-job scheduler
-timeout remains an accepted, documented architectural limitation: the
-scheduler runs jobs in-process and synchronously, so a thread-based
-timeout would not actually stop a hung call -- it would report
-"timed out" while the original call kept running unsupervised, a worse
-failure mode than today's (a stuck lock, reliably reclaimed on the next
-restart). A real preemptive timeout needs subprocess isolation, out of
-this campaign's scope without separate justification.
-
-**Unified health**: `core/health.py::collect_system_health()` -- one
-shared model (application, database, disk, dhan credentials,
-kill_switch, scheduler, risk config, ollama reachability; overall
-HEALTHY/DEGRADED/SAFE_STOP/FAILED) consumed identically by `python
-main.py health` and the dashboard's `/health` route. Does not replace
-`readiness-check` (untouched, its own established contract preserved)
-and does not make a live Yahoo/Dhan network call by default. Memory-
-pressure monitoring is not implemented (no new dependency added for
-it -- disclosed, not silently omitted).
-
-**Security**: A real `pip-audit` dependency scan found 7 CVEs across
-`langchain`/`chromadb`; both investigated with evidence rather than
-reflexively bumped or ignored -- `langchain` bumped 1.3.4->1.3.9
-(its CVE not exploitable in this project's actual usage, bumped anyway
-as defense-in-depth); `chromadb` left pinned (its CVEs are all in a
-networked multi-tenant server mode this project never starts -- it
-uses chromadb only as an embedded, local, file-backed store). A repo-
-wide secret scan re-run clean. Full findings in `SECURITY.md`.
-
-**Clean installation -- the mission's own "mandatory release gate" --
-actually run, not assumed**: a real `git clone` of the pushed branch
-into an isolated temp directory, a brand-new venv, `pip install -r
-requirements.txt`, and a single `pytest` run. **This found and fixed a
-real defect**: the `langchain` version bump above required
-`langchain-core>=1.4.6`, but `requirements.txt` still pinned
-`langchain-core==1.4.1` -- an unsatisfiable combination invisible to
-the existing, already-upgraded dev venv, but fatal to a genuinely fresh
-install. Fixed by pinning the actual tested-compatible version
-(`1.6.3`). A true single-pass clean install: **2020 passed, 0 failed,
-82 skipped cleanly**. Further smoke-tested `health`, `universe`,
-`scan` (real Yahoo data), and `paper status` in that same environment.
-
-**Claude Code / AI-agent runtime independence -- proven by removal, not
-just static analysis**: `.claude/`, `.cursor/`, `.cursorignore`, and
-`.mcp.json` were deleted from the clean-install clone, and every
-smoke-tested command ran identically with zero trace of any AI-tool
-artifact present. A dedicated read-only audit additionally confirmed
-zero Claude/Anthropic imports outside one test's own independence-
-assertion docstring, zero agent-specific environment variables read
-anywhere, and `mcp_server/` confirmed opt-in (never imported by
-`main.py`'s core command set).
-
-**Documentation**: The full suite the mission requires now exists --
-`INSTALLATION.md`, `USER_GUIDE.md`, `OPERATIONS_GUIDE.md`,
-`TROUBLESHOOTING.md`, `ARCHITECTURE.md`, `SECURITY.md` -- describing
-the system as it actually exists (cross-checked against real code
-throughout this campaign, not written speculatively), cross-linked
-from `README.md`.
-
-**Testing**: Full regression is currently **2103+ passed, 0 failed**
-(re-run after every change across all three passes; exact count drifts
-upward slightly as tests are added -- see `FINAL_RELEASE_REMAINING_WORK.md`
-for the running total). Growth across the campaign spans dozens of new,
-real tests: a threading-based concurrency test, failure-injection tests
-(scheduler setup-phase failure, INVALID market data end-to-end,
-position double-close, prediction duplicate race, a real restart-
-boundary scheduler-lock-reclaim test, a real restart-boundary
-duplicate-bar-replay test), a corrupted-database FAILED-health-status
-test, and a kill-switch-active SAFE_STOP-health-status test. 9+
-pre-existing tests were fixed at the root cause (not weakened) when
-found to rest on assumptions the new correctness guarantees correctly
-stopped tolerating -- most notably 6 fixture bugs the new DB-level
-prediction-duplicate constraint surfaced: multiple predictions for the
-same symbol sharing one hardcoded `entry_time`, data no real caller
-could legitimately produce.
+This document is deliberately honest about scope. It states what is
+proven, with evidence, what remains unverified, and what is explicitly
+disabled by design — not what would make the product look most
+complete.
 
 ---
 
-## Known limitations (disclosed, not unsafe)
+## 1. Does the implementation satisfy the original specification?
 
-See `FINAL_RELEASE_REMAINING_WORK.md` for the complete, itemized
-CLOSED/EXTERNALLY BLOCKED/ACCEPTED LIMITATION table. Summary of what
-remains genuinely open or deliberately not built:
+**PARTIALLY.**
 
-1. Gap detection (missing bars) in `market_data/validation.py` is a heuristic (not calendar-aware); OHLC-sanity checking runs on the live scanner path only, not the offline `ml_research`/`quant_research` paths.
-2. ~~No automatic startup self-diagnostic~~ -- **CLOSED this pass**. `main.py::_run_startup_gate` now runs `core/health.py`'s same unified check before `paper-live` and `schedule tick`/`schedule loop` start -- FAILED refuses to start (SAFE_STOP), SAFE_STOP (kill switch)/DEGRADED warn and continue. Diagnostic commands (`dashboard`, `health`, `readiness-check`, `schedule status`, kill-switch admin actions) are deliberately never gated on their own health check, so a broken system stays diagnosable. See `FINAL_RELEASE_REMAINING_WORK.md` P1-10.
-3. ~~Provider failure-injection coverage~~ -- **CLOSED this pass**. A dedicated coverage survey found 9 of 16 named scenarios already existed; the 4 genuinely missing were closed with real fixes and tests, including one real code defect (not just a test gap): `DhanRestClient._get()` let a transport-level exception (a real timeout) propagate raw instead of wrapping it in the same `DhanRestError` every other Dhan REST failure raises -- fixed. See `FINAL_RELEASE_REMAINING_WORK.md` P1-6 for the full triage.
-4. Broader systematic chaos testing (simulated disk-full, simulated multi-service simultaneous outage) beyond the targeted failure-injection tests above was not built as a standalone suite.
-5. Dashboard has no authentication; safe only for the current loopback/single-operator deployment model.
-6. No full non-secret-scan security audit (static analysis tooling, dependency license audit) beyond the `pip-audit` CVE scan and the targeted SQL-injection/XSS/path-traversal/credential-handling checks already covered.
-7. SQLite stores have no automatic retention/archival policy -- deliberately: every one of them is exactly the "critical trading state" the mission's own rule forbids automatically deleting; this is confirmed correct-as-is, not a gap.
-8. Performance profiling has not been done -- correctly deferred per the mission's own P0-P3 priority order (P3, only after correctness/resilience, which is not yet fully closed).
+The engineering specification (safe, deterministic, auditable, paper-only
+trading platform with a structurally-disabled live-execution path) is
+satisfied — see Section 9 (Engineering readiness: READY).
 
-None of the above represent unsafe behavior: live order execution
-remains structurally blocked (`tests/test_dhan_no_real_orders.py`,
-confirmed unmodified and passing throughout), the deterministic
-risk/decision core is untouched, and every safety-critical
-restart/recovery path checked was found already correct or was closed
-with a real fix and a test.
+The *trading* specification — a system that generates genuine economic
+edge — is **not** satisfied by present evidence: the frozen ML research
+verdict is `PromotionVerdict.NEGATIVE` on every walk-forward fold, and no
+paper-trading or live track record exists yet that could establish edge
+independently. This is not an engineering gap; it is an open scientific
+question the codebase itself states honestly (see Section 7).
+
+Exceptions/unmet items, all previously disclosed and none unsafe:
+- No official NSE/BSE/SEBI data API exists — permanently out of this
+  project's control, unfixable, correctly worked around via Yahoo
+  Finance.
+- Dashboard authentication is not implemented — deliberately deferred
+  for the current single-operator, loopback-only threat model.
+- No demonstrated live or long-duration paper-trading track record
+  exists (see Section 7's profitability-evidence hierarchy: this
+  project currently sits at Level 4, transaction-cost-adjusted
+  walk-forward, with a negative result — Levels 5–8 have not been
+  attempted).
+
+## 2. What is actually implemented?
+
+A layered pipeline (data → validation → indicators → strategy → risk →
+decision → paper execution → persistence → learning/tracking), a
+deterministic risk/decision core with zero LLM involvement, a
+signal_id-keyed idempotent paper-trading engine, a kill switch and
+account-level circuit breakers now proven to hold even across
+mid-flight process crashes and TOCTOU races, a scheduler with
+process-level-proven mutual exclusion and crash recovery, a real Dhan
+WebSocket data-source implementation (untested against a live account),
+a structurally-disabled real-broker-order path, an MCP server, a
+dashboard, and a ~30-subcommand CLI. Full detail: `FINAL_PRODUCT_CAPABILITY_MATRIX.md`.
+
+## 3. What is actually verified?
+
+- **Unit**: thousands of tests across `risk/`, `paper/`, `market/`,
+  `predictions/`, `scheduler/`.
+- **Integration**: `tests/test_dhan_pipeline_integration.py`,
+  `tests/test_scheduler_runner.py` (real signal generation → real risk
+  evaluation → real paper submission, only market/news/sector data
+  providers faked).
+- **End-to-end**: the full market-data → decision → paper-execution
+  chain, proven to reject INVALID data before any decision is computed.
+- **Concurrency**: real Python threads with `threading.Barrier`/`Event`
+  synchronization (cycles 15, 19, 20, 23, 25) AND real, independent OS
+  subprocesses (`subprocess.Popen`, cycle 27) for the scheduler's core
+  locking primitive.
+- **Subprocess-level**: `SchedulerRunStore.try_start_run`'s mutual
+  exclusion, proven atomic under two genuinely separate OS processes
+  with independent SQLite connections, 10 repetitions.
+- **Restart/recovery**: real temp-file SQLite databases, real "process
+  crashed here" simulation at named transaction boundaries, real fresh
+  store/pipeline instances standing in for a restarted process (cycles
+  8, 15, 20, 22, 26, 29).
+- **External-provider verification**: **not performed**. Every Dhan-
+  related test uses dependency-injected fake transports. No test in
+  this project's history has run against real Dhan credentials.
+- **Mutation testing**: systematic, repeated, and — critically —
+  sometimes **failed on the first attempt and was caught**: cycle 24's
+  17-mutant campaign against `risk/engine.py` (all killed); cycles 27
+  and 28 each independently found and fixed an initially-too-weak new
+  test via this same discipline before trusting it as evidence.
+
+## 4. What is simulated or mocked?
+
+- **Dhan market data**: real client library (`websocket-client`), real
+  WebSocket protocol handling — but every test drives it through a
+  dependency-injected fake transport. `SIMULATED / VERIFIED`, never
+  `REAL PROVIDER / VERIFIED`.
+- **`MockBrokerAdapter`**: not a broker connection at all — delegates
+  entirely to `PaperTradingEngine`. The name describes a Protocol-
+  conformance rehearsal, not simulated broker access.
+- **`DisabledDhanOrderExecutor`**: exists specifically to make real
+  order placement impossible; every method unconditionally raises.
+- **News/sector/market-context providers** in the scheduler's own test
+  suite: faked, by that suite's own long-standing, explicit convention
+  (not hidden — every affected test file states this in its own module
+  docstring).
+- **The 32-trade `data/paper_trading.db` history**: on direct
+  inspection this cycle, this is a **batch replay of ~5 years of cached
+  AAPL (a US stock) historical data through the paper engine, run in one
+  sitting on 2026-08-25** — mechanical engine-validation evidence, not a
+  live or forward-looking paper-trading track record, and not evidence
+  about Indian-market performance. `data/live_sim_trading.db` (the
+  engine actually wired to the live pipeline) is confirmed empty.
+
+## 5. Is the system live?
+
+Answered separately, per this campaign's own standing rule against
+collapsing these into one word:
+
+| Axis | Status |
+|---|---|
+| Live-capable market data | YES — real `websocket-client` transport, real Dhan REST client |
+| Live-verified market data | **NO** — never run against real credentials in this environment |
+| Paper execution | YES, real, the sole exercised execution path |
+| Broker connectivity (read-only) | YES, live-capable (`DhanAccountReader`), not live-verified |
+| Real broker order execution | **NO** — structurally, unconditionally disabled (`RealOrderPlacementDisabledError`), no bypass exists anywhere in the codebase |
+| Live-money operation | **NOT ENABLED, NOT AUTHORIZED, NOT ATTEMPTED** |
+
+## 6. Can it actually trade?
+
+- **Paper**: **YES.**
+- **Broker-connected (data only, no orders)**: **YES**, for market data
+  and read-only account/fund/position access — unverified against a
+  live account.
+- **Real-money**: **NO.** Structurally impossible without a deliberate
+  source-code change to remove `RealOrderPlacementDisabledError` and
+  wire a real execution adapter into the pipeline — neither of which
+  exists, and neither of which this campaign was authorized to do (and
+  did not do).
+
+## 7. Is it profitable?
+
+> **CURRENT EVIDENCE IS NEGATIVE.**
+
+Not "insufficient evidence" — this project has actually run the
+walk-forward evaluation, and the result is negative, not merely absent.
+
+- ROC-AUC 0.575–0.615 across 4 walk-forward folds plus a held-out test.
+- `PromotionVerdict.NEGATIVE` on **every single split**, for both the
+  trained model and the deterministic-rule benchmark it was evaluated
+  against.
+- Transaction costs were included in that evaluation.
+- Canonical source: `docs/STRATEGY_EDGE_DISCOVERY_FINAL_OUTPUT.md`.
+  Surfaced live by the running `readiness-check` CLI command itself
+  (verified this cycle): *"Active strategy: trend_momentum_baseline v1.0
+  -- SCIENTIFIC VERDICT: NO DEMONSTRATED EDGE."*
+- This is a frozen, settled research conclusion. It has not been
+  revisited, reframed, re-tuned, or re-run against the same held-out
+  data at any point across this entire campaign, by explicit standing
+  instruction.
+- Separately: `data/predictions.db` holds 13 live forward predictions
+  against real NSE symbols (entered 2026-09-03/04, 20-bar horizon); as
+  of the last evaluation (2026-09-09) **all 13 remain ACTIVE with zero
+  resolved outcomes** — the live calibration mechanism works, but
+  produces no usable evidence yet, positive or negative.
+
+**Evidence-hierarchy position**: Level 4 (cost-adjusted walk-forward,
+negative). Levels 5–8 (out-of-sample paper trading, long-duration paper
+trading, controlled live trading, statistically credible live evidence)
+have not been attempted.
+
+## 8. What does the current quantitative evidence say?
+
+| Field | Value |
+|---|---|
+| Dataset | `ml_research/`'s own held-out and walk-forward splits |
+| Methodology | 4 walk-forward folds + 1 held-out test |
+| Leakage controls | Purge/embargo, temporal ordering — implemented and unmodified across this entire campaign (`ml_research/` is zero-diff) |
+| ROC-AUC | 0.575–0.615 |
+| Promotion verdict | `NEGATIVE` on every fold, model and benchmark alike |
+| Transaction costs | Included in the evaluation |
+| Expectancy | Not economically positive after costs (the direct basis for the NEGATIVE verdict) |
+| Limitations | Single research pass; not re-run with new features/thresholds this campaign (deliberately, to avoid manufacturing a result by repeated tuning against the same test set) |
+
+This conclusion is preserved unchanged.
+
+## 9. Engineering readiness
+
+**READY.**
+
+35 adversarial hardening cycles; 2378 passing tests (final regression, 0 failed); a 110-row
+executable failure-injection matrix; 39 documented, evidence-graded
+failure-mode entries; systematic mutation testing (including two
+instances where the campaign's own new tests were themselves caught as
+initially too weak and fixed before being trusted); real OS-subprocess
+and multi-thread concurrency proof for the highest-value locking
+primitives; a bounded, measured soak test finding no leak (one accepted,
+documented long-session limitation). All 8 sacred live-execution-safety
+files (`live/dhan/broker_adapter.py`, `live/broker.py`,
+`live/pipeline.py`, `decision_engine/rules.py`,
+`decision_engine/engine.py`, `risk/engine.py`, `risk/sizing.py`,
+`main.py`) reviewed line-by-line after every cycle; zero-diff except for
+five deliberate, individually-reviewed, purely-additive changes to
+`live/pipeline.py`.
+
+## 10. Safety readiness
+
+**READY.**
+
+No known open HIGH or CRITICAL defect. Two CRITICAL defects were found
+and fixed during this campaign, both in the live-approval/execution
+path, both closed with regression tests that were mutation-tested and
+shown to fail against the pre-fix code:
+
+- **A PENDING order could fill after the kill switch or an account
+  circuit breaker activated mid-flight** (cycle 24) — the live pipeline
+  had no equivalent of the guard `paper/advance.py`'s batch path already
+  carried; fixed with `allow_new_fill`, proven never to block managing
+  an already-open position.
+- **A TOCTOU window let `approve_pending()` execute after the kill
+  switch activated between its ownership claim and `submit_signal()`**
+  (cycle 25) — fixed with a second kill-switch check placed immediately
+  before execution, proven both deterministically and with a real,
+  properly-synchronized two-process race.
+
+Live order execution remains structurally, unconditionally disabled.
+
+## 11. Trading-strategy readiness
+
+**INSUFFICIENT EVIDENCE** to authorize any capital deployment,
+and current directional evidence is negative, not merely absent (see
+Section 7).
+
+## 12. Live-money readiness
+
+**NOT READY**, and not attempted: real order placement is structurally
+disabled by design; enabling it would require a deliberate, separate,
+explicitly-authorized product decision this campaign was never asked to
+make and did not make.
+
+---
+
+## Final capability table (summary — full detail in `FINAL_PRODUCT_CAPABILITY_MATRIX.md`)
+
+| Capability | Implemented | Integrated | Tested | Externally Verified | Real | Safe | Production Ready | Evidence |
+|---|---|---|---|---|---|---|---|---|
+| Market data (Yahoo) | Yes | Yes | Yes | Yes (real provider, unofficial API) | Yes | Yes | Yes | Extensive |
+| Market data (Dhan WebSocket) | Yes | Yes | Yes (fake transport) | **No** | Yes (real library) | Yes | Live-capable, not live-verified | Cycles 21/22/23/28 |
+| Indicators | Yes | Yes | Yes | N/A | Yes | Yes | Yes | Cycle 10 property tests |
+| Deterministic decision/risk engine | Yes | Yes | Yes | N/A | Yes | Yes, mutation-tested | Yes | Cycle 24 (17/17 mutants killed) |
+| Kill switch / circuit breakers | Yes | Yes | Yes | N/A | Yes | Yes, mutation-tested | Yes | Cycles 4/24/25 |
+| Paper execution | Yes | Yes | Yes | N/A | Yes | Yes | Yes | Extensive |
+| Real broker execution | No (disabled by design) | No | N/A | N/A | N/A | Yes (safe by exclusion) | N/A | `RealOrderPlacementDisabledError` |
+| Scheduler | Yes | Yes | Yes | Yes (real OS subprocesses) | Yes | Yes | Yes | Cycles 8/27/29 |
+| Crash/restart recovery | Yes | Yes | Yes | Yes (real temp SQLite) | Yes | Yes | Yes | Cycles 8/15/20/22/26/29 |
+| MCP server | Yes | Yes | Yes | N/A | Yes | Yes | Yes | Cycle 11 |
+| Dashboard | Yes | Yes | Yes | N/A | Yes | Partially (no auth, deliberate) | Yes for the intended threat model | — |
+| LLM/RAG | Yes | Yes | Partial | N/A | Yes | Yes (structurally excluded from risk/execution) | Yes | Zero-diff sacred files |
+| Trading edge / profitability | Research attempted | N/A | Yes (walk-forward) | N/A | Yes | N/A | **No** | `PromotionVerdict.NEGATIVE` |
+| Live prediction calibration | Yes | Yes | Yes (mechanism) | N/A | Yes | Yes | Data insufficient | 13 predictions, 0 resolved |
+
+## Final remaining-risk table
+
+| Risk | Severity | Impact | Mitigation | Acceptable? |
+|---|---|---|---|---|
+| Dhan data path never live-verified | MEDIUM | Real-account behavior (auth edge cases, real rate limits, real malformed frames) unproven | Extensive simulated-protocol testing; structurally cannot place real orders even if data misbehaves | Yes, for a paper-only deployment |
+| No demonstrated trading edge | HIGH (to any capital-deployment decision), N/A to engineering safety | A live/paper deployment expecting profit would be unsupported by evidence | Verdict is surfaced live by the CLI itself, not hidden | Yes, as long as no capital is deployed on this basis |
+| Indicator-history buffer unbounded (`_SymbolBuffer.bars`) | LOW | Memory/compute grow for a multi-month continuous session without restart | Documented; project's own operating model is per-session, not multi-month-continuous | Yes |
+| Dashboard has no authentication | LOW–MEDIUM if exposed beyond loopback | Unauthorized access to a locally-reachable dashboard | Documented single-operator/loopback threat model | Yes, for the stated deployment model only |
+| Fresh clean-install not re-run this specific cycle | LOW | Small chance of an undetected install-time regression | `requirements.txt` confirmed unchanged since the last full clean-install verification (cycle 18); ~15 full-suite runs on the existing venv this campaign, all passing | Yes |
+| Live prediction calibration sample size (13, 0 resolved) | N/A to safety, HIGH to any calibration claim | No live accuracy claim can currently be supported | None needed — no such claim is made | Yes |
+
+---
+
+## Claims audit
+
+Every claim below was checked against actual code/evidence this cycle,
+not assumed from prior documentation:
+
+- **"Live trading"**: never claimed as enabled. Correctly described
+  throughout as structurally disabled.
+- **"Real-time"**: not claimed for Dhan data (live-capable, not
+  live-verified); Yahoo data is correctly described as delayed/EOD-
+  or-intraday-batch, not tick-real-time.
+- **"AI-powered"**: the LLM/RAG layer is real and integrated, but
+  verified (via zero-diff sacred files across the entire campaign) to
+  have no path into risk, sizing, execution, or kill-switch decisions —
+  described accordingly, never as "AI execution."
+- **"Exactly-once"**: never claimed. This campaign's own settled,
+  evidence-backed characterization is **effectively-once** (signal_id-
+  keyed idempotency, proven under concurrency and crash injection, not
+  a mathematical exactly-once guarantee).
+- **"Production-ready"**: used only with its scope stated —
+  engineering-production-ready, explicitly NOT a claim of trading
+  profitability or live-money readiness.
+- **"Guaranteed"**: not used for anything this campaign could not
+  actually prove (guarantees are scoped: "no duplicate execution
+  proven under X conditions," never bare "guaranteed").
+- **"Profitable"**: never claimed. The actual, current, negative
+  verdict is stated plainly in Sections 7–8 above and by the running
+  CLI itself.
+- **"High accuracy"**: not claimed for the ML baseline (ROC-AUC
+  0.575–0.615 is reported as-is, not characterized as "high").
+- **"Autonomous trading"**: the system can autonomously generate paper
+  decisions on a schedule; it cannot autonomously place a real order
+  under any configuration.
+
+---
+
+## Known limitations (disclosed, not unsafe) — carried forward, still accurate
+
+1. Gap detection (missing bars) in `market_data/validation.py` is a
+   heuristic, not calendar-aware.
+2. Broader systematic chaos testing (simulated disk-full, simulated
+   multi-service simultaneous outage) beyond the targeted
+   failure-injection tests was not built as a standalone suite.
+3. Dashboard has no authentication — safe only for the current
+   loopback/single-operator deployment model.
+4. No full non-secret-scan security audit (static analysis tooling,
+   dependency license audit) beyond `pip-audit` (re-run fresh this
+   cycle, 53 advisories across 8 already-triaged packages, no new
+   vulnerable package) and the targeted injection/credential checks.
+5. SQLite stores have no automatic retention/archival policy —
+   deliberately: every one is exactly the "critical trading state" this
+   project's own rule forbids automatically deleting.
+6. Performance profiling beyond this cycle's own bounded soak test has
+   not been done.
+7. `_SymbolBuffer.bars` (indicator history) has no eviction policy —
+   see the remaining-risk table above.
+
+None of the above represent unsafe behavior. Live order execution
+remains structurally blocked; the deterministic risk/decision core is
+untouched (zero-diff across all 35 cycles of this campaign); every
+safety-critical restart/recovery/concurrency path attacked was found
+already correct or was closed with a real fix, a regression test, and
+mutation-test evidence.
 
 ## Remaining external dependencies
 
-- Dhan credentials and live connectivity are not available in this
-  development environment; live-broker behavior beyond the
-  structurally-enforced no-real-orders invariant is not independently
-  re-verified against a real Dhan session.
+- Dhan credentials and live connectivity remain unavailable in this
+  development environment.
 - Yahoo Finance's continued availability and rate limits (unofficial,
   free-tier API) remain an external dependency with no official
   NSE/BSE/SEBI alternative.
 - Ollama's continued availability for the critic/RAG advisory layer
-  (confirmed non-blocking to the deterministic core -- see
-  `FINAL_FAILURE_MODE_ANALYSIS.md` and the two dedicated
-  degrade-gracefully tests re-verified this campaign).
-
-## Remaining research uncertainty
-
-The Phase 1 ML baseline demonstrated **no statistically meaningful
-edge** over the deterministic benchmark. This is a settled, frozen
-research result -- reported here as unresolved *research* uncertainty,
-not an engineering defect. No attempt has been made, or should be made
-without a new, separately pre-registered experiment, to revisit,
-reframe, or extract a positive result from that finding.
+  (confirmed non-blocking to the deterministic core).
 
 ---
 
-**Live trading: DISABLED**
-**Claude Code runtime dependency: NONE** -- proven this campaign by
-direct removal-and-re-execution (`.claude/`/`.cursor/`/`.mcp.json`
-deleted from a clean-install clone, every smoke-tested command ran
-identically), not merely claimed.
-**Release recommendation: READY**
+## Definitive verdict
 
-Rationale: across three hardening passes, every P0 and P1 item in the
-mission's own explicit checklist is now CLOSED, EXTERNALLY BLOCKED, or
-a formally-documented ACCEPTED LIMITATION with reasoning -- see
-`FINAL_RELEASE_REMAINING_WORK.md` for the complete, evidence-backed
-table, and `FINAL_RELEASE_CANDIDATE_REPORT.md` for the final,
-criterion-by-criterion evidence and the explicit 19/19 gate checklist.
-Datetime duplication, SQLite concurrency resilience, a scheduler
-uncaught-exception path, a genuine cache-staleness correctness bug, a
-previously-nonexistent data-quality validation layer (now proven
-end-to-end), an unguarded paper-position state machine, and app-level-
-only prediction duplicate-prevention were all closed with real fixes
-and tests. Schema-version tracking, restart recovery across every
-stateful category, scheduler resilience, paper-trading consistency,
-the provider failure-injection matrix, a unified health system
-consumed identically by the CLI and dashboard, and a real startup gate
-are all closed. A full clean-install verification and Claude-Code-
-independence proof were both run for real, finding and fixing two
-genuine defects along the way (a dependency-pin mismatch, and a Dhan
-REST client that didn't wrap transport failures like every other
-provider in the project). The full documentation suite exists. The
-live-trading-safety boundary was re-verified untouched after every
-single one of the 11 commits in this campaign.
+**Live trading: DISABLED, structurally, by design.**
+**Can it place a real order: NO.**
+**Is it profitable: CURRENT EVIDENCE IS NEGATIVE.**
+**Engineering readiness: READY.**
+**Safety readiness: READY.**
+**Trading-strategy readiness: INSUFFICIENT EVIDENCE (evidence that exists is negative).**
+**Live-money readiness: NOT READY.**
 
-What remains is a small set of P2/P3 items, each individually disclosed
-and reasoned rather than silently dropped (dashboard authentication;
-`core/config.py`'s low-risk, zero-untrusted-input config validation;
-SQLite retention policy, deliberately not built per the mission's own
-"never delete critical trading state automatically" rule; performance
-profiling, correctly deferred until after correctness) -- none of
-which represent unsafe behavior. Per the mission's own standard ("a
-final product can have known limitations, it cannot have known unsafe
-behavior"), and given every explicit release-gate criterion is now
-satisfied with cited evidence, this is a READY release candidate for
-what this mission actually defines: a safe, resilient, independently-
-operable paper-trading research platform -- not a claim of trading
-profitability, which remains explicitly unproven and not attempted.
+This is a safe, resilient, independently-operable, extensively
+adversarially-hardened **paper-trading research platform**. It is not,
+and does not claim to be, a demonstrated source of trading profit. The
+distinction between those two things — engineering quality and trading
+edge — is the single most important fact in this report, and this
+campaign's entire final cycle sequence (27–35) existed specifically to
+make sure that distinction was never allowed to blur.
