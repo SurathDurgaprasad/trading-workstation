@@ -248,6 +248,69 @@ def test_store_persists_across_reconnect(tmp_path):
     reopened.close()
 
 
+# --- Real-time strategy validation mission, Phase J: crash resilience for
+# the live-path prediction-recording write itself (live/prediction_
+# recorder.py's own tests already prove the higher-level DuplicatePrediction
+# Error/failure-isolation behavior around save_prediction -- these two
+# tests prove the actual SQLite-level durability guarantee that behavior
+# depends on, using the SAME real database engine, not a mock). ------------
+
+
+def test_an_uncommitted_write_leaves_no_partial_row_simulating_a_crash_mid_write(tmp_path):
+    """Simulates a process crash BETWEEN save_prediction's own BEGIN and
+    COMMIT (see PredictionStore.transaction's own BEGIN/COMMIT/ROLLBACK):
+    manually BEGIN + INSERT via the raw connection, then abandon it
+    without ever calling COMMIT or ROLLBACK -- exactly what a real SIGKILL
+    mid-transaction leaves behind. A restart (a fresh PredictionStore
+    connection to the same file) must see NOTHING, not a corrupted or
+    half-written row -- SQLite's own durability guarantee, verified
+    against the real database engine this project actually uses, not
+    assumed."""
+    db_path = tmp_path / "predictions.db"
+    store = PredictionStore(db_path)
+    crashed_prediction = _prediction(prediction_id="crashed-p1")
+    store._conn.execute("BEGIN")
+    store._conn.execute(
+        "INSERT INTO predictions (prediction_id, decision_id, symbol, created_at, entry_time, data_json) VALUES (?,?,?,?,?,?)",
+        (
+            crashed_prediction.prediction_id, crashed_prediction.decision_id, crashed_prediction.symbol,
+            crashed_prediction.created_at.isoformat(), crashed_prediction.entry_time.isoformat(), crashed_prediction.model_dump_json(),
+        ),
+    )
+    # Deliberately NO commit/rollback/close -- simulates the process
+    # disappearing mid-transaction. Drop the reference to release the
+    # connection object without any orderly shutdown.
+    del store
+
+    restarted = PredictionStore(db_path)
+    assert restarted.get_prediction("crashed-p1") is None
+    assert restarted.list_predictions() == []
+    restarted.close()
+
+
+def test_a_committed_prediction_survives_an_abrupt_connection_loss(tmp_path):
+    """The other half of the same guarantee: a prediction that DID
+    complete save_prediction's own commit must survive even if the
+    connection is then lost abruptly (never explicitly .close()'d) --
+    proving durability does not depend on an orderly shutdown sequence,
+    exactly the real-world shape of "the process was recording a
+    prediction and then the machine lost power/was killed one instant
+    later."""
+    db_path = tmp_path / "predictions.db"
+    store = PredictionStore(db_path)
+    store.save_prediction(_prediction(prediction_id="survivor-p1"))
+    # No store.close() -- simulate the process disappearing immediately
+    # after the write it cared about completed, with no chance to run
+    # any cleanup.
+    del store
+
+    restarted = PredictionStore(db_path)
+    recovered = restarted.get_prediction("survivor-p1")
+    assert recovered is not None
+    assert recovered.symbol == "AAPL"
+    restarted.close()
+
+
 # --- final-product-hardening: DB-level duplicate prevention ---------------
 
 
