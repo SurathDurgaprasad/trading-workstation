@@ -80,10 +80,14 @@ def test_index_renders_empty_workstation(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "SIMULATED PAPER TRADING" in response.text
-    assert "No signals pending human approval." in response.text
-    assert "No open positions." in response.text
     # Phase 26: the new /intelligence page must be linked from here.
     assert 'href="/intelligence"' in response.text
+
+    signals_response = client.get("/signals")
+    assert "No signals pending human approval." in signals_response.text
+
+    portfolio_response = client.get("/portfolio")
+    assert "No open positions." in portfolio_response.text
 
 
 def test_index_states_the_scientific_no_edge_verdict_prominently(client):
@@ -103,8 +107,11 @@ def test_index_shows_initial_capital_and_realized_pnl(client):
     """Mission requirement: the dashboard's ACCOUNT section must show
     starting capital and realized P&L, not just cash/equity/open P&L --
     an operator watching ₹20,000 simulated capital needs to see what it
-    started as, not infer it from equity minus P&L by hand."""
-    response = client.get("/")
+    started as, not infer it from equity minus P&L by hand.
+
+    UI integration (Claude Design "Trading Workstation" approved
+    canvas): this content now lives on the dedicated Portfolio tab."""
+    response = client.get("/portfolio")
     assert "Initial Capital" in response.text
     assert "100,000.00" in response.text  # this fixture's engine uses PaperTradingEngine's own default
     assert "Realized P&amp;L" in response.text or "Realized P&L" in response.text
@@ -112,15 +119,21 @@ def test_index_shows_initial_capital_and_realized_pnl(client):
 
 def test_index_shows_no_feed_data_when_nothing_processed_yet(client):
     """Phase 15 §7/§22: absence of a feed_status row must never be
-    silently filled in with a fabricated MOCK/SIMULATED default."""
-    response = client.get("/")
+    silently filled in with a fabricated MOCK/SIMULATED default.
+
+    UI integration: the MARKET FEED table now lives on the System tab."""
+    response = client.get("/system")
     assert "No market data processed yet in this session" in response.text
 
 
 def test_index_shows_real_feed_status_once_written(client):
     """Directly exercises live.workstation.get_feed_status() through the
     dashboard -- proving MOCK vs. DHAN and SIMULATED vs. LIVE are both
-    genuinely distinguished in the rendered page, never hardcoded."""
+    genuinely distinguished in the rendered page, never hardcoded.
+
+    UI integration: the full MARKET FEED table (with a Source column)
+    now lives on the System tab; the Overview tab's own watchlist reads
+    the same real feed_status rows, checked separately below."""
     import live.workstation as workstation_module
 
     state_store = workstation_module.new_live_state_store()
@@ -130,11 +143,14 @@ def test_index_shows_real_feed_status_once_written(client):
     state_store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, connection_state="CONNECTED")
     state_store.close()
 
-    response = client.get("/")
+    response = client.get("/system")
     assert "RELIANCE.NS" in response.text
     assert "DHAN" in response.text
     assert "LIVE" in response.text
     assert "CONNECTED" in response.text
+
+    overview_response = client.get("/")
+    assert "RELIANCE.NS" in overview_response.text
 
 
 def test_market_feed_table_shows_a_real_last_price(client):
@@ -149,7 +165,7 @@ def test_market_feed_table_shows_a_real_last_price(client):
     state_store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, connection_state="CONNECTED", last_price=1309.2)
     state_store.close()
 
-    response = client.get("/")
+    response = client.get("/system")
     assert "Last Price" in response.text
     assert "1,309.20" in response.text
 
@@ -166,7 +182,7 @@ def test_market_feed_table_shows_n_a_when_last_price_was_never_recorded(client):
     state_store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, connection_state="CONNECTED")
     state_store.close()
 
-    response = client.get("/")
+    response = client.get("/system")
     assert "n/a" in response.text
 
 
@@ -233,7 +249,8 @@ def test_index_shows_stale_data_health_for_an_old_bar(client):
 
 
 def test_index_shows_no_critic_rejections_when_none_ever_recorded(client):
-    response = client.get("/")
+    """UI integration: the CRITIC REJECTIONS table now lives on Signals."""
+    response = client.get("/signals")
     assert "No signal has ever been rejected by the deterministic critic." in response.text
 
 
@@ -242,7 +259,10 @@ def test_index_shows_a_real_persisted_critic_rejection(client):
     live.workstation.get_critic_rejections() through the dashboard --
     proving a critic-rejected signal (which never creates a JournalEntry
     at all) is still genuinely visible to an operator, not silently
-    lost."""
+    lost.
+
+    UI integration: the full table now lives on Signals; Overview shows
+    only a real, honest count-level summary in its Attention panel."""
     import live.workstation as workstation_module
     from datetime import datetime, timezone
 
@@ -254,11 +274,15 @@ def test_index_shows_a_real_persisted_critic_rejection(client):
     )
     state_store.close()
 
-    response = client.get("/")
+    response = client.get("/signals")
     assert "RELIANCE.NS" in response.text
     assert "REJECT" in response.text
     assert "Kill switch is active" in response.text
     assert "sig-abc123"[:12] in response.text
+
+    overview_response = client.get("/")
+    assert "CRITIC REJECTIONS" in overview_response.text
+    assert "1 recorded" in overview_response.text
 
 
 def test_index_journal_table_has_a_decision_id_column(client):
@@ -272,11 +296,13 @@ def test_index_journal_table_has_a_decision_id_column(client):
     live/pipeline.py Strategy, same as _drive_one_pending_approval's own
     real pipeline), so it correctly shows the documented "--" placeholder
     -- proving the column renders and is honest about absence, not that
-    a decision_id was fabricated."""
+    a decision_id was fabricated.
+
+    UI integration: the JOURNAL table now lives on the Portfolio tab."""
     signal_id = _drive_one_pending_approval()
     client.post("/approve", data={"signal_id": signal_id})
 
-    response = client.get("/")
+    response = client.get("/portfolio")
     assert "Decision ID" in response.text
     assert "&mdash;" in response.text  # the documented placeholder for a signal with no decision_engine Decision
 
@@ -443,11 +469,17 @@ def test_banner_does_not_claim_connected_for_a_stale_row_still_marked_connected(
 
 
 def test_index_shows_a_pending_signal_with_approve_reject_buttons(client):
+    """UI integration: the approve/reject table now lives on Signals;
+    Overview still surfaces the same real pending signal in its
+    Attention panel (checked separately below)."""
     signal_id = _drive_one_pending_approval()
-    response = client.get("/")
+    response = client.get("/signals")
     assert signal_id[:12] in response.text
     assert "APPROVE" in response.text
     assert "REJECT" in response.text
+
+    overview_response = client.get("/")
+    assert "APPROVAL REQUIRED" in overview_response.text
 
 
 def test_approve_route_calls_the_same_domain_method_and_redirects(client):
@@ -494,3 +526,132 @@ def test_approving_while_kill_switch_active_is_blocked(client):
     assert workstation_module.get_trade_journal() == []
     # still pending -- the kill switch blocked the approval, it didn't discard it
     assert len(workstation_module.get_pending_approvals()) == 1
+
+
+# --- UI integration (Claude Design "Trading Workstation" approved canvas) -------
+
+
+def test_signal_detail_page_shows_the_real_trade_plan_and_honestly_reports_ai_unavailable(client):
+    """The Trade Plan/Technical Evidence/Risk Assessment sections must
+    come entirely from real, persisted fields (strategy.signal.Signal,
+    live.state_store.PendingApprovalRecord, a read-only RiskEngine
+    recompute) -- and the AI section must NOT fabricate a narrative for
+    a path that never persists one."""
+    signal_id = _drive_one_pending_approval()
+    response = client.get(f"/signals/{signal_id}")
+    assert response.status_code == 200
+    assert "AAPL" in response.text
+    assert "TRADE PLAN" in response.text
+    assert "PENDING_HUMAN_APPROVAL" in response.text
+    assert "Trend confirmed" in response.text  # a real reason_code, not an AI narrative
+    assert "POSITION SIZE" in response.text
+    assert "NOT AVAILABLE for this signal" in response.text  # AI interpretation, honestly absent
+    assert "SIGNAL_GENERATED" in response.text  # real state.history timeline
+    assert "exit_reason TARGET" in response.text
+    assert "exit_reason STOP" in response.text
+
+
+def test_signal_detail_page_for_an_unknown_signal_id_is_honest_not_broken(client):
+    response = client.get("/signals/does-not-exist")
+    assert response.status_code == 200
+    assert "may have already been approved, rejected, or expired" in response.text
+
+
+def test_fleet_page_reports_not_configured_by_default(client):
+    response = client.get("/fleet")
+    assert "Not configured" in response.text
+
+
+def test_fleet_page_shows_real_fleet_summary_data_once_configured(client, monkeypatch, tmp_path):
+    """Wires the Fleet tab at a real runtime-dir with real, persisted
+    per-symbol state -- exercising the SAME live/fleet_summary.py and
+    live/runtime_layout.py functions `fleet-summary` itself uses, not a
+    second implementation."""
+    import dashboard.app as dashboard_app
+    from datetime import datetime, timezone
+    from live.runtime_layout import ensure_symbol_runtime_dirs, symbol_runtime_paths
+    from live.state_store import LiveStateStore
+
+    dashboard_app.configure(schedule_config_path=None, fleet_runtime_dir=str(tmp_path), fleet_symbols=["RELIANCE.NS", "TCS.NS"])
+
+    paths = symbol_runtime_paths(tmp_path, "RELIANCE.NS")
+    ensure_symbol_runtime_dirs(paths)
+    (paths.logs_dir / "session.log").write_text(
+        "[RELIANCE.NS] bar#   1 2026-09-15T09:15:00  close=2481.20  NO_SIGNAL  fresh=True\n", encoding="utf-8",
+    )
+    now = datetime.now(timezone.utc)
+    state_store = LiveStateStore(paths.state_db)
+    state_store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, connection_state="CONNECTED")
+    state_store.close()
+    # TCS.NS deliberately never started -- proving a never-launched symbol
+    # is reported honestly, not silently dropped from the table.
+
+    response = client.get("/fleet")
+    assert response.status_code == 200
+    assert "RELIANCE.NS" in response.text
+    assert "TCS.NS" in response.text
+    assert "1 / 2 HEALTHY" in response.text
+    assert "CONNECTED" in response.text
+    assert "NOT AVAILABLE" in response.text  # process-alive status, honestly absent
+
+    dashboard_app.configure(schedule_config_path=None)  # reset for other tests in this module
+
+
+def test_portfolio_page_computes_position_pnl_from_the_real_last_observed_price(client):
+    """UI integration: per-position current price/P&L is a pure
+    arithmetic readout of two already-real numbers (Position.entry_price
+    and feed_status.last_price for the SAME symbol) -- not a new
+    trading computation."""
+    import live.workstation as workstation_module
+    from datetime import datetime, timezone
+    from paper.models import Position, PositionStatus
+
+    engine = workstation_module.get_live_engine()
+    engine.store.save_position(Position(
+        position_id="pos-1", symbol="AAPL", status=PositionStatus.OPEN, signal_id="sig-1",
+        entry_order_id="ord-1", entry_fill_id="fill-1", entry_time=datetime.now(timezone.utc),
+        entry_price=100.0, quantity=10, stop_price=95.0, target_price=110.0,
+    ))
+    state_store = workstation_module.new_live_state_store()
+    now = datetime.now(timezone.utc)
+    state_store.save_feed_status(symbol="AAPL", source="DHAN", status="LIVE", bar_timestamp=now, received_at=now, connection_state="CONNECTED", last_price=105.0)
+    state_store.close()
+
+    response = client.get("/portfolio")
+    assert "AAPL" in response.text
+    assert "105.00" in response.text  # current price, read from feed_status
+    assert "+50.00" in response.text  # (105 - 100) * 10, a pure readout of two real numbers
+
+
+def test_portfolio_page_shows_n_a_when_no_live_price_observed_for_a_position(client):
+    import live.workstation as workstation_module
+    from datetime import datetime, timezone
+    from paper.models import Position, PositionStatus
+
+    engine = workstation_module.get_live_engine()
+    engine.store.save_position(Position(
+        position_id="pos-1", symbol="AAPL", status=PositionStatus.OPEN, signal_id="sig-1",
+        entry_order_id="ord-1", entry_fill_id="fill-1", entry_time=datetime.now(timezone.utc),
+        entry_price=100.0, quantity=10, stop_price=95.0, target_price=110.0,
+    ))
+
+    response = client.get("/portfolio")
+    assert "n/a" in response.text
+
+
+def test_overview_watchlist_shows_observed_symbols_and_a_pending_signal_badge(client):
+    signal_id = _drive_one_pending_approval()
+    response = client.get("/")
+    assert "AAPL" in response.text
+    assert "WATCHLIST" in response.text
+    assert "LONG" in response.text  # the real signal's own side, badged on its watchlist row
+
+
+def test_api_state_returns_a_real_json_snapshot(client):
+    response = client.get("/api/state")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kill_switch_active"] is False
+    assert body["pending_approvals_count"] == 0
+    assert "as_of" in body
+    assert body["prices"] == []

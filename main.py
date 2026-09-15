@@ -1466,7 +1466,14 @@ def run_dashboard_command(args: argparse.Namespace) -> None:
     import dashboard.app as dashboard_app
     from dashboard.app import app
 
-    dashboard_app.configure(schedule_config_path=args.schedule_config)
+    fleet_symbols = None
+    if args.fleet_watchlist_file:
+        from market_data.universe import MarketUniverse
+
+        fleet_symbols = list(MarketUniverse.from_yaml_file(args.fleet_watchlist_file).symbols)
+    elif args.fleet_symbols:
+        fleet_symbols = [s for s in args.fleet_symbols.split(",") if s.strip()]
+    dashboard_app.configure(schedule_config_path=args.schedule_config, fleet_runtime_dir=args.fleet_runtime_dir, fleet_symbols=fleet_symbols)
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         # Strategy science Phase 17 (security review) finding: the
@@ -4212,6 +4219,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     dashboard_parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1, local-only).")
     dashboard_parser.add_argument("--port", type=int, default=8765, help="Bind port (default: 8765).")
     dashboard_parser.add_argument("--schedule-config", type=str, default=None, help="Optional path to the SAME YAML schedule/holiday config used with `schedule --config` (holidays: key). When given, the market-status banner is cross-checked against it instead of only warning that no holiday calendar was consulted.")
+    dashboard_parser.add_argument("--fleet-runtime-dir", type=str, default=None, help="UI integration: the SAME --runtime-dir a `fleet-supervise` session was launched with. When given (with --fleet-symbols or --fleet-watchlist-file), the Fleet tab shows real data from live/fleet_summary.py. Omit to leave the Fleet tab honestly reporting itself as not configured.")
+    dashboard_parser.add_argument("--fleet-symbols", type=str, default=None, help="Comma-separated symbol list for the Fleet tab, matching the SAME set fleet-supervise was launched with. Alternative to --fleet-watchlist-file.")
+    dashboard_parser.add_argument("--fleet-watchlist-file", type=str, default=None, help="Path to a YAML watchlist file (e.g. market_data/watchlists/starter_nse.yaml) for the Fleet tab. Alternative to --fleet-symbols.")
 
     universe_parser = subparsers.add_parser(
         "universe",

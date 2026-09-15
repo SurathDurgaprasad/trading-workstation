@@ -32,7 +32,7 @@ from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, RedirectResponse
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.routing import Route
 
 import live.workstation as workstation
@@ -49,7 +49,7 @@ default -- e.g. under every existing test, which never calls
 `configure()`) reproduces the page's original behavior exactly."""
 
 
-def configure(*, schedule_config_path: str | None) -> None:
+def configure(*, schedule_config_path: str | None, fleet_runtime_dir: str | None = None, fleet_symbols: list[str] | None = None) -> None:
     """Live-market-readiness audit finding: the dashboard's own market-
     status banner never had a way to consult the SAME holiday list an
     operator may have already configured for the scheduler
@@ -58,11 +58,29 @@ def configure(*, schedule_config_path: str | None) -> None:
     Called once at process startup, never per-request (a dashboard GET
     must never trigger file I/O just to render the banner -- see
     `_market_status_banner`'s own docstring); the loaded holiday set is
-    cached at module level for the life of the process."""
-    global _schedule_config_path, _cached_holidays
+    cached at module level for the life of the process.
+
+    UI integration (Claude Design "Trading Workstation" approved canvas):
+    `fleet_runtime_dir`/`fleet_symbols` are optional, same pattern as
+    `schedule_config_path` -- when omitted (the default, e.g. every
+    existing test), the Fleet tab honestly reports itself as not
+    configured rather than fabricating fleet data. When given, they
+    point the Fleet tab at the SAME `runtime/{SYMBOL}/...` layout
+    `live/runtime_layout.py` and `fleet-supervise`/`fleet-summary`
+    already use -- no new fleet data model is introduced here."""
+    global _schedule_config_path, _cached_holidays, _fleet_runtime_dir, _fleet_symbols
     _schedule_config_path = schedule_config_path
     _cached_holidays = _load_holidays(schedule_config_path)
+    _fleet_runtime_dir = fleet_runtime_dir
+    _fleet_symbols = fleet_symbols or []
 
+
+_fleet_runtime_dir: str | None = None
+"""UI integration: set by `configure(fleet_runtime_dir=...)`. None (the
+default) means the Fleet tab is not configured -- see `fleet_page()`."""
+
+_fleet_symbols: list[str] = []
+"""UI integration: set by `configure(fleet_symbols=...)`."""
 
 _cached_holidays: frozenset | None = None
 """None (the default, e.g. every existing test that never calls
@@ -268,48 +286,160 @@ def _scientific_verdict_banner() -> str:
     )
 
 
-def _page(body: str) -> str:
+_NAV_ITEMS = (
+    ("/", "Overview"),
+    ("/signals", "Signals"),
+    ("/portfolio", "Portfolio"),
+    ("/fleet", "Fleet"),
+    ("/system", "System"),
+    ("/research", "Research"),
+)
+
+
+def _nav_bar(active_path: str) -> str:
+    links = "".join(
+        f'<a href="{href}" style="padding:8px 14px;font-size:13px;font-weight:600;text-decoration:none;'
+        f'border-bottom:2px solid {"#4DA3FF" if href == active_path else "transparent"};'
+        f'color:{"#F2F4F7" if href == active_path else "#66717D"};">{label}</a>'
+        for href, label in _NAV_ITEMS
+    )
+    return (
+        '<div style="display:flex;align-items:center;height:44px;padding:0 20px;border-bottom:1px solid #252D35;'
+        f'background:#0B0E11;gap:4px;overflow-x:auto;">{links}'
+        '<a href="/intelligence" style="margin-left:auto;padding:8px 14px;font-size:12px;color:#66717D;text-decoration:none;">Legacy intelligence view &rarr;</a>'
+        "</div>"
+    )
+
+
+def _top_bar() -> str:
+    return (
+        '<div style="display:flex;align-items:center;height:56px;padding:0 20px;border-bottom:1px solid #252D35;'
+        'background:#0B0E11;gap:24px;">'
+        '<div style="display:flex;flex-direction:column;line-height:1.1;">'
+        '<div style="font-size:14px;font-weight:600;letter-spacing:0.04em;">TRADING INTELLIGENCE</div>'
+        '<div style="font-size:10px;color:#66717D;letter-spacing:0.08em;">RESEARCH &amp; PAPER-TRADING WORKSTATION</div>'
+        "</div>"
+        '<div style="margin-left:auto;font-size:10px;font-weight:600;letter-spacing:0.06em;padding:4px 9px;'
+        'border-radius:4px;border:1px solid #4DA3FF55;color:#4DA3FF;background:#4DA3FF14;">PAPER</div>'
+        "</div>"
+    )
+
+
+def _kill_switch_banner() -> str:
+    """Shown on the live-workstation tabs only (Overview/Signals/
+    Portfolio/System -- the ones live.workstation.get_live_engine()'s
+    account/kill-switch state is actually about), NOT injected into the
+    shared `_page()` shell: `/intelligence`/`/health` are a genuinely
+    different subsystem (the shadow-run/decision_engine research
+    pipeline's own account, dashboard/intelligence.py's own
+    STATE_DB_PATH read) and already have their own equivalent (see
+    intelligence_page()'s own kill_switch_section). A real regression
+    was found and fixed here: calling get_live_engine() from every page
+    (including /health, /intelligence -- which never touched it before)
+    crashed those pages' own tests with a genuine
+    sqlite3.ProgrammingError ("SQLite objects created in a thread can
+    only be used in that same thread") the moment Starlette's
+    TestClient dispatched a request to a different thread than the one
+    that first cached the module-level live engine -- exactly the
+    cross-thread hazard tests/test_dashboard.py's own
+    `_isolated_live_engine` fixture already documents and works around
+    for ITS pages, but /health and /intelligence's own test fixtures
+    never needed to, because those pages never called this before.
+    Reads workstation.get_live_sim_status() -- the SAME real, persisted
+    kill-switch state /approve and /reject already check before
+    acting."""
+    status = workstation.get_live_sim_status()
+    if not status["kill_switch_active"]:
+        return ""
+    reason = html.escape(status["kill_switch_reason"] or "")
+    return f'<div class="banner kill-active">KILL SWITCH ACTIVE &mdash; {reason} &mdash; no new signal will be approved or executed.</div>'
+
+
+def _risk_halt_banner() -> str:
+    """Shown on the live-workstation tabs only -- same reasoning as
+    `_kill_switch_banner()`. Reads workstation.get_risk_halt_reasons(),
+    the real risk.engine.RiskEngine.account_level_halt_reasons() output,
+    never fabricated."""
+    risk_halt_reasons = workstation.get_risk_halt_reasons()
+    if not risk_halt_reasons:
+        return ""
+    reasons_text = ", ".join(html.escape(r) for r in risk_halt_reasons)
+    return (
+        f'<div class="banner kill-active">RISK HALT ACTIVE &mdash; {reasons_text} &mdash; '
+        f"a new signal would be REJECTED by risk.engine's own circuit breaker (separate from the kill switch above).</div>"
+    )
+
+
+def _page(body: str, *, active_path: str = "/") -> str:
+    """UI integration (Claude Design "Trading Workstation" approved
+    canvas): visual shell only -- dark charcoal/near-black background,
+    Inter for UI text, IBM Plex Mono for numeric/financial values,
+    restrained blue accent, the same green/red/amber/blue semantic
+    colors the approved design specifies. Every banner below is the
+    SAME real, pre-existing function (broker connectivity, clock skew,
+    scientific verdict, market status) -- only their visual container
+    changed, never their content or the real data source behind them.
+    Still meta-refreshes (this project has no client-side framework and
+    no WebSocket layer; see `/api/state` for the one piece of this page
+    that DOES update without a full reload)."""
     return f"""<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>Paper-Live Workstation (SIMULATED)</title>
+<title>Trading Workstation (PAPER)</title>
 <meta http-equiv="refresh" content="{_REFRESH_SECONDS}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  body {{ font-family: -apple-system, Segoe UI, sans-serif; background: #0f1115; color: #e6e6e6; margin: 0; padding: 24px; }}
-  .banner {{ background: #7a1f1f; color: #fff; padding: 10px 16px; font-weight: bold; border-radius: 4px; margin-bottom: 16px; }}
-  .kill-active {{ background: #b30000; }}
-  .verdict-banner {{ background: #3a3316; color: #f0d878; border: 1px solid #6b5a1f; font-weight: normal; }}
-  .verdict-banner strong {{ font-weight: bold; }}
-  h2 {{ border-bottom: 1px solid #333; padding-bottom: 4px; margin-top: 28px; }}
+  * {{ box-sizing: border-box; }}
+  body {{ font-family: Inter, -apple-system, Segoe UI, sans-serif; background: #0B0E11; color: #F2F4F7; margin: 0; padding: 0; }}
+  a {{ color: #4DA3FF; }}
+  .content {{ padding: 24px 20px 40px; max-width: 1400px; }}
+  .banner {{ background: #7a1f1f; color: #fff; padding: 10px 16px; font-weight: bold; margin: 0; }}
+  .kill-active {{ background: #FF4D5A; color: #1A0505; }}
+  .verdict-banner {{ background: #1A1508; color: #E7B84B; border-bottom: 1px solid #3a3316; font-weight: normal; padding: 10px 20px; }}
+  .verdict-banner strong {{ font-weight: 700; }}
+  h2 {{ border-bottom: 1px solid #252D35; padding-bottom: 6px; margin-top: 28px; font-size: 15px; font-weight: 600; }}
+  h3 {{ color: #9AA4AF; font-size: 13px; }}
   table {{ width: 100%; border-collapse: collapse; margin-top: 8px; }}
-  th, td {{ text-align: left; padding: 6px 10px; border-bottom: 1px solid #262a33; font-size: 14px; }}
-  th {{ color: #9aa4b2; font-weight: 600; }}
-  .tag {{ display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 12px; font-weight: bold; }}
-  .tag-mock {{ background: #33415c; color: #a9c1ff; }}
-  .tag-sim {{ background: #33415c; color: #a9c1ff; }}
-  .tag-long {{ background: #14432a; color: #7be8a4; }}
-  .tag-short {{ background: #4a1f1f; color: #ff9d9d; }}
-  .tag-warn {{ background: #4a3a1f; color: #f0c078; }}
+  th, td {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid #252D35; font-size: 13px; }}
+  th {{ color: #66717D; font-weight: 600; font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; }}
+  td {{ font-family: 'IBM Plex Mono', monospace; }}
+  td.label {{ font-family: Inter, sans-serif; font-weight: 600; }}
+  .tag {{ display: inline-block; padding: 3px 9px; border-radius: 4px; font-size: 11px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; }}
+  .tag-mock {{ background: #1A2128; color: #9AA4AF; border: 1px solid #252D35; }}
+  .tag-sim {{ background: #1A2128; color: #9AA4AF; border: 1px solid #252D35; }}
+  .tag-long {{ background: #35C98A14; color: #35C98A; border: 1px solid #35C98A55; }}
+  .tag-short {{ background: #F05D5E14; color: #F05D5E; border: 1px solid #F05D5E55; }}
+  .tag-warn {{ background: #E7B84B14; color: #E7B84B; border: 1px solid #E7B84B55; }}
   form.inline {{ display: inline; }}
-  button {{ padding: 6px 14px; border-radius: 4px; border: none; font-weight: bold; cursor: pointer; }}
-  button.approve {{ background: #1f7a3f; color: #fff; }}
-  button.reject {{ background: #7a1f1f; color: #fff; }}
-  button.killswitch {{ background: #b30000; color: #fff; }}
-  button.reset {{ background: #33415c; color: #fff; }}
-  input[type=text] {{ background: #1a1d24; border: 1px solid #333; color: #e6e6e6; padding: 4px 8px; border-radius: 3px; }}
-  .muted {{ color: #8a93a3; font-size: 12px; }}
-  .kv {{ display: grid; grid-template-columns: 220px 1fr; row-gap: 4px; max-width: 480px; }}
+  button {{ padding: 7px 16px; border-radius: 5px; border: 1px solid #252D35; font-weight: 600; font-size: 12px; cursor: pointer; letter-spacing: 0.02em; }}
+  button.approve {{ background: #35C98A14; color: #35C98A; border-color: #35C98A55; }}
+  button.reject {{ background: #F05D5E14; color: #F05D5E; border-color: #F05D5E55; }}
+  button.killswitch {{ background: #FF4D5A; color: #1A0505; border-color: #FF4D5A; }}
+  button.reset {{ background: #11161B; color: #9AA4AF; }}
+  input[type=text] {{ background: #0B0E11; border: 1px solid #252D35; color: #F2F4F7; padding: 6px 10px; border-radius: 5px; font-family: Inter, sans-serif; }}
+  .muted {{ color: #66717D; font-size: 12px; }}
+  .kv {{ display: grid; grid-template-columns: 220px 1fr; row-gap: 6px; max-width: 480px; font-size: 13px; }}
+  .kv > div:nth-child(odd) {{ color: #66717D; }}
+  .card {{ border: 1px solid #252D35; border-radius: 8px; padding: 16px; background: #11161B; }}
+  .pill {{ display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 4px; }}
+  .dot {{ width: 6px; height: 6px; border-radius: 50%; display: inline-block; }}
 </style>
 </head>
 <body>
+{_top_bar()}
+{_nav_bar(active_path)}
 {_broker_connectivity_banner()}
 {_clock_skew_banner()}
 {_scientific_verdict_banner()}
 {_market_status_banner()}
+<div class="content">
 {body}
 <p class="muted">Auto-refreshes every {_REFRESH_SECONDS}s. This page does not advance the market itself &mdash;
-run <code>python main.py paper-live --symbol ... --interval ... --period ...</code> in a terminal to process bars and generate signals.</p>
+run <code>python main.py paper-live --symbol ... --interval ... --period ...</code> (or <code>fleet-supervise</code> for
+multiple symbols) in a terminal to process bars and generate signals.</p>
+</div>
 </body>
 </html>"""
 
@@ -366,49 +496,188 @@ def _decision_id_cell(entry) -> str:
     return "<span class='muted'>&mdash;</span>"
 
 
-async def index(request: Request) -> HTMLResponse:
-    status = workstation.get_live_sim_status()
-    pending = workstation.get_pending_approvals()
-    positions = workstation.get_positions()
-    account = workstation.get_account_state()
-    risk = workstation.get_risk_state()
-    journal = workstation.get_trade_journal()
-    feed_status = workstation.get_feed_status()
-    critic_rejections = workstation.get_critic_rejections(limit=25)
-
-    kill_banner = ""
-    if status["kill_switch_active"]:
-        reason = html.escape(status["kill_switch_reason"] or "")
-        kill_banner = f'<div class="banner kill-active">KILL SWITCH ACTIVE &mdash; {reason} &mdash; no new signal will be approved or executed.</div>'
-
-    risk_halt_reasons = workstation.get_risk_halt_reasons()
-    risk_halt_banner = ""
-    if risk_halt_reasons:
-        reasons_text = ", ".join(html.escape(r) for r in risk_halt_reasons)
-        risk_halt_banner = (
-            f'<div class="banner kill-active">RISK HALT ACTIVE &mdash; {reasons_text} &mdash; '
-            f"a new signal would be REJECTED by risk.engine's own circuit breaker (separate from the kill switch above).</div>"
-        )
-
-    kill_form = (
-        '<form class="inline" method="post" action="/kill-switch/reset">'
-        '<button class="reset" type="submit">Reset kill switch</button></form>'
-        if status["kill_switch_active"] else
-        '<form class="inline" method="post" action="/kill-switch/activate">'
-        '<input type="text" name="reason" placeholder="reason (optional)">'
-        '<button class="killswitch" type="submit">Activate kill switch</button></form>'
+def _feed_row(record) -> str:
+    source_class = "tag-mock" if record.source == "MOCK" else "tag-long"  # reuse the LONG/green tag color for a real source, distinct from mock's blue
+    status_class = "tag-sim" if record.status in ("SIMULATED", "HISTORICAL") else "tag-long"
+    try:
+        age_seconds = (datetime.now(timezone.utc) - datetime.fromisoformat(record.received_at)).total_seconds()
+        age_text = f"{age_seconds:,.1f}s"
+    except ValueError:
+        age_seconds = None
+        age_text = "unknown"
+    conn = record.connection_state or "UNKNOWN"
+    conn_class = "tag-long" if conn == "CONNECTED" else "tag-short"
+    health_label, health_class = _data_health_label(connection_state=record.connection_state, age_seconds=age_seconds)
+    # AUTONOMOUS LIVE PAPER-TRADING HARDENING mission, dashboard truth
+    # audit: this table had no price at all -- a real gap against the
+    # mission's own "live prices" checklist item. last_price is None
+    # for any row written before this column existed (old rows are
+    # never backfilled, see state_store._ensure_column) -- shown
+    # honestly as "n/a", never a fabricated 0 or blank.
+    price_text = f"{record.last_price:,.2f}" if record.last_price is not None else "n/a"
+    return (
+        f"<tr><td>{html.escape(record.symbol)}</td>"
+        f"<td><span class='tag {source_class}'>{html.escape(record.source)}</span></td>"
+        f"<td><span class='tag {status_class}'>{html.escape(record.status)}</span></td>"
+        f"<td><span class='tag {conn_class}'>{html.escape(conn)}</span></td>"
+        f"<td><span class='tag {health_class}'>{html.escape(health_label)}</span></td>"
+        f"<td>{price_text}</td>"
+        f"<td>{html.escape(record.bar_timestamp)}</td>"
+        f"<td>{age_text}</td></tr>"
     )
 
+
+def _feed_health(record) -> tuple[str, str]:
+    """Same grading `_feed_row` uses, exposed standalone for the
+    Overview watchlist (UI integration) -- one call site, not a second
+    competing implementation."""
+    try:
+        age_seconds = (datetime.now(timezone.utc) - datetime.fromisoformat(record.received_at)).total_seconds()
+    except ValueError:
+        age_seconds = None
+    return _data_health_label(connection_state=record.connection_state, age_seconds=age_seconds)
+
+
+async def overview(request: Request) -> HTMLResponse:
+    """UI integration (Claude Design "Trading Workstation" approved
+    canvas) -- Overview tab. A real "watchlist" made of exactly the
+    symbols this session has actually observed (live.workstation.
+    get_feed_status() rows), each with its real last-known price and
+    the SAME data-health grading the old MARKET FEED table used --
+    never an arbitrary hardcoded symbol list. "Attention" is built
+    entirely from real, already-existing signals (kill switch, risk
+    halt, stale/disconnected feeds, critic rejections, pending
+    approvals) -- nothing here is invented for the UI."""
+    status = workstation.get_live_sim_status()
+    pending = workstation.get_pending_approvals()
+    feed_status = workstation.get_feed_status()
+    critic_rejections = workstation.get_critic_rejections(limit=25)
+    health = _collect_health(check_ollama=False)
+
+    pending_by_symbol = {r.symbol: r for r in pending}
+
+    def _watchlist_row(record) -> str:
+        health_label, health_class = _feed_health(record)
+        price_text = f"{record.last_price:,.2f}" if record.last_price is not None else "&mdash;"
+        sig = pending_by_symbol.get(record.symbol)
+        sig_badge = (
+            f"<span class='tag tag-{sig.signal.side.value.lower()}' style='margin-left:6px;'>{sig.signal.side.value}</span>"
+            if sig is not None else ""
+        )
+        return (
+            f'<div style="display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:6px;'
+            f'border-left:2px solid {"#4DA3FF" if sig is not None else "transparent"};">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+            f'<span style="font-size:12px;font-weight:600;">{html.escape(record.symbol)}</span>{sig_badge}</div>'
+            f'<div style="display:flex;justify-content:space-between;font-family:\'IBM Plex Mono\',monospace;font-size:11px;">'
+            f'<span style="color:#9AA4AF;">{price_text}</span>'
+            f'<span class="tag {health_class}" style="padding:1px 6px;">{html.escape(health_label)}</span></div></div>'
+        )
+
+    watchlist_html = "".join(_watchlist_row(r) for r in feed_status) or (
+        '<p class="muted">No symbol has been observed yet &mdash; run <code>python main.py paper-live ...</code> '
+        "or <code>fleet-supervise</code> to start tracking one.</p>"
+    )
+
+    attention_items: list[str] = []
+    if status["kill_switch_active"]:
+        attention_items.append(_attention_card("TRADING HALTED", "Kill switch active", "All new paper orders are blocked.", "#FF4D5A"))
+    risk_halt_reasons = workstation.get_risk_halt_reasons()
+    if risk_halt_reasons:
+        attention_items.append(_attention_card("RISK HALT", "Risk circuit breaker active", ", ".join(html.escape(r) for r in risk_halt_reasons), "#E7B84B"))
+    for r in pending:
+        attention_items.append(_attention_card(
+            "APPROVAL REQUIRED", html.escape(r.symbol),
+            f"{r.signal.side.value} signal awaiting human approval, R:R {r.signal.risk_reward:.1f}", "#E7B84B",
+        ))
+    for record in feed_status:
+        label, _cls = _feed_health(record)
+        if label in ("STALE", "DEGRADED", "DISCONNECTED", "RECONNECTING", "SOURCE_UNAVAILABLE"):
+            attention_items.append(_attention_card("DATA WARNING", html.escape(record.symbol), f"Feed health: {label}.", "#E7B84B"))
+    if critic_rejections:
+        attention_items.append(_attention_card(
+            "CRITIC REJECTIONS", f"{len(critic_rejections)} recorded",
+            "See Signals tab for the most recent deterministic critic rejections.", "#8B95A1",
+        ))
+    attention_html = "".join(attention_items) or '<div class="card" style="text-align:center;color:#66717D;font-size:12px;">NO ACTION REQUIRED</div>'
+
+    account = workstation.get_account_state()
+    system_summary = f"""
+<div class="card" style="cursor:pointer;" onclick="location.href='/system'">
+  <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;margin-bottom:10px;">
+    <span class="dot" style="background:{_status_color(health['overall'])};"></span>SYSTEM &middot; {html.escape(health['overall'])}
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px;font-size:11px;color:#9AA4AF;">
+    <div style="display:flex;justify-content:space-between;"><span>Kill switch</span><span>{'ACTIVE' if status['kill_switch_active'] else 'ARMED'}</span></div>
+    <div style="display:flex;justify-content:space-between;"><span>Pending approvals</span><span>{status['pending_approvals_count']}</span></div>
+    <div style="display:flex;justify-content:space-between;"><span>Open positions</span><span>{status['open_positions_count']}</span></div>
+    <div style="display:flex;justify-content:space-between;"><span>Equity</span><span>{_fmt_money(account.equity)}</span></div>
+  </div>
+</div>"""
+
+    body = f"""
+{_kill_switch_banner()}
+{_risk_halt_banner()}
+<div style="display:grid;grid-template-columns:220px minmax(0,1fr) 280px;gap:20px;align-items:start;">
+  <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+    <div style="font-size:10px;font-weight:700;letter-spacing:0.06em;color:#66717D;margin-bottom:8px;">WATCHLIST &mdash; observed this session</div>
+    {watchlist_html}
+  </div>
+  <div style="min-width:0;">
+    <p><a href="/intelligence">Market intelligence &amp; prediction performance &rarr;</a></p>
+    <div class="card">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;">Reconciliation: {'OK' if status['reconciliation_ok'] else 'FAILED'}</div>
+      <p class="muted">This Overview reads the SAME real, persisted paper-live workstation state as the Signals/Portfolio/System tabs &mdash;
+      nothing here is a separate or simulated data source. See <a href="/signals">Signals</a> for the full pending-approval table and
+      <a href="/portfolio">Portfolio</a> for account/positions/risk detail.</p>
+    </div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:20px;min-width:0;">
+    <div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;">Attention</div>
+      {attention_html}
+    </div>
+    {system_summary}
+  </div>
+</div>
+"""
+    return HTMLResponse(_page(body, active_path="/"))
+
+
+def _attention_card(kind: str, title: str, detail: str, color: str) -> str:
+    return (
+        f'<div style="padding:12px 14px;border-radius:8px;background:#151B21;border-left:3px solid {color};margin-bottom:8px;">'
+        f'<div style="font-size:10px;font-weight:700;letter-spacing:0.04em;color:{color};margin-bottom:4px;">{html.escape(kind)}</div>'
+        f'<div style="font-size:13px;font-weight:600;margin-bottom:2px;">{title}</div>'
+        f'<div style="font-size:12px;color:#9AA4AF;">{detail}</div></div>'
+    )
+
+
+def _status_color(status: str) -> str:
+    return {"HEALTHY": "#35C98A", "DEGRADED": "#E7B84B", "SAFE_STOP": "#E7B84B", "FAILED": "#FF4D5A"}.get(status, "#8B95A1")
+
+
+async def signals_page(request: Request) -> HTMLResponse:
+    """UI integration -- Signals tab: the exact same real pending-
+    approval data the old `/` page showed (live.workstation.
+    get_pending_approvals()), plus the critic-rejection ledger, now with
+    a link into a per-signal Trade Plan detail page
+    (`/signals/{signal_id}`)."""
+    status = workstation.get_live_sim_status()
+    pending = workstation.get_pending_approvals()
+    critic_rejections = workstation.get_critic_rejections(limit=25)
+
     market_rows = "".join(
-        f"<tr><td>{html.escape(r.symbol)}</td><td><span class='tag tag-{r.signal.side.value.lower()}'>{r.signal.side.value}</span></td>"
+        f"<tr><td class='label'>{html.escape(r.symbol)}</td><td><span class='tag tag-{r.signal.side.value.lower()}'>{r.signal.side.value}</span></td>"
         f"<td>{r.signal.reference_price:.2f}</td><td>{r.signal.generated_at}</td></tr>"
         for r in pending
     ) or "<tr><td colspan='4' class='muted'>No pending signals &mdash; nothing to show until paper-live generates one.</td></tr>"
 
     pending_rows = "".join(
-        f"<tr><td>{html.escape(r.signal_id[:12])}</td><td>{html.escape(r.symbol)}</td>"
+        f"<tr><td class='label'><a href='/signals/{html.escape(r.signal_id)}'>{html.escape(r.signal_id[:12])}</a></td><td class='label'>{html.escape(r.symbol)}</td>"
         f"<td><span class='tag tag-{r.signal.side.value.lower()}'>{r.signal.side.value}</span></td>"
         f"<td>{r.signal.stop_price:.2f}</td><td>{r.signal.target_price:.2f}</td><td>{r.requested_quantity}</td>"
+        f"<td>{r.signal.risk_reward:.1f}</td>"
         f"<td>{html.escape(r.expires_at)}</td>"
         f"<td>"
         f"<form class='inline' method='post' action='/approve'><input type='hidden' name='signal_id' value='{html.escape(r.signal_id)}'>"
@@ -417,88 +686,179 @@ async def index(request: Request) -> HTMLResponse:
         f"<button class='reject' type='submit'>REJECT</button></form>"
         f"</td></tr>"
         for r in pending
-    ) or "<tr><td colspan='8' class='muted'>No signals pending human approval.</td></tr>"
-
-    position_rows = "".join(
-        f"<tr><td>{html.escape(p.symbol)}</td><td>{p.quantity}</td><td>{p.entry_price:.2f}</td>"
-        f"<td>{p.stop_price:.2f}</td><td>{p.target_price:.2f}</td><td>{p.entry_time}</td></tr>"
-        for p in positions
-    ) or "<tr><td colspan='6' class='muted'>No open positions.</td></tr>"
-
-    journal_rows = "".join(
-        f"<tr><td>{e.created_at}</td><td>{html.escape(e.symbol)}</td><td>{html.escape(e.outcome.value)}</td>"
-        f"<td>{html.escape(e.signal_id[:12])}</td><td>{_decision_id_cell(e)}</td></tr>"
-        for e in sorted(journal, key=lambda e: e.created_at, reverse=True)[:25]
-    ) or "<tr><td colspan='5' class='muted'>No journal entries yet.</td></tr>"
+    ) or "<tr><td colspan='9' class='muted'>No signals pending human approval.</td></tr>"
 
     critic_rejection_rows = "".join(
-        f"<tr><td>{html.escape(r.rejected_at)}</td><td>{html.escape(r.symbol)}</td>"
+        f"<tr><td>{html.escape(r.rejected_at)}</td><td class='label'>{html.escape(r.symbol)}</td>"
         f"<td><span class='tag tag-short'>{html.escape(r.verdict)}</span></td>"
         f"<td>{html.escape(r.reasons[0]) if r.reasons else ''}</td>"
         f"<td>{html.escape(r.signal_id[:12])}</td></tr>"
         for r in critic_rejections
     ) or "<tr><td colspan='5' class='muted'>No signal has ever been rejected by the deterministic critic.</td></tr>"
 
-    def _feed_row(record) -> str:
-        source_class = "tag-mock" if record.source == "MOCK" else "tag-long"  # reuse the LONG/green tag color for a real source, distinct from mock's blue
-        status_class = "tag-sim" if record.status in ("SIMULATED", "HISTORICAL") else "tag-long"
-        try:
-            age_seconds = (datetime.now(timezone.utc) - datetime.fromisoformat(record.received_at)).total_seconds()
-            age_text = f"{age_seconds:,.1f}s"
-        except ValueError:
-            age_seconds = None
-            age_text = "unknown"
-        conn = record.connection_state or "UNKNOWN"
-        conn_class = "tag-long" if conn == "CONNECTED" else "tag-short"
-        health_label, health_class = _data_health_label(connection_state=record.connection_state, age_seconds=age_seconds)
-        # AUTONOMOUS LIVE PAPER-TRADING HARDENING mission, dashboard truth
-        # audit: this table had no price at all -- a real gap against the
-        # mission's own "live prices" checklist item. last_price is None
-        # for any row written before this column existed (old rows are
-        # never backfilled, see state_store._ensure_column) -- shown
-        # honestly as "n/a", never a fabricated 0 or blank.
-        price_text = f"{record.last_price:,.2f}" if record.last_price is not None else "n/a"
-        return (
-            f"<tr><td>{html.escape(record.symbol)}</td>"
-            f"<td><span class='tag {source_class}'>{html.escape(record.source)}</span></td>"
-            f"<td><span class='tag {status_class}'>{html.escape(record.status)}</span></td>"
-            f"<td><span class='tag {conn_class}'>{html.escape(conn)}</span></td>"
-            f"<td><span class='tag {health_class}'>{html.escape(health_label)}</span></td>"
-            f"<td>{price_text}</td>"
-            f"<td>{html.escape(record.bar_timestamp)}</td>"
-            f"<td>{age_text}</td></tr>"
-        )
-
-    feed_rows = "".join(_feed_row(r) for r in feed_status) or (
-        "<tr><td colspan='8' class='muted'>No market data processed yet in this session &mdash; "
-        "run <code>python main.py paper-live ...</code> to start a feed.</td></tr>"
-    )
-
     body = f"""
-{kill_banner}
-{risk_halt_banner}
-<p><a href="/intelligence">Market intelligence &amp; prediction performance &rarr;</a></p>
-<h2>KILL SWITCH <span class="tag tag-sim">{'ACTIVE' if status['kill_switch_active'] else 'INACTIVE'}</span></h2>
-{kill_form}
-
-<h2>MARKET FEED</h2>
-<p class="muted">The last bar actually delivered by whatever is driving the feed (the paper-live CLI, in another process) &mdash; never fabricated here. Data Health is a display-only approximation (see its own tooltip in the source); the real gate against acting on stale data is the live pipeline's own freshness check, not this label.</p>
-<table><tr><th>Symbol</th><th>Source</th><th>Status</th><th>Connection</th><th>Data Health</th><th>Last Price</th><th>Last Bar</th><th>Data Age</th></tr>{feed_rows}</table>
-
+{_kill_switch_banner()}
+{_risk_halt_banner()}
 <h2>SIGNALS <span class="tag tag-mock">from pending approvals</span></h2>
 <p class="muted">Derived from the latest signal seen for each symbol currently awaiting approval.</p>
 <table><tr><th>Symbol</th><th>Direction</th><th>Reference Price</th><th>As Of</th></tr>{market_rows}</table>
 
 <h2>SIGNALS / PENDING APPROVAL ({status['pending_approvals_count']})</h2>
-<table><tr><th>Signal ID</th><th>Symbol</th><th>Direction</th><th>Stop</th><th>Target</th><th>Qty</th><th>Expires</th><th>Action</th></tr>{pending_rows}</table>
+<p class="muted">Click a Signal ID for the full trade plan, evidence, and risk assessment.</p>
+<table><tr><th>Signal ID</th><th>Symbol</th><th>Dir.</th><th>Stop</th><th>Target</th><th>Qty</th><th>R:R</th><th>Expires</th><th>Action</th></tr>{pending_rows}</table>
 
 <h2>CRITIC REJECTIONS (most recent 25)</h2>
 <p class="muted">Signals the deterministic critic (critic.engine.evaluate, independent of decision_engine.rules.classify) blocked BEFORE risk sizing or any paper order was attempted &mdash; only present when this session's paper-live was started without --skip-critic.</p>
 <table><tr><th>Rejected At</th><th>Symbol</th><th>Verdict</th><th>Reason</th><th>Signal ID</th></tr>{critic_rejection_rows}</table>
+"""
+    return HTMLResponse(_page(body, active_path="/signals"))
 
-<h2>POSITIONS ({len(positions)} open)</h2>
-<table><tr><th>Symbol</th><th>Qty</th><th>Entry</th><th>Stop</th><th>Target</th><th>Entry Time</th></tr>{position_rows}</table>
 
+async def signal_detail_page(request: Request) -> HTMLResponse:
+    """UI integration -- the design's "Trade Plan" detail view, backed
+    entirely by real fields: strategy.signal.Signal (entry/stop/target/
+    risk_reward/reason_codes), live.state_store.PendingApprovalRecord
+    (requested_quantity/state/history -- history IS a real, persisted
+    signal timeline), and a read-only recompute of the risk breakdown
+    via the new live.workstation.get_risk_decision_for_pending() (same
+    pure-function pattern live/prediction_recorder.py already uses).
+    AI interpretation is honestly reported as NOT AVAILABLE for this
+    path -- see this module's own integration report: the live
+    paper-live loop's AI explanation (main.py::_try_ai_explain) is
+    never persisted anywhere, only printed to the CLI at approval time,
+    so there is no real value here to show without fabricating one."""
+    signal_id = request.path_params["signal_id"]
+    pending = {r.signal_id: r for r in workstation.get_pending_approvals()}
+    record = pending.get(signal_id)
+    if record is None:
+        body = f"<p class='muted'>No pending signal with id starting {html.escape(signal_id[:12])} &mdash; it may have already been approved, rejected, or expired. See <a href='/signals'>Signals</a>.</p>"
+        return HTMLResponse(_page(body, active_path="/signals"))
+
+    sig = record.signal
+    risk_decision = workstation.get_risk_decision_for_pending(record)
+
+    evidence_rows = "".join(f"<li>{html.escape(_reason_code_label(rc.value))}</li>" for rc in sig.reason_codes) or "<li class='muted'>(none recorded)</li>"
+
+    timeline_rows = "".join(
+        f"<tr><td>{html.escape(ts)}</td><td class='label'>{html.escape(state)}</td></tr>"
+        for state, ts in record.history
+    ) or "<tr><td colspan='2' class='muted'>(no history recorded)</td></tr>"
+
+    if risk_decision is not None:
+        veto_text = ", ".join(v.value for v in risk_decision.veto_reasons) or "None"
+        risk_block = f"""
+<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:12px;padding:12px;border:1px solid #252D35;border-radius:8px;margin-bottom:18px;font-family:'IBM Plex Mono',monospace;">
+  <div><div style="color:#66717D;font-size:10px;">POSITION SIZE</div>{risk_decision.position_size.quantity if risk_decision.position_size else 'n/a'} shares</div>
+  <div><div style="color:#66717D;font-size:10px;">TOTAL RISK</div>{_fmt_money(risk_decision.risk_amount) if risk_decision.risk_amount is not None else 'n/a'} ({f'{risk_decision.risk_percent:.2f}%' if risk_decision.risk_percent is not None else 'n/a'})</div>
+  <div><div style="color:#66717D;font-size:10px;">EXPOSURE</div>{f'{risk_decision.exposure.exposure_pct:.1f}%' if risk_decision.exposure is not None else 'n/a'}</div>
+  <div><div style="color:#66717D;font-size:10px;">VETO REASONS</div>{html.escape(veto_text)}</div>
+</div>
+<p class="muted">Risk breakdown above is a live, read-only recompute of risk.engine.RiskEngine.evaluate(signal, account) &mdash; the exact same pure function the real approval path calls, run again here for display only (see live/workstation.py::get_risk_decision_for_pending). It cannot and does not change the approval, quantity, stop, or target.</p>"""
+    else:
+        risk_block = "<p class='muted'>Risk breakdown not available.</p>"
+
+    capital = (record.requested_quantity * sig.reference_price) if record.requested_quantity else None
+    body = f"""
+{_kill_switch_banner()}
+{_risk_halt_banner()}
+<p><a href="/signals">&larr; back to Signals</a></p>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+  <div>
+    <div style="font-size:18px;font-weight:700;">{html.escape(sig.symbol)}</div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;margin-top:4px;">{sig.reference_price:.2f}</div>
+  </div>
+  <div style="display:flex;gap:8px;">
+    <span class="tag tag-sim">{html.escape(record.state)}</span>
+    <span class="tag tag-{sig.side.value.lower()}">{sig.side.value}</span>
+  </div>
+</div>
+
+<h2>TRADE PLAN</h2>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:22px;padding:12px;border:1px solid #252D35;border-radius:8px;font-family:'IBM Plex Mono',monospace;font-size:13px;">
+  <div><div style="color:#66717D;font-size:10px;">ACTION</div>{sig.side.value} (BUY)</div>
+  <div><div style="color:#66717D;font-size:10px;">ORDER TYPE</div>MARKET (next bar open)</div>
+  <div><div style="color:#66717D;font-size:10px;">STATUS</div>{html.escape(record.state)}</div>
+  <div><div style="color:#66717D;font-size:10px;">ENTRY (reference)</div>{sig.reference_price:.2f}</div>
+  <div><div style="color:#F05D5E;font-size:10px;">STOP</div>{sig.stop_price:.2f}</div>
+  <div><div style="color:#35C98A;font-size:10px;">TARGET</div>{sig.target_price:.2f}</div>
+  <div><div style="color:#66717D;font-size:10px;">QUANTITY</div>{record.requested_quantity} shares</div>
+  <div><div style="color:#66717D;font-size:10px;">REQUIRED CAPITAL</div>{_fmt_money(capital) if capital is not None else 'n/a'}</div>
+  <div><div style="color:#66717D;font-size:10px;">R:R</div>1 : {sig.risk_reward:.2f}</div>
+</div>
+<p class="muted">No limit/stop order types exist &mdash; approved signals fill at market on the next bar. Expires (APPROVAL_EXPIRED) at {html.escape(record.expires_at)} if not approved in time.</p>
+
+<h2>TECHNICAL EVIDENCE</h2>
+<p class="muted">Deterministic reason codes from strategy.signal.Signal.reason_codes &mdash; the actual basis for this signal, not an AI narrative.</p>
+<ul>{evidence_rows}</ul>
+
+<h2>RISK ASSESSMENT</h2>
+{risk_block}
+
+<h2>AI INTERPRETATION</h2>
+<p class="muted">NOT AVAILABLE for this signal. The live paper-live approval loop's optional AI explanation
+(main.py's <code>_try_ai_explain</code>, shown only in the CLI at approval time) is never persisted to any
+store for this execution path, so there is no real value to show here &mdash; shown honestly as unavailable
+rather than fabricated. (Decisions generated via <code>decide</code>/<code>shadow-run</code> DO persist a real
+narrative; see <a href="/research">Research</a> for a symbol that has one.)</p>
+
+<h2>SIGNAL TIMELINE</h2>
+<table><tr><th>Time</th><th>State</th></tr>{timeline_rows}</table>
+
+<h2>EXIT CONDITIONS</h2>
+<p class="muted">If approved and filled, this becomes an open position that closes automatically on either level being hit:
+target {sig.target_price:.2f} &rarr; exit_reason TARGET, or stop {sig.stop_price:.2f} &rarr; exit_reason STOP
+(paper.models.Position.exit_reason / backtesting.trade.ExitReason -- the same real field Portfolio's own Open Positions table reads).
+Not approved before {html.escape(record.expires_at)} &rarr; state APPROVAL_EXPIRED, the signal never enters a position at all.</p>
+"""
+    return HTMLResponse(_page(body, active_path="/signals"))
+
+
+def _reason_code_label(code: str) -> str:
+    return code.replace("_", " ").capitalize()
+
+
+async def portfolio_page(request: Request) -> HTMLResponse:
+    """UI integration -- Portfolio &amp; Risk tab: the same real ACCOUNT/
+    RISK/POSITIONS/JOURNAL data the old `/` page showed, restyled.
+    Per-position "current price"/"P&L" are a pure arithmetic readout
+    (current - entry) * qty of two already-real numbers (Position.
+    entry_price and the matching feed_status.last_price) -- not a new
+    trading computation, and shown as "n/a" when no live price for that
+    symbol has been observed."""
+    status = workstation.get_live_sim_status()
+    positions = workstation.get_positions()
+    account = workstation.get_account_state()
+    risk = workstation.get_risk_state()
+    journal = workstation.get_trade_journal()
+    feed_status = {r.symbol: r for r in workstation.get_feed_status()}
+
+    def _position_row(p) -> str:
+        feed = feed_status.get(p.symbol)
+        current = feed.last_price if feed is not None else None
+        if current is not None:
+            pnl = (current - p.entry_price) * p.quantity
+            pnl_color = "#35C98A" if pnl >= 0 else "#F05D5E"
+            current_text = f"{current:,.2f}"
+            pnl_text = f"{'+' if pnl >= 0 else ''}{_fmt_money(pnl)}"
+        else:
+            current_text, pnl_text, pnl_color = "n/a", "n/a", "#9AA4AF"
+        return (
+            f"<tr><td class='label'>{html.escape(p.symbol)}</td><td>{p.quantity}</td><td>{p.entry_price:.2f}</td>"
+            f"<td>{current_text}</td><td>{p.stop_price:.2f} / {p.target_price:.2f}</td>"
+            f"<td style='color:{pnl_color};'>{pnl_text}</td><td>{p.entry_time}</td></tr>"
+        )
+
+    position_rows = "".join(_position_row(p) for p in positions) or "<tr><td colspan='7' class='muted'>No open positions.</td></tr>"
+
+    journal_rows = "".join(
+        f"<tr><td>{e.created_at}</td><td class='label'>{html.escape(e.symbol)}</td><td>{html.escape(e.outcome.value)}</td>"
+        f"<td>{html.escape(e.signal_id[:12])}</td><td>{_decision_id_cell(e)}</td></tr>"
+        for e in sorted(journal, key=lambda e: e.created_at, reverse=True)[:25]
+    ) or "<tr><td colspan='5' class='muted'>No journal entries yet.</td></tr>"
+
+    body = f"""
+{_kill_switch_banner()}
+{_risk_halt_banner()}
 <h2>ACCOUNT</h2>
 <div class="kv">
 <div>Initial Capital</div><div>{_fmt_money(account.initial_capital)}</div>
@@ -520,10 +880,230 @@ async def index(request: Request) -> HTMLResponse:
 <div>Open Positions</div><div>{risk['open_positions']}</div>
 </div>
 
+<h2>OPEN POSITIONS ({len(positions)})</h2>
+<p class="muted">Current price/P&amp;L are read from this symbol's own last observed feed price (live.workstation.get_feed_status()) &mdash; "n/a" when no live price has been observed for that symbol.</p>
+<table><tr><th>Symbol</th><th>Qty</th><th>Entry</th><th>Current</th><th>Stop / Target</th><th>P&amp;L</th><th>Entry Time</th></tr>{position_rows}</table>
+
 <h2>JOURNAL (most recent 25)</h2>
 <table><tr><th>Time</th><th>Symbol</th><th>Outcome</th><th>Signal</th><th>Decision ID</th></tr>{journal_rows}</table>
 """
-    return HTMLResponse(_page(body))
+    return HTMLResponse(_page(body, active_path="/portfolio"))
+
+
+async def fleet_page(request: Request) -> HTMLResponse:
+    """UI integration -- Fleet tab: real data from live/fleet_summary.py
+    (this project's own existing multi-symbol fleet-reporting module,
+    reused verbatim -- not a second fleet-monitoring implementation),
+    read against an operator-configured --fleet-runtime-dir. Per-symbol
+    DATA health reuses each symbol's own isolated state.db feed_status
+    row (live/runtime_layout.py's own isolation, same _feed_health()
+    grading the rest of this dashboard uses). PROCESS (is the OS
+    process itself alive) is honestly NOT AVAILABLE from this page --
+    the dashboard is a separate process from fleet-supervise and has no
+    way to inspect another process's PID; only fleet-supervise's own
+    console output can answer that today. Never fabricated as HEALTHY."""
+    if _fleet_runtime_dir is None or not _fleet_symbols:
+        body = (
+            '<h2>FLEET</h2>'
+            '<p class="muted">Not configured. Start the dashboard with <code>--fleet-runtime-dir</code> and '
+            '<code>--fleet-watchlist-file</code> (or <code>--fleet-symbols</code>) to show real fleet-supervisor data here. '
+            "See <code>python main.py fleet-supervise</code>/<code>fleet-summary</code>.</p>"
+        )
+        return HTMLResponse(_page(body, active_path="/fleet"))
+
+    from live.fleet_summary import summarize_fleet_session
+    from live.runtime_layout import symbol_runtime_paths
+    from live.state_store import LiveStateStore
+
+    summary = summarize_fleet_session(_fleet_runtime_dir, _fleet_symbols)
+
+    rows = []
+    healthy = 0
+    exceptions = []
+    for s in summary.per_symbol:
+        paths = symbol_runtime_paths(_fleet_runtime_dir, s.symbol)
+        data_label, data_class = "NOT AVAILABLE", "tag-sim"
+        if paths.state_db.exists():
+            store = LiveStateStore(paths.state_db)
+            try:
+                rows_status = store.list_feed_status()
+            finally:
+                store.close()
+            own = next((r for r in rows_status if r.symbol == s.symbol), None)
+            if own is not None:
+                data_label, data_class = _feed_health(own)
+        is_healthy = s.log_found and data_label in ("CONNECTED", "LIVE")
+        if is_healthy:
+            healthy += 1
+        else:
+            exceptions.append((s.symbol, f"log_found={s.log_found}, db_found={s.db_found}, data={data_label}"))
+        pnl_color = "#35C98A" if s.net_pnl >= 0 else "#F05D5E"
+        rows.append(
+            f"<tr><td class='label'>{html.escape(s.symbol)}</td>"
+            f"<td><span class='tag {data_class}'>{html.escape(data_label)}</span></td>"
+            f"<td><span class='tag tag-sim'>NOT AVAILABLE</span></td>"
+            f"<td>{s.bars_processed}</td><td>{s.signals}</td><td>{s.trades}</td>"
+            f"<td style='color:{pnl_color};'>{s.net_pnl:+,.2f}</td></tr>"
+        )
+
+    exception_html = "".join(
+        f'<div style="padding:12px 16px;border-radius:8px;border-left:3px solid #E7B84B;background:#151B21;margin-bottom:8px;">'
+        f'<div style="font-size:10px;font-weight:700;letter-spacing:0.04em;color:#E7B84B;margin-bottom:3px;">EXCEPTION &mdash; {html.escape(sym)}</div>'
+        f'<div style="font-size:13px;">{html.escape(reason)}</div></div>'
+        for sym, reason in exceptions
+    )
+
+    body = f"""
+<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:14px;">
+  <div style="font-size:15px;font-weight:600;">Fleet</div>
+  <div style="font-size:13px;font-weight:600;color:{'#35C98A' if healthy == len(summary.per_symbol) else '#E7B84B'};">{healthy} / {len(summary.per_symbol)} HEALTHY</div>
+</div>
+<p class="muted">Runtime dir: {html.escape(str(_fleet_runtime_dir))}. Process-alive status is NOT AVAILABLE from this page (a separate
+process from fleet-supervise) &mdash; "PROCESS" reflects only whether this symbol's log/store files exist, not whether its OS process is
+currently running. Bars/Signals/Trades/P&amp;L are read via live/fleet_summary.py, the same module <code>fleet-summary</code> uses.</p>
+{exception_html}
+<table><tr><th>Symbol</th><th>Data</th><th>Process</th><th>Bars</th><th>Signals</th><th>Trades</th><th>Net P&amp;L</th></tr>{"".join(rows)}</table>
+"""
+    return HTMLResponse(_page(body, active_path="/fleet"))
+
+
+def _collect_health(*, check_ollama: bool = True) -> dict:
+    """`check_ollama=False` (used by the Overview page's own summary
+    card, which every page load renders) skips the one real network
+    probe collect_system_health() can make -- a localhost Ollama
+    connection attempt -- so the primary landing page never blocks on
+    it. The System tab (an operator's own explicit request to see
+    health) keeps the full, real check, exactly like the pre-existing
+    `/health` route always has."""
+    from core.health import collect_system_health
+
+    db_paths = {
+        "experiments": PROJECT_ROOT / "data" / "experiments.db",
+        "decision_engine": intelligence.DECISIONS_DB_PATH,
+        "live_state": intelligence.STATE_DB_PATH,
+        "promotion_gate": PROJECT_ROOT / "data" / "promotion_gate.db",
+        "paper": intelligence.PAPER_DB_PATH,
+        "scheduler": intelligence.SCHEDULER_DB_PATH,
+        "predictions": intelligence.PREDICTIONS_DB_PATH,
+        "research": intelligence.RESEARCH_DB_PATH,
+        "scanner": intelligence.SCANNER_DB_PATH,
+        "regime": PROJECT_ROOT / "data" / "market_regime.db",
+    }
+    health = collect_system_health(db_paths=db_paths, probe_dir=PROJECT_ROOT, check_ollama=check_ollama)
+    return {
+        "overall": health.overall.value,
+        "components": [{"name": c.name, "status": c.status.value, "detail": c.detail} for c in health.components],
+    }
+
+
+async def system_page(request: Request) -> HTMLResponse:
+    """UI integration -- System tab: the SAME core.health.
+    collect_system_health() the existing `/health` route already uses
+    (one shared health source, not a second implementation), plus the
+    MARKET FEED table the old `/` page showed and the kill-switch
+    control panel."""
+    health = _collect_health()
+    feed_status = workstation.get_feed_status()
+    status = workstation.get_live_sim_status()
+
+    tag_class = {"HEALTHY": "tag-long", "DEGRADED": "tag-warn", "FAILED": "tag-short", "DISABLED": "tag-sim", "UNKNOWN": "tag-sim"}
+    health_rows = "".join(
+        f"<tr><td class='label'>{html.escape(c['name'])}</td>"
+        f"<td><span class='tag {tag_class.get(c['status'], 'tag-sim')}'>{html.escape(c['status'])}</span></td>"
+        f"<td class='muted' style='font-family:Inter,sans-serif;'>{html.escape(c['detail'])}</td></tr>"
+        for c in health["components"]
+    )
+
+    feed_rows = "".join(_feed_row(r) for r in feed_status) or (
+        "<tr><td colspan='8' class='muted'>No market data processed yet in this session &mdash; "
+        "run <code>python main.py paper-live ...</code> to start a feed.</td></tr>"
+    )
+
+    overall_class = tag_class.get(health["overall"], "tag-sim") if health["overall"] != "SAFE_STOP" else "tag-warn"
+    kill_form = (
+        '<form class="inline" method="post" action="/kill-switch/reset">'
+        '<button class="reset" type="submit">Reset kill switch</button></form>'
+        if status["kill_switch_active"] else
+        '<form class="inline" method="post" action="/kill-switch/activate">'
+        '<input type="text" name="reason" placeholder="reason (optional)">'
+        '<button class="killswitch" type="submit">Activate kill switch</button></form>'
+    )
+
+    body = f"""
+{_kill_switch_banner()}
+{_risk_halt_banner()}
+<h2>SYSTEM HEALTH</h2>
+<p>Overall status: <span class="tag {overall_class}">{html.escape(health['overall'])}</span></p>
+<table><tr><th>Component</th><th>Status</th><th>Detail</th></tr>{health_rows}</table>
+<p class="muted">Same source as <code>python main.py health</code> and <a href="/health">/health</a> (core/health.py).</p>
+
+<h2>MARKET FEED</h2>
+<p class="muted">The last bar actually delivered by whatever is driving the feed (the paper-live CLI, in another process) &mdash; never fabricated here.</p>
+<table><tr><th>Symbol</th><th>Source</th><th>Status</th><th>Connection</th><th>Data Health</th><th>Last Price</th><th>Last Bar</th><th>Data Age</th></tr>{feed_rows}</table>
+
+<h2>KILL SWITCH <span class="tag tag-sim">{'ACTIVE' if status['kill_switch_active'] else 'INACTIVE'}</span></h2>
+<p class="muted">Halts all new paper order submission immediately. Existing open positions remain until manually closed.</p>
+{kill_form}
+"""
+    return HTMLResponse(_page(body, active_path="/system"))
+
+
+async def research_page(request: Request) -> HTMLResponse:
+    """UI integration -- Research tab: a thin symbol picker over the
+    SAME watchlist source the Overview tab uses (real, observed
+    symbols), linking into the existing, unmodified `/intelligence/
+    {{symbol}}` decision-detail page rather than duplicating its logic
+    -- that page already shows real scanner evidence, research (news/
+    sector/AI summary), and prediction history."""
+    feed_status = workstation.get_feed_status()
+    symbols = sorted({r.symbol for r in feed_status})
+    if not symbols:
+        try:
+            from market_data.universe import MarketUniverse
+
+            watchlist_path = PROJECT_ROOT / "market_data" / "watchlists" / "starter_nse.yaml"
+            if watchlist_path.exists():
+                symbols = list(MarketUniverse.from_yaml_file(str(watchlist_path)).symbols)
+        except Exception:  # noqa: BLE001 -- Research page must render even if the optional starter watchlist is missing/malformed
+            symbols = []
+
+    chips = "".join(
+        f'<a href="/intelligence/{html.escape(sym)}" style="padding:6px 12px;border-radius:5px;font-size:12px;font-weight:600;'
+        f'text-decoration:none;border:1px solid #252D35;color:#9AA4AF;">{html.escape(sym)}</a>'
+        for sym in symbols
+    ) or '<p class="muted">No symbols observed yet, and no starter watchlist found.</p>'
+
+    body = f"""
+<h2>RESEARCH</h2>
+<p class="muted">Select a symbol for its full decision history, scanner evidence, research (news/sector/AI summary), and
+prediction history &mdash; all real, persisted data from <a href="/intelligence">Market Intelligence</a>, unchanged.</p>
+<div style="display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap;">{chips}</div>
+"""
+    return HTMLResponse(_page(body, active_path="/research"))
+
+
+async def api_state(request: Request) -> JSONResponse:
+    """UI integration -- Live Data UX requirement ("do not refresh the
+    entire page; update only changed values"). A small, read-only JSON
+    snapshot of exactly the same real fields the top status bar and
+    Overview watchlist already render server-side -- polled by a small
+    vanilla-JS snippet to update ONLY those DOM nodes in place, no
+    framework, no WebSocket (this project has neither), no full page
+    reload. Same local-SQLite-only, zero-network-fetch discipline as
+    every other read in this module."""
+    status = workstation.get_live_sim_status()
+    feed_status = workstation.get_feed_status()
+    prices = []
+    for r in feed_status:
+        label, _cls = _feed_health(r)
+        prices.append({"symbol": r.symbol, "price": r.last_price, "health": label})
+    return JSONResponse({
+        "kill_switch_active": status["kill_switch_active"],
+        "pending_approvals_count": status["pending_approvals_count"],
+        "open_positions_count": status["open_positions_count"],
+        "prices": prices,
+        "as_of": datetime.now(timezone.utc).isoformat(),
+    })
 
 
 async def approve(request: Request) -> RedirectResponse:
@@ -1043,7 +1623,14 @@ call this page can make is to a local Ollama daemon, never a market-data provide
 
 
 app = Starlette(routes=[
-    Route("/", index, methods=["GET"]),
+    Route("/", overview, methods=["GET"]),
+    Route("/signals", signals_page, methods=["GET"]),
+    Route("/signals/{signal_id}", signal_detail_page, methods=["GET"]),
+    Route("/portfolio", portfolio_page, methods=["GET"]),
+    Route("/fleet", fleet_page, methods=["GET"]),
+    Route("/system", system_page, methods=["GET"]),
+    Route("/research", research_page, methods=["GET"]),
+    Route("/api/state", api_state, methods=["GET"]),
     Route("/approve", approve, methods=["POST"]),
     Route("/reject", reject, methods=["POST"]),
     Route("/kill-switch/activate", kill_switch_activate, methods=["POST"]),

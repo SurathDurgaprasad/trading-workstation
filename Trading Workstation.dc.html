@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    body { margin:0; background:#0B0E11; }
+    * { box-sizing:border-box; }
+    ::selection { background:#4DA3FF44; }
+    input::placeholder { color:#66717D; }
+  </style>
+</helmet>
+
+<div style="min-height:100vh;background:#0B0E11;color:#F2F4F7;font-family:Inter,sans-serif;display:flex;flex-direction:column;">
+
+  <sc-if value="{{ killSwitchActive }}" hint-placeholder-val="{{ false }}">
+    <div style="background:#FF4D5A;color:#1A0505;padding:8px 20px;display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;letter-spacing:0.02em;">
+      <span style="width:8px;height:8px;border-radius:50%;background:#1A0505;flex:0 0 auto;"></span>
+      TRADING HALTED — Kill switch active. New paper orders are blocked. Existing paper positions are unaffected.
+    </div>
+  </sc-if>
+
+  <div style="display:flex;align-items:center;height:56px;padding:0 20px;border-bottom:1px solid #252D35;background:#0B0E11;flex:0 0 auto;gap:24px;">
+    <div style="display:flex;flex-direction:column;line-height:1.1;">
+      <div style="font-size:14px;font-weight:600;letter-spacing:0.04em;">TRADING INTELLIGENCE</div>
+      <div style="font-size:10px;color:#66717D;letter-spacing:0.08em;">RESEARCH &amp; PAPER-TRADING WORKSTATION</div>
+    </div>
+
+    <div style="flex:1;display:flex;justify-content:center;">
+      <div style="display:flex;align-items:center;gap:8px;padding:5px 14px;border:1px solid #252D35;border-radius:5px;background:#11161B;">
+        <span style="width:6px;height:6px;border-radius:50%;background:#35C98A;"></span>
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.06em;color:#9AA4AF;">NSE</span>
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.03em;">MARKET OPEN</span>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:16px;">
+      <div title="Open search" onClick="{{ openSearch }}" style="display:flex;align-items:center;gap:8px;padding:5px 10px;border:1px solid #252D35;border-radius:5px;color:#66717D;font-size:11px;cursor:pointer;font-family:'IBM Plex Mono',monospace;">
+        Search <span style="color:#9AA4AF;">⌘K</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9AA4AF;">
+        <span style="width:6px;height:6px;border-radius:50%;background:#35C98A;"></span>
+        LIVE <span style="color:#66717D;">{{ dataLatencyMs }}ms</span>
+      </div>
+      <div style="font-size:10px;font-weight:600;letter-spacing:0.06em;padding:4px 9px;border-radius:4px;border:1px solid #4DA3FF55;color:#4DA3FF;background:#4DA3FF14;">PAPER</div>
+      <sc-if value="{{ killSwitchConfirming }}" hint-placeholder-val="{{ false }}">
+        <div onClick="{{ armKillSwitch }}" style="font-size:10px;font-weight:700;letter-spacing:0.04em;padding:5px 10px;border-radius:4px;border:1px solid #FF4D5A;color:#FF4D5A;cursor:pointer;">CONFIRM HALT?</div>
+      </sc-if>
+      <sc-if value="{{ !killSwitchConfirming }}" hint-placeholder-val="{{ true }}">
+        <div onClick="{{ armKillSwitch }}" title="Kill switch" style="display:flex;align-items:center;gap:6px;font-size:10px;font-weight:600;letter-spacing:0.04em;padding:5px 10px;border-radius:4px;border:1px solid #252D35;cursor:pointer;color:{{ killSwitchStateColor }};">
+          <span style="width:6px;height:6px;border-radius:50%;background:{{ killSwitchStateColor }};"></span>
+          KILL SWITCH {{ killSwitchStateLabel }}
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;height:44px;padding:0 20px;border-bottom:1px solid #252D35;background:#0B0E11;flex:0 0 auto;gap:4px;overflow-x:auto;">
+    <div onClick="{{ goOverview }}" style="padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;border-bottom:2px solid {{ navOverviewBorder }};color:{{ navOverviewColor }};">Overview</div>
+    <div onClick="{{ goSignals }}" style="padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;border-bottom:2px solid {{ navSignalsBorder }};color:{{ navSignalsColor }};">Signals</div>
+    <div onClick="{{ goPortfolio }}" style="padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;border-bottom:2px solid {{ navPortfolioBorder }};color:{{ navPortfolioColor }};">Portfolio</div>
+    <div onClick="{{ goFleet }}" style="padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;border-bottom:2px solid {{ navFleetBorder }};color:{{ navFleetColor }};">Fleet</div>
+    <div onClick="{{ goSystem }}" style="padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;border-bottom:2px solid {{ navSystemBorder }};color:{{ navSystemColor }};">System</div>
+    <div onClick="{{ goResearch }}" style="padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;border-bottom:2px solid {{ navResearchBorder }};color:{{ navResearchColor }};">Research</div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:28px;height:34px;padding:0 20px;border-bottom:1px solid #252D35;background:#11161B;flex:0 0 auto;font-family:'IBM Plex Mono',monospace;font-size:12px;overflow-x:auto;">
+    <div style="display:flex;gap:8px;align-items:baseline;"><span style="color:#66717D;">NIFTY 50</span><span style="font-weight:600;">{{ niftyVal }}</span><span style="color:#35C98A;">+0.62%</span></div>
+    <div style="display:flex;gap:8px;align-items:baseline;"><span style="color:#66717D;">BANK NIFTY</span><span style="font-weight:600;">{{ bankniftyVal }}</span><span style="color:#35C98A;">+0.48%</span></div>
+    <div style="display:flex;gap:8px;align-items:baseline;"><span style="color:#66717D;">VIX</span><span style="font-weight:600;">{{ vixVal }}</span><span style="color:#F05D5E;">-2.1%</span></div>
+  </div>
+
+  <div style="flex:1;overflow:auto;padding:24px 20px 40px;">
+
+    <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+      <div style="display:grid;grid-template-columns:190px minmax(0,1fr) 280px;gap:20px;align-items:start;">
+
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+          <div style="font-size:10px;font-weight:700;letter-spacing:0.06em;color:#66717D;margin-bottom:8px;">WATCHLIST</div>
+          <sc-for list="{{ watchlist }}" as="w" hint-placeholder-count="15">
+            <div onClick="{{ w.select }}" style="display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:6px;cursor:pointer;background:{{ w.bg }};border-left:2px solid {{ w.borderColor }};">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-size:12px;font-weight:600;">{{ w.symbol }}</span>
+                <span style="font-size:9px;font-weight:600;color:{{ w.dotColor }};">{{ w.signalLabel }}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:11px;">
+                <span style="color:#9AA4AF;">{{ w.priceLabel }}</span>
+                <span style="color:{{ w.changeColor }};">{{ w.changeLabel }}</span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="min-width:0;">
+          <div style="border:1px solid #252D35;border-radius:8px;padding:20px;background:#11161B;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+              <div>
+                <div style="font-size:18px;font-weight:700;">{{ focus.symbol }}</div>
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;margin-top:2px;">{{ focus.priceLabel }} <span style="font-size:13px;color:{{ focus.changeColor }};">{{ focus.changeLabel }}</span></div>
+                <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#35C98A;font-weight:600;margin-top:6px;"><span style="width:6px;height:6px;border-radius:50%;background:#35C98A;"></span>LIVE · Dhan · {{ dataLatencyMs }}ms ago</div>
+              </div>
+              <sc-if value="{{ focus.hasSignal }}" hint-placeholder-val="{{ false }}">
+                <div style="text-align:right;display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
+                  <div style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:4px;color:#5EA8FF;border:1px solid #5EA8FF;">{{ focus.side }} · {{ focus.confidence }}%</div>
+                  <div style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:4px;color:{{ focus.statusColor }};border:1px solid {{ focus.statusColor }};">{{ focus.statusLabel }}</div>
+                </div>
+              </sc-if>
+            </div>
+
+            <svg viewBox="0 0 660 180" style="width:100%;height:180px;overflow:visible;margin:10px 0 14px;">
+              <sc-for list="{{ focus.candles }}" as="c" hint-placeholder-count="24">
+                <g>
+                  <line x1="{{ c.wickX }}" y1="{{ c.wickY1 }}" x2="{{ c.wickX }}" y2="{{ c.wickY2 }}" stroke="{{ c.color }}" stroke-width="1"></line>
+                  <rect x="{{ c.x }}" y="{{ c.y }}" width="{{ c.w }}" height="{{ c.h }}" fill="{{ c.color }}"></rect>
+                </g>
+              </sc-for>
+              <sc-if value="{{ focus.hasLevels }}" hint-placeholder-val="{{ false }}">
+                <g>
+                  <line x1="0" y1="{{ focus.entryY }}" x2="600" y2="{{ focus.entryY }}" stroke="#9AA4AF" stroke-width="1" stroke-dasharray="4 4"></line>
+                  <line x1="0" y1="{{ focus.stopY }}" x2="600" y2="{{ focus.stopY }}" stroke="#F05D5E" stroke-width="1" stroke-dasharray="4 4"></line>
+                  <line x1="0" y1="{{ focus.targetY }}" x2="600" y2="{{ focus.targetY }}" stroke="#35C98A" stroke-width="1" stroke-dasharray="4 4"></line>
+                  <circle cx="{{ focus.markerX }}" cy="{{ focus.markerY }}" r="3.5" fill="#4DA3FF"></circle>
+                  <text x="{{ focus.markerX }}" y="{{ focus.markerLabelY }}" fill="#4DA3FF" font-size="9" font-family="IBM Plex Mono, monospace" text-anchor="middle">SIGNAL</text>
+                </g>
+              </sc-if>
+              <text x="606" y="10" fill="#66717D" font-size="9" font-family="IBM Plex Mono, monospace">{{ focus.hiLabel }}</text>
+              <text x="606" y="150" fill="#66717D" font-size="9" font-family="IBM Plex Mono, monospace">{{ focus.loLabel }}</text>
+              <text x="0" y="170" fill="#66717D" font-size="9" font-family="IBM Plex Mono, monospace">24 bars ago</text>
+              <text x="562" y="170" fill="#66717D" font-size="9" font-family="IBM Plex Mono, monospace">now</text>
+            </svg>
+
+            <sc-if value="{{ focus.hasSignal }}" hint-placeholder-val="{{ false }}">
+              <div>
+                <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:8px;">
+                  <div><div style="font-size:10px;color:#66717D;">ENTRY</div><div style="font-family:'IBM Plex Mono',monospace;font-size:14px;">{{ focus.entryLabel }}</div></div>
+                  <div><div style="font-size:10px;color:#66717D;">STOP</div><div style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#F05D5E;">{{ focus.stopLabel }}</div></div>
+                  <div><div style="font-size:10px;color:#66717D;">TARGET</div><div style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#35C98A;">{{ focus.targetLabel }}</div></div>
+                  <div><div style="font-size:10px;color:#66717D;">R:R</div><div style="font-family:'IBM Plex Mono',monospace;font-size:14px;">{{ focus.rr }}</div></div>
+                </div>
+                <sc-if value="{{ focus.riskLine }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:11px;color:#9AA4AF;margin-bottom:16px;">{{ focus.riskLine }}</div>
+                </sc-if>
+                <div onClick="{{ focus.openDetail }}" style="font-size:12px;color:#4DA3FF;cursor:pointer;margin-bottom:18px;">Full analysis →</div>
+
+                <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:10px;">WHY THIS SIGNAL?</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;">
+                  <div>
+                    <div style="font-size:10px;font-weight:700;color:#35C98A;margin-bottom:6px;">SUPPORTING EVIDENCE</div>
+                    <sc-for list="{{ focus.evidenceFor }}" as="ev" hint-placeholder-count="3">
+                      <div style="display:flex;gap:6px;font-size:12px;margin-bottom:5px;"><span style="color:#35C98A;">✓</span>{{ ev }}</div>
+                    </sc-for>
+                  </div>
+                  <div>
+                    <div style="font-size:10px;font-weight:700;color:#E7B84B;margin-bottom:6px;">CONTRADICTING EVIDENCE</div>
+                    <div style="display:flex;gap:6px;font-size:12px;"><span style="color:#E7B84B;">!</span>{{ focus.contradicting }}</div>
+                  </div>
+                </div>
+
+                <div style="display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:8px;">
+                  AI INTERPRETATION <span style="font-size:9px;font-weight:600;padding:2px 6px;border-radius:3px;background:#1A2128;color:#9AA4AF;">OLLAMA · MODEL-GENERATED</span>
+                </div>
+                <div style="padding:14px;border:1px solid #252D35;border-radius:8px;background:#151B21;margin-bottom:18px;">
+                  <div style="font-size:13px;line-height:1.5;margin-bottom:12px;">{{ focus.narrative }}</div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <div onClick="{{ focus.viewExplain }}" style="font-size:11px;padding:5px 10px;border-radius:5px;border:1px solid {{ focus.explainBorder }};color:{{ focus.explainColor }};cursor:pointer;">Explain signal</div>
+                    <div onClick="{{ focus.viewInvalidation }}" style="font-size:11px;padding:5px 10px;border-radius:5px;border:1px solid {{ focus.invalidationBorder }};color:{{ focus.invalidationColor }};cursor:pointer;">What invalidates this?</div>
+                    <div onClick="{{ focus.viewContradicting }}" style="font-size:11px;padding:5px 10px;border-radius:5px;border:1px solid {{ focus.contradictingBorder }};color:{{ focus.contradictingColor }};cursor:pointer;">Show contradictory evidence</div>
+                  </div>
+                  <sc-if value="{{ focus.answerText }}" hint-placeholder-val="{{ false }}">
+                    <div style="font-size:12px;color:#9AA4AF;margin-top:12px;padding-top:12px;border-top:1px solid #252D35;">{{ focus.answerText }}</div>
+                  </sc-if>
+                </div>
+
+                <sc-if value="{{ focus.hasTimeline }}" hint-placeholder-val="{{ false }}">
+                  <div>
+                    <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:10px;">SIGNAL TIMELINE</div>
+                    <sc-for list="{{ focus.timeline }}" as="ev" hint-placeholder-count="5">
+                      <div style="display:flex;gap:12px;font-size:12px;margin-bottom:6px;">
+                        <span style="font-family:'IBM Plex Mono',monospace;color:#66717D;width:64px;flex:0 0 auto;">{{ ev.time }}</span>
+                        <span>{{ ev.label }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-if>
+            <sc-if value="{{ !focus.hasSignal }}" hint-placeholder-val="{{ true }}">
+              <div style="padding:14px;border:1px solid #252D35;border-radius:8px;background:#151B21;font-size:13px;color:#66717D;">No qualifying signal for {{ focus.symbol }} right now. The strategy currently sees no setup meeting its entry criteria for this symbol.</div>
+            </sc-if>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:20px;min-width:0;">
+          <div>
+            <div style="font-size:13px;font-weight:600;margin-bottom:10px;">Attention</div>
+            <sc-if value="{{ hasAttention }}" hint-placeholder-val="{{ true }}">
+              <sc-for list="{{ attentionItems }}" as="item" hint-placeholder-count="5">
+                <div style="padding:12px 14px;border-radius:8px;background:#151B21;border-left:3px solid {{ item.color }};margin-bottom:8px;">
+                  <div style="font-size:10px;font-weight:700;letter-spacing:0.04em;color:{{ item.color }};margin-bottom:4px;">{{ item.type }}</div>
+                  <div style="font-size:13px;font-weight:600;margin-bottom:2px;">{{ item.title }}</div>
+                  <div style="font-size:12px;color:#9AA4AF;">{{ item.detail }}</div>
+                </div>
+              </sc-for>
+            </sc-if>
+            <sc-if value="{{ !hasAttention }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:14px;border-radius:8px;background:#151B21;font-size:12px;color:#66717D;text-align:center;">NO ACTION REQUIRED</div>
+            </sc-if>
+          </div>
+          <div onClick="{{ goSystem }}" style="cursor:pointer;border:1px solid #252D35;border-radius:8px;padding:14px;background:#11161B;">
+            <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;margin-bottom:10px;">
+              <span style="width:6px;height:6px;border-radius:50%;background:{{ overallStatusColor }};"></span>SYSTEM · {{ overallStatus }}
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;font-size:11px;color:#9AA4AF;">
+              <div style="display:flex;justify-content:space-between;"><span>Dhan</span><span style="color:#35C98A;">LIVE</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Fleet</span><span>{{ fleetHealthyCount }}/{{ fleetTotal }}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Database</span><span style="color:#35C98A;">HEALTHY</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Ollama (LLM)</span><span style="color:#E7B84B;">DEGRADED</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isSignals }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:14px;">Signals</div>
+        <div style="border:1px solid #252D35;border-radius:8px;overflow:hidden;">
+          <div style="display:grid;grid-template-columns:110px 90px 90px 90px 70px 90px 130px 1fr;padding:10px 16px;background:#151B21;font-size:10px;font-weight:600;letter-spacing:0.05em;color:#66717D;">
+            <div>SYMBOL</div><div>PRICE</div><div>DIR.</div><div>R:R</div><div>CONF.</div><div>STATUS</div><div>UPDATED</div><div></div>
+          </div>
+          <sc-for list="{{ signals }}" as="sig" hint-placeholder-count="3">
+            <div onClick="{{ sig.open }}" style="display:grid;grid-template-columns:110px 90px 90px 90px 70px 90px 130px 1fr;padding:13px 16px;border-top:1px solid #252D35;font-size:13px;cursor:pointer;align-items:center;">
+              <div style="font-weight:600;">{{ sig.symbol }}</div>
+              <div style="font-family:'IBM Plex Mono',monospace;">{{ sig.livePrice }}</div>
+              <div style="color:#5EA8FF;font-weight:600;font-size:12px;">{{ sig.side }}</div>
+              <div style="color:#9AA4AF;font-size:12px;">{{ sig.rr }}</div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;">{{ sig.confidence }}%</div>
+              <div style="font-size:11px;font-weight:600;color:{{ sig.statusColor }};">{{ sig.statusLabel }}</div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#66717D;">{{ sig.ts }}</div>
+              <div style="text-align:right;color:#66717D;font-size:12px;">View →</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isPortfolio }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:14px;">Portfolio &amp; Risk</div>
+        <div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:16px;margin-bottom:24px;">
+          <div style="display:flex;flex-direction:column;gap:4px;"><span style="font-size:10px;color:#66717D;letter-spacing:0.05em;">OPEN POSITIONS</span><span style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace;">2</span></div>
+          <div style="display:flex;flex-direction:column;gap:4px;"><span style="font-size:10px;color:#66717D;letter-spacing:0.05em;">EXPOSURE</span><span style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace;">34%</span></div>
+          <div style="display:flex;flex-direction:column;gap:4px;"><span style="font-size:10px;color:#66717D;letter-spacing:0.05em;">DAILY P&amp;L</span><span style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace;color:#35C98A;">+₹4,280</span></div>
+          <div style="display:flex;flex-direction:column;gap:4px;min-width:0;"><span style="font-size:10px;color:#66717D;letter-spacing:0.05em;">UNREALIZED P&amp;L</span><span style="font-size:18px;font-weight:600;font-family:'IBM Plex Mono',monospace;color:{{ unrealizedColor }};white-space:nowrap;">{{ unrealizedPnlLabel }}</span></div>
+          <div style="display:flex;flex-direction:column;gap:4px;"><span style="font-size:10px;color:#66717D;letter-spacing:0.05em;">DRAWDOWN</span><span style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace;color:#F05D5E;">-3.2%</span></div>
+          <div style="display:flex;flex-direction:column;gap:4px;"><span style="font-size:10px;color:#66717D;letter-spacing:0.05em;">RISK UTILIZATION</span><span style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace;color:#E7B84B;">82%</span></div>
+        </div>
+
+        <div style="padding:12px 16px;border-radius:8px;border-left:3px solid #E7B84B;background:#151B21;margin-bottom:24px;">
+          <div style="font-size:10px;font-weight:700;letter-spacing:0.04em;color:#E7B84B;margin-bottom:3px;">RISK WARNING</div>
+          <div style="font-size:13px;">Daily risk utilization is at 82% of the configured limit. New signals near the limit may be sized down or rejected by the risk engine.</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:24px;margin-bottom:24px;">
+          <div>
+            <div style="font-size:13px;font-weight:600;margin-bottom:10px;">Open Positions</div>
+            <div style="border:1px solid #252D35;border-radius:8px;overflow:hidden;">
+              <div style="display:grid;grid-template-columns:85px 40px 35px 68px 68px 80px minmax(70px,1fr) 60px;padding:10px 12px;background:#151B21;font-size:10px;font-weight:600;letter-spacing:0.05em;color:#66717D;">
+                <div>SYMBOL</div><div>SIDE</div><div>QTY</div><div>ENTRY</div><div>CURRENT</div><div>STOP/TGT</div><div>P&amp;L</div><div>STATUS</div>
+              </div>
+              <sc-for list="{{ positions }}" as="pos" hint-placeholder-count="2">
+                <div style="display:grid;grid-template-columns:85px 40px 35px 68px 68px 80px minmax(70px,1fr) 60px;padding:12px 12px;border-top:1px solid #252D35;font-size:13px;align-items:center;">
+                  <div style="font-weight:600;white-space:nowrap;">{{ pos.symbol }}</div>
+                  <div style="color:#5EA8FF;font-size:12px;">{{ pos.side }}</div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;">{{ pos.qty }}</div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;">{{ pos.entryLabel }}</div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;">{{ pos.currentLabel }}</div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;">
+                    <div style="color:#66717D;">{{ pos.stopTargetLabel }}</div>
+                    <div><span style="color:#F05D5E;">{{ pos.toStopLabel }}</span> / <span style="color:#35C98A;">{{ pos.toTargetLabel }}</span></div>
+                  </div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:{{ pos.pnlColor }};">{{ pos.pnlLabel }}</div>
+                  <div style="font-size:10px;font-weight:600;color:#5EA8FF;">{{ pos.status }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:600;margin-bottom:10px;">Today's P&amp;L</div>
+            <div style="border:1px solid #252D35;border-radius:8px;padding:16px;background:#11161B;">
+              <svg viewBox="0 0 240 70" style="width:100%;height:70px;overflow:visible;">
+                <polyline points="0,50 30,46 60,52 90,38 120,42 150,26 180,30 210,16 240,18" fill="none" stroke="#4DA3FF" stroke-width="2"></polyline>
+              </svg>
+              <div style="font-size:11px;color:#66717D;margin-top:8px;">Realized + unrealized, session start to now.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isFleet }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:14px;">
+          <div style="font-size:15px;font-weight:600;">Fleet</div>
+          <div style="font-size:13px;font-weight:600;color:{{ fleetStatusColor }};">{{ fleetHealthyCount }} / {{ fleetTotal }} HEALTHY</div>
+        </div>
+        <sc-for list="{{ fleetExceptions }}" as="exc" hint-placeholder-count="2">
+          <div style="padding:12px 16px;border-radius:8px;border-left:3px solid #E7B84B;background:#151B21;margin-bottom:8px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:0.04em;color:#E7B84B;margin-bottom:3px;">EXCEPTION — {{ exc.symbol }}</div>
+            <div style="font-size:13px;">{{ exc.reason }}</div>
+          </div>
+        </sc-for>
+        <div style="border:1px solid #252D35;border-radius:8px;overflow:hidden;margin-top:12px;">
+          <div style="display:grid;grid-template-columns:110px 90px 100px 130px 80px 1fr;padding:10px 16px;background:#151B21;font-size:10px;font-weight:600;letter-spacing:0.05em;color:#66717D;">
+            <div>SYMBOL</div><div>PRICE</div><div>DATA</div><div>PROCESS</div><div>SIGNAL</div><div>LAST UPDATE</div>
+          </div>
+          <sc-for list="{{ fleetRows }}" as="row" hint-placeholder-count="15">
+            <div style="display:grid;grid-template-columns:110px 90px 100px 130px 80px 1fr;padding:10px 16px;border-top:1px solid #252D35;font-size:12px;align-items:center;background:{{ row.rowBg }};">
+              <div style="font-weight:600;">{{ row.symbol }}</div>
+              <div style="font-family:'IBM Plex Mono',monospace;">{{ row.price }}</div>
+              <div style="display:flex;align-items:center;gap:6px;color:{{ row.dataColor }};font-weight:600;font-size:11px;"><span style="width:6px;height:6px;border-radius:50%;background:{{ row.dataColor }};"></span>{{ row.data }}</div>
+              <div style="display:flex;align-items:center;gap:6px;color:{{ row.processColor }};font-weight:600;font-size:11px;"><span style="width:6px;height:6px;border-radius:50%;background:{{ row.processColor }};"></span>{{ row.process }}</div>
+              <div style="color:#5EA8FF;font-weight:600;font-size:11px;">{{ row.signal }}</div>
+              <div style="font-family:'IBM Plex Mono',monospace;color:#66717D;">{{ row.lastUpdate }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isSystem }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:16px;">
+          <div style="font-size:15px;font-weight:600;">System Health</div>
+          <div style="font-size:13px;font-weight:600;color:{{ overallStatusColor }};">{{ overallStatus }}</div>
+        </div>
+        <div style="border:1px solid #252D35;border-radius:8px;overflow:hidden;margin-bottom:24px;max-width:640px;">
+          <sc-for list="{{ healthRows }}" as="h" hint-placeholder-count="10">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-top:1px solid #252D35;font-size:13px;">
+              <div style="font-weight:500;width:170px;flex:0 0 auto;">{{ h.name }}</div>
+              <div style="display:flex;align-items:center;gap:6px;width:100px;flex:0 0 auto;color:{{ h.color }};font-weight:600;font-size:12px;"><span style="width:6px;height:6px;border-radius:50%;background:{{ h.color }};"></span>{{ h.status }}</div>
+              <div style="color:#66717D;font-size:12px;flex:1;">{{ h.detail }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="max-width:400px;padding:16px;border:1px solid #252D35;border-radius:8px;background:#11161B;">
+          <div style="font-size:13px;font-weight:600;margin-bottom:6px;">Kill Switch</div>
+          <div style="font-size:12px;color:#9AA4AF;margin-bottom:12px;">Halts all new paper order submission immediately. Existing open positions remain until manually closed. Requires a second confirmation click to activate or reset.</div>
+          <sc-if value="{{ killSwitchConfirming }}" hint-placeholder-val="{{ false }}">
+            <div onClick="{{ armKillSwitch }}" style="text-align:center;padding:10px;border-radius:6px;border:1px solid #FF4D5A;color:#FF4D5A;font-weight:700;font-size:12px;letter-spacing:0.03em;cursor:pointer;">CLICK AGAIN TO CONFIRM HALT</div>
+          </sc-if>
+          <sc-if value="{{ !killSwitchConfirming }}" hint-placeholder-val="{{ true }}">
+            <div onClick="{{ armKillSwitch }}" style="text-align:center;padding:10px;border-radius:6px;border:1px solid #252D35;color:{{ killSwitchButtonColor }};font-weight:700;font-size:12px;letter-spacing:0.03em;cursor:pointer;">{{ killSwitchButtonLabel }}</div>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isResearch }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="font-size:15px;font-weight:600;margin-bottom:14px;">Research</div>
+        <div style="display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap;">
+          <sc-for list="{{ researchSymbolChips }}" as="chip" hint-placeholder-count="6">
+            <div onClick="{{ chip.select }}" style="padding:6px 12px;border-radius:5px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid {{ chip.borderColor }};color:{{ chip.textColor }};background:{{ chip.bgColor }};">{{ chip.symbol }}</div>
+          </sc-for>
+        </div>
+
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:24px;">
+          <div style="display:flex;flex-direction:column;gap:16px;">
+            <div style="border:1px solid #252D35;border-radius:8px;padding:16px;background:#11161B;">
+              <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:10px;">TECHNICAL SNAPSHOT</div>
+              <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;font-family:'IBM Plex Mono',monospace;">
+                <div><div style="font-size:10px;color:#66717D;">SMA20</div><div style="font-size:14px;">{{ researchData.sma20 }}</div></div>
+                <div><div style="font-size:10px;color:#66717D;">SMA50</div><div style="font-size:14px;">{{ researchData.sma50 }}</div></div>
+                <div><div style="font-size:10px;color:#66717D;">RSI14</div><div style="font-size:14px;">{{ researchData.rsi14 }}</div></div>
+                <div><div style="font-size:10px;color:#66717D;">ATR14</div><div style="font-size:14px;">{{ researchData.atr14 }}</div></div>
+              </div>
+            </div>
+            <div style="border:1px solid #252D35;border-radius:8px;padding:16px;background:#11161B;">
+              <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:8px;">CORPORATE ACTIONS</div>
+              <div style="font-size:13px;color:#66717D;">No qualifying corporate actions in range.</div>
+            </div>
+            <div style="border:1px solid #252D35;border-radius:8px;padding:16px;background:#11161B;">
+              <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:8px;">NEWS</div>
+              <div style="font-size:13px;color:#66717D;">No qualifying news events in range.</div>
+            </div>
+          </div>
+          <div>
+            <div style="border:1px solid #252D35;border-radius:8px;padding:16px;background:#11161B;">
+              <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:10px;">CONTEXT</div>
+              <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;">
+                <div><div style="font-size:10px;color:#66717D;">SECTOR</div><div>{{ researchData.sector }}</div></div>
+                <div><div style="font-size:10px;color:#66717D;">DATA SOURCE</div><div>{{ researchData.source }}</div></div>
+                <div><div style="font-size:10px;color:#66717D;">RELATIVE STRENGTH VS NIFTY</div><div style="color:{{ researchData.rsColor }};">{{ researchData.relativeStrength }}</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+  </div>
+
+  <sc-if value="{{ selectedSignal }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeSignal }}" style="position:fixed;inset:0;background:#00000088;z-index:40;">
+      <div onClick="{{ stopPropagation }}" style="position:absolute;top:0;right:0;bottom:0;width:min(520px,100%);background:#11161B;border-left:1px solid #252D35;overflow-y:auto;padding:24px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+          <div>
+            <div style="font-size:18px;font-weight:700;">{{ selectedSignal.symbol }}</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;margin-top:4px;">{{ selectedSignal.livePrice }}</div>
+          </div>
+          <div onClick="{{ closeSignal }}" style="cursor:pointer;color:#66717D;font-size:20px;line-height:1;">×</div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:20px;">
+          <div style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:4px;color:{{ selectedSignal.statusColor }};border:1px solid {{ selectedSignal.statusColor }};">{{ selectedSignal.statusLabel }}</div>
+          <div style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:4px;color:#5EA8FF;border:1px solid #5EA8FF;">{{ selectedSignal.side }}</div>
+        </div>
+
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:8px;">TRADE PLAN</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:22px;padding:12px;border:1px solid #252D35;border-radius:8px;">
+          <div><div style="font-size:10px;color:#66717D;">ACTION</div><div style="font-family:'IBM Plex Mono',monospace;font-size:13px;">{{ selectedSignal.actionLabel }}</div></div>
+          <div><div style="font-size:10px;color:#66717D;">ORDER TYPE</div><div style="font-family:'IBM Plex Mono',monospace;font-size:13px;">{{ selectedSignal.orderType }}</div></div>
+          <div><div style="font-size:10px;color:#66717D;">STATUS</div><div style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:{{ selectedSignal.statusColor }};">{{ selectedSignal.statusLabel }}</div></div>
+          <div><div style="font-size:10px;color:#66717D;">ENTRY</div><div style="font-family:'IBM Plex Mono',monospace;font-size:14px;">{{ selectedSignal.entryLabel }}</div></div>
+          <div><div style="font-size:10px;color:#66717D;">STOP</div><div style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#F05D5E;">{{ selectedSignal.stopLabel }}</div></div>
+          <div><div style="font-size:10px;color:#66717D;">TARGET</div><div style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#35C98A;">{{ selectedSignal.targetLabel }}</div></div>
+          <div><div style="font-size:10px;color:#66717D;">QUANTITY</div><div style="font-family:'IBM Plex Mono',monospace;font-size:13px;">{{ selectedSignal.quantityLabel }}</div></div>
+          <div><div style="font-size:10px;color:#66717D;">REQUIRED CAPITAL</div><div style="font-family:'IBM Plex Mono',monospace;font-size:13px;">{{ selectedSignal.capitalLabel }}</div></div>
+          <div><div style="font-size:10px;color:#66717D;">R:R</div><div style="font-family:'IBM Plex Mono',monospace;font-size:13px;">{{ selectedSignal.rr }}</div></div>
+          <div><div style="font-size:10px;color:#66717D;">POSITION RISK</div><div style="font-family:'IBM Plex Mono',monospace;font-size:13px;">{{ selectedSignal.riskLabel }}</div></div>
+          <div><div style="font-size:10px;color:#66717D;">CONFIDENCE</div><div style="font-family:'IBM Plex Mono',monospace;font-size:13px;">{{ selectedSignal.confidence }}%</div></div>
+          <div><div style="font-size:10px;color:#66717D;">TIMESTAMP</div><div style="font-family:'IBM Plex Mono',monospace;font-size:13px;">{{ selectedSignal.ts }}</div></div>
+        </div>
+        <div style="font-size:11px;color:#66717D;margin-bottom:22px;">{{ selectedSignal.expiryLabel }} No limit/stop order types exist — approved signals fill at market on the next bar.</div>
+
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:8px;">MARKET DATA</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:12px;border:1px solid #252D35;border-radius:8px;margin-bottom:18px;">
+          <div><div style="color:#66717D;font-size:10px;">SMA20/50</div>{{ selectedSignal.market.sma }}</div>
+          <div><div style="color:#66717D;font-size:10px;">RSI14</div>{{ selectedSignal.market.rsi }}</div>
+          <div><div style="color:#66717D;font-size:10px;">VOL RATIO</div>{{ selectedSignal.market.volRatio }}</div>
+          <div style="grid-column:1/-1;color:#66717D;font-size:11px;">Source: {{ selectedSignal.market.source }} · Status: {{ selectedSignal.market.status }} · Freshness: {{ selectedSignal.market.freshness }}</div>
+        </div>
+
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:8px;">TECHNICAL EVIDENCE</div>
+        <div style="margin-bottom:18px;">
+          <sc-for list="{{ selectedSignal.evidenceFor }}" as="ev" hint-placeholder-count="3">
+            <div style="display:flex;gap:8px;font-size:13px;margin-bottom:6px;"><span style="color:#35C98A;">✓</span>{{ ev }}</div>
+          </sc-for>
+        </div>
+
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:8px;">RISK ASSESSMENT</div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;font-size:12px;padding:12px;border:1px solid #252D35;border-radius:8px;margin-bottom:18px;font-family:'IBM Plex Mono',monospace;">
+          <div><div style="color:#66717D;font-size:10px;">POSITION SIZE</div>{{ selectedSignal.risk.size }}</div>
+          <div><div style="color:#66717D;font-size:10px;">TOTAL RISK</div>{{ selectedSignal.risk.total }}</div>
+          <div><div style="color:#66717D;font-size:10px;">EXPOSURE</div>{{ selectedSignal.risk.exposure }}</div>
+          <div><div style="color:#66717D;font-size:10px;">VETO REASONS</div>{{ selectedSignal.risk.veto }}</div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:8px;">
+          AI INTERPRETATION <span style="font-size:9px;font-weight:600;padding:2px 6px;border-radius:3px;background:#1A2128;color:#9AA4AF;letter-spacing:0.02em;">MODEL-GENERATED · NOT VERIFIED</span>
+        </div>
+        <div style="padding:14px;border:1px solid #252D35;border-radius:8px;background:#151B21;margin-bottom:18px;">
+          <div style="font-size:13px;line-height:1.5;margin-bottom:12px;color:#F2F4F7;">{{ selectedSignal.ai.narrative }}</div>
+          <div style="font-size:10px;font-weight:700;color:#35C98A;margin-bottom:4px;">SUPPORTING EVIDENCE</div>
+          <div style="font-size:12px;color:#9AA4AF;margin-bottom:10px;">{{ selectedSignal.ai.supporting }}</div>
+          <div style="font-size:10px;font-weight:700;color:#E7B84B;margin-bottom:4px;">CONTRADICTING EVIDENCE</div>
+          <div style="font-size:12px;color:#9AA4AF;">{{ selectedSignal.ai.contradicting }}</div>
+        </div>
+
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:8px;">EXIT CONDITIONS</div>
+        <sc-if value="{{ selectedSignal.exitConditions.length }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-bottom:18px;">
+            <sc-for list="{{ selectedSignal.exitConditions }}" as="ec" hint-placeholder-count="3">
+              <div style="font-size:12px;color:#9AA4AF;margin-bottom:6px;">• {{ ec }}</div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ !selectedSignal.exitConditions.length }}" hint-placeholder-val="{{ true }}">
+          <div style="font-size:12px;color:#66717D;margin-bottom:18px;">No exit conditions — no Signal has been generated for this decision yet.</div>
+        </sc-if>
+
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:#66717D;margin-bottom:8px;">PREDICTION RECORD</div>
+        <div style="font-size:12px;color:#9AA4AF;padding:12px;border:1px solid #252D35;border-radius:8px;">{{ selectedSignal.predictionNote }}</div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ searchOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeSearch }}" style="position:fixed;inset:0;background:#00000088;z-index:50;display:flex;justify-content:center;padding-top:120px;">
+      <div onClick="{{ stopPropagation }}" style="width:min(480px,90vw);height:fit-content;background:#151B21;border:1px solid #252D35;border-radius:10px;padding:14px;">
+        <input value="{{ searchQuery }}" onChange="{{ onSearchChange }}" onKeyDown="{{ onSearchKeyDown }}" autoFocus="{{ true }}" placeholder="Search stocks..." style="width:100%;background:#0B0E11;border:1px solid #252D35;border-radius:6px;color:#F2F4F7;font-size:14px;padding:10px 12px;outline:none;margin-bottom:10px;"></input>
+        <sc-for list="{{ searchResults }}" as="r" hint-placeholder-count="5">
+          <div onClick="{{ r.select }}" style="padding:10px 12px;border-radius:6px;font-size:13px;cursor:pointer;font-family:'IBM Plex Mono',monospace;">{{ r.symbol }}</div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    tab: 'overview',
+    now: Date.now(),
+    killSwitchActive: false,
+    killSwitchConfirming: false,
+    selectedSignalId: null,
+    searchOpen: false,
+    searchQuery: '',
+    researchSymbol: 'RELIANCE',
+    focusSymbol: 'RELIANCE',
+    aiView: 'narrative',
+    dataLatencyMs: 420,
+    prices: {
+      RELIANCE: 2481.20, INFY: 1621.40, HDFCBANK: 1782.30, TCS: 3912.60, ICICIBANK: 1204.50,
+      SBIN: 812.40, LT: 3540.10, BHARTIARTL: 1598.75, AXISBANK: 1142.20, KOTAKBANK: 1789.90,
+      ITC: 468.30, HINDUNILVR: 2612.80, MARUTI: 12840.50, SUNPHARMA: 1789.40, WIPRO: 512.60,
+    },
+    indices: { NIFTY: 25481.20, BANKNIFTY: 58241.40, VIX: 13.42 },
+  };
+
+  fleetSymbols = ['RELIANCE','INFY','HDFCBANK','TCS','ICICIBANK','SBIN','LT','BHARTIARTL','AXISBANK','KOTAKBANK','ITC','HINDUNILVR','MARUTI','SUNPHARMA','WIPRO'];
+
+  openPrices = {
+    RELIANCE: 2481.20, INFY: 1621.40, HDFCBANK: 1782.30, TCS: 3912.60, ICICIBANK: 1204.50,
+    SBIN: 812.40, LT: 3540.10, BHARTIARTL: 1598.75, AXISBANK: 1142.20, KOTAKBANK: 1789.90,
+    ITC: 468.30, HINDUNILVR: 2612.80, MARUTI: 12840.50, SUNPHARMA: 1789.40, WIPRO: 512.60,
+  };
+
+  seededCandles(symbol, base, n = 24) {
+    let seed = 0;
+    for (let i = 0; i < symbol.length; i++) seed = (seed * 31 + symbol.charCodeAt(i)) >>> 0;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const bars = [];
+    let price = base * 0.985;
+    for (let i = 0; i < n; i++) {
+      const o = price;
+      let c = o * (1 + (rnd() - 0.5) * 0.007);
+      if (i === n - 1) c = base;
+      const hi = Math.max(o, c) * (1 + rnd() * 0.0035);
+      const lo = Math.min(o, c) * (1 - rnd() * 0.0035);
+      bars.push({ o, h: hi, l: lo, c });
+      price = c;
+    }
+    return bars;
+  }
+
+  signalsBase = [
+    {
+      id: 'RELIANCE', symbol: 'RELIANCE', side: 'LONG', status: 'PENDING_HUMAN_APPROVAL', confidence: 78,
+      entry: 2475, stop: 2440, target: 2560, rr: '1 : 2.4', ts: '12:42:08',
+      market: { sma: '2455.10 / 2410.75', rsi: '61.2', volRatio: '1.6x (rising)', source: 'YAHOO + DHAN overlay', status: 'LIVE', freshness: '1.2s' },
+      evidenceFor: ['Price trading above both SMA20 and SMA50', 'RSI14 trending up without reaching overbought territory', 'Volume 1.6x the 20-day average, confirming participation'],
+      risk: { size: '40 shares', total: '₹1,400 (0.7% equity)', exposure: '4.9% of account', veto: 'None' },
+      orderType: 'MARKET', quantity: 40, riskAmount: 1400, riskPercent: '0.7%',
+      expiryNote: 'Expires (APPROVAL_EXPIRED) if not approved within the platform\u2019s configured approval window.',
+      exitConditions: ['Target hit at \u20B92,560 \u2192 recorded TARGET_HIT.', 'Stop hit at \u20B92,440 \u2192 recorded STOP_HIT.', 'Not approved in time \u2192 APPROVAL_EXPIRED; signal never enters.'],
+      ai: {
+        narrative: 'Momentum and trend alignment are the primary support for this setup. Volume confirms participation in the move. Elevated short-term volatility is the main risk to the thesis holding through to target.',
+        supporting: 'Trend alignment, momentum confirmation, volume confirmation.',
+        contradicting: 'ATR14 has expanded over the last few sessions, widening the plausible range around entry.',
+        invalidation: 'This setup is invalidated if price closes back below ₹2,475 on above-average volume, or if RSI14 drops back under 50 before target is reached.',
+      },
+      timeline: [
+        { time: '12:41:52', label: 'Market data received' },
+        { time: '12:42:01', label: 'SIGNAL_GENERATED' },
+        { time: '12:42:03', label: 'RISK_APPROVED' },
+        { time: '12:42:05', label: 'AI_EXPLAINED' },
+        { time: '12:42:08', label: 'PENDING_HUMAN_APPROVAL' },
+      ],
+      predictionNote: 'Recorded at signal time. Horizon: 48 bars (5m interval). Current outcome: ACTIVE — no target or stop hit yet.',
+    },
+    {
+      id: 'INFY', symbol: 'INFY', side: 'LONG', status: 'ACTIVE', confidence: 71,
+      entry: 1605, stop: 1580, target: 1665, rr: '1 : 2.3', ts: '12:31:52',
+      market: { sma: '1598.40 / 1584.90', rsi: '58.6', volRatio: '1.2x (steady)', source: 'YAHOO (historical) — live overlay stale', status: 'STALE', freshness: '18.4s' },
+      evidenceFor: ['Trend confirmed on daily and intraday timeframes', 'Momentum positive but weaker than RELIANCE'],
+      risk: { size: '150 shares', total: '₹3,750 (1.1% equity)', exposure: '9.8% of account', veto: 'None' },
+      orderType: 'MARKET', quantity: 150, riskAmount: 3750, riskPercent: '1.1%',
+      expiryNote: null,
+      exitConditions: ['Target hit at \u20B91,665 \u2192 position closes, exit_reason TARGET.', 'Stop hit at \u20B91,580 \u2192 position closes, exit_reason STOP.'],
+      ai: {
+        narrative: 'The setup is supported by a confirmed uptrend, though the live data feed for this symbol is currently stale, which reduces confidence in the most recent price action.',
+        supporting: 'Trend confirmation, prior clean breakout structure.',
+        contradicting: 'Live feed has not updated in 18 seconds — recent price action cannot be independently confirmed.',
+        invalidation: 'This setup is invalidated if price closes back below ₹1,580, or if the live feed remains stale for another 60 seconds — the position would then be flagged for manual review.',
+      },
+      timeline: [
+        { time: '12:31:38', label: 'Market data received' },
+        { time: '12:31:44', label: 'SIGNAL_GENERATED' },
+        { time: '12:31:49', label: 'RISK_APPROVED' },
+        { time: '12:31:52', label: 'EXECUTED' },
+      ],
+      predictionNote: 'Recorded at signal time, auto-executed under current no-approval-required paper configuration. Outcome: ACTIVE.',
+    },
+    {
+      id: 'TCS', symbol: 'TCS', side: 'LONG', status: 'WATCH', confidence: 54,
+      entry: null, stop: null, target: null, rr: '—', ts: '12:19:03',
+      market: { sma: '3895.20 / 3880.10', rsi: '52.1', volRatio: '0.9x (below average)', source: 'YAHOO', status: 'LIVE', freshness: '2.4s' },
+      evidenceFor: ['Relative strength positive vs. sector benchmark'],
+      risk: { size: '—', total: '—', exposure: '—', veto: 'Below signal-generation threshold — no sizing performed' },
+      orderType: null, quantity: null, riskAmount: null, riskPercent: null,
+      expiryNote: null, exitConditions: [],
+      ai: {
+        narrative: 'Relative strength is positive, but volume has not confirmed the move and momentum is neutral. This does not yet meet the bar for a scored signal.',
+        supporting: 'Relative strength vs. benchmark.',
+        contradicting: 'Volume below the 20-day average; momentum flat.',
+      },
+      predictionNote: 'No prediction record — WATCH-labeled decisions are not sized or recorded as predictions.',
+    },
+  ];
+
+  componentDidMount() {
+    this._tick = setInterval(() => {
+      this.setState((s) => {
+        const round2 = (n) => Math.round(n * 100) / 100;
+        const prices = { ...s.prices };
+        Object.keys(prices).forEach((sym) => {
+          if (Math.random() < 0.35) prices[sym] = round2(prices[sym] * (1 + (Math.random() - 0.5) * 0.002));
+        });
+        const indices = { ...s.indices };
+        indices.NIFTY = round2(indices.NIFTY * (1 + (Math.random() - 0.5) * 0.0006));
+        indices.BANKNIFTY = round2(indices.BANKNIFTY * (1 + (Math.random() - 0.5) * 0.0006));
+        indices.VIX = round2(indices.VIX * (1 + (Math.random() - 0.5) * 0.01));
+        return { now: Date.now(), prices, indices, dataLatencyMs: 300 + Math.floor(Math.random() * 400) };
+      });
+    }, 2200);
+
+    this._keyHandler = (e) => {
+      if (e.key === 'Escape') this.setState({ selectedSignalId: null, searchOpen: false, killSwitchConfirming: false });
+      if ((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.openSearch(); }
+      else if (e.key === '/' && document.activeElement.tagName !== 'INPUT') { e.preventDefault(); this.openSearch(); }
+    };
+    window.addEventListener('keydown', this._keyHandler);
+  }
+
+  componentWillUnmount() {
+    clearInterval(this._tick);
+    clearTimeout(this._confirmTimer);
+    window.removeEventListener('keydown', this._keyHandler);
+  }
+
+  setTab(tab) { this.setState({ tab, selectedSignalId: null }); }
+  openSignal(id) { this.setState({ selectedSignalId: id }); }
+  closeSignal() { this.setState({ selectedSignalId: null }); }
+  openSearch() { this.setState({ searchOpen: true, searchQuery: '' }); }
+  closeSearch() { this.setState({ searchOpen: false }); }
+  selectResearchSymbol(sym) { this.setState({ researchSymbol: sym }); }
+  setFocus(sym) { this.setState({ focusSymbol: sym, aiView: null }); }
+  setAiView(view) { this.setState((s) => ({ aiView: s.aiView === view ? null : view })); }
+
+  armKillSwitch() {
+    if (this.state.killSwitchActive) { this.setState({ killSwitchActive: false, killSwitchConfirming: false }); return; }
+    if (this.state.killSwitchConfirming) { clearTimeout(this._confirmTimer); this.setState({ killSwitchActive: true, killSwitchConfirming: false }); return; }
+    this.setState({ killSwitchConfirming: true });
+    clearTimeout(this._confirmTimer);
+    this._confirmTimer = setTimeout(() => this.setState({ killSwitchConfirming: false }), 4000);
+  }
+
+  renderVals() {
+    const s = this.state;
+    const fmtINR = (n) => '\u20B9' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const statusStyle = {
+      WATCH: { label: 'WATCH', color: '#8B95A1' },
+      PENDING_HUMAN_APPROVAL: { label: 'PENDING APPROVAL', color: '#E7B84B' },
+      ACTIVE: { label: 'ACTIVE', color: '#35C98A' },
+      EXECUTED: { label: 'EXECUTED', color: '#5EA8FF' },
+      HUMAN_REJECTED: { label: 'REJECTED', color: '#F05D5E' },
+      EXPIRED: { label: 'EXPIRED', color: '#66717D' },
+    };
+
+    const signals = this.signalsBase.map((sig) => {
+      const st = statusStyle[sig.status];
+      return {
+        ...sig,
+        livePrice: fmtINR(s.prices[sig.symbol]),
+        statusLabel: st.label,
+        statusColor: st.color,
+        entryLabel: sig.entry != null ? fmtINR(sig.entry) : '—',
+        stopLabel: sig.stop != null ? fmtINR(sig.stop) : '—',
+        targetLabel: sig.target != null ? fmtINR(sig.target) : '—',
+        quantityLabel: sig.quantity != null ? `${sig.quantity} shares` : '—',
+        capitalLabel: sig.quantity != null && sig.entry != null ? fmtINR(sig.quantity * sig.entry) : '—',
+        riskLabel: sig.riskAmount != null ? `${fmtINR(sig.riskAmount)} (${sig.riskPercent} equity)` : '—',
+        expiryLabel: sig.expiryNote || 'No expiry configured for this signal.',
+        actionLabel: sig.entry != null ? `${sig.side} (BUY)` : `${sig.status === 'WATCH' ? 'WATCH — not sized' : sig.side}`,
+        open: () => this.openSignal(sig.id),
+      };
+    });
+    const selectedSignal = signals.find((x) => x.id === s.selectedSignalId) || null;
+
+    const dot = (st) => ({
+      HEALTHY: '#35C98A', LIVE: '#35C98A', AVAILABLE: '#35C98A', ARMED: '#35C98A',
+      DEGRADED: '#E7B84B', STALE: '#E7B84B', WARNING: '#E7B84B',
+      FAILED: '#FF4D5A', DISCONNECTED: '#FF4D5A', CRITICAL: '#FF4D5A', ACTIVE: '#FF4D5A',
+      DISABLED: '#8B95A1', UNKNOWN: '#8B95A1', SAFE_STOP: '#FF4D5A',
+    }[st] || '#8B95A1');
+
+    const fleetRows = this.fleetSymbols.map((sym) => {
+      const isStaleData = sym === 'INFY';
+      const isDegradedProcess = sym === 'SBIN';
+      const sigMap = { RELIANCE: 'LONG', INFY: 'LONG', TCS: 'WATCH' };
+      return {
+        symbol: sym,
+        price: fmtINR(s.prices[sym]),
+        data: isStaleData ? 'STALE' : 'LIVE',
+        dataColor: dot(isStaleData ? 'STALE' : 'LIVE'),
+        process: isDegradedProcess ? 'DEGRADED' : 'HEALTHY',
+        processColor: dot(isDegradedProcess ? 'DEGRADED' : 'HEALTHY'),
+        signal: sigMap[sym] || '—',
+        lastUpdate: isStaleData ? '18.4s' : isDegradedProcess ? '—' : (0.4 + Math.random() * 1.4).toFixed(1) + 's',
+        rowBg: (isStaleData || isDegradedProcess) ? '#151B21' : 'transparent',
+      };
+    });
+    const fleetHealthyCount = fleetRows.filter((r) => r.process === 'HEALTHY').length;
+    const fleetExceptions = [
+      { symbol: 'SBIN', reason: 'Process restarting after unexpected exit (attempt 2 of 3). Data and signals for this symbol are unavailable until it recovers.' },
+      { symbol: 'INFY', reason: 'Live data feed has not updated for 18 seconds. Process is healthy; the connectivity layer is degraded.' },
+    ];
+
+    const healthRows = [
+      { name: 'Dhan', status: 'HEALTHY', detail: 'Credentials configured, connectivity verified.' },
+      { name: 'Market Data (NSE)', status: 'LIVE', detail: 'Feed nominal fleet-wide; 1 symbol (INFY) currently stale.' },
+      { name: 'Yahoo Finance', status: 'AVAILABLE', detail: 'Historical/research series reachable.' },
+      { name: 'Ollama (LLM)', status: 'DEGRADED', detail: 'Unavailable: connection refused on localhost:11434. AI interpretation withheld for new signals.' },
+      { name: 'Fleet', status: fleetHealthyCount === fleetRows.length ? 'HEALTHY' : 'DEGRADED', detail: `${fleetHealthyCount} / ${fleetRows.length} processes healthy.` },
+      { name: 'Database', status: 'HEALTHY', detail: '12 stores checked via integrity_check, all ok.' },
+      { name: 'Prediction Recording', status: 'HEALTHY', detail: 'Writes confirmed, no gaps detected.' },
+      { name: 'Risk Engine', status: 'HEALTHY', detail: 'Config loads and validates.' },
+      { name: 'Scheduler', status: 'HEALTHY', detail: 'No active run lock, no sustained slot failures.' },
+      { name: 'Kill Switch', status: s.killSwitchActive ? 'ACTIVE' : 'ARMED', detail: s.killSwitchActive ? 'ACTIVE — new paper orders are blocked until reset.' : 'Inactive. Monitoring for manual trigger.' },
+    ].map((h) => ({ ...h, color: dot(h.status) }));
+
+    const overallStatus = s.killSwitchActive ? 'SAFE_STOP' : (healthRows.some((h) => h.status === 'DEGRADED') ? 'DEGRADED' : 'HEALTHY');
+
+    const attentionItems = [
+      { type: 'APPROVAL REQUIRED', title: 'RELIANCE', detail: 'Long signal awaiting human approval · 78% confidence', color: '#E7B84B' },
+      { type: 'RISK WARNING', title: 'Daily risk utilization', detail: 'At 82% of the configured limit.', color: '#E7B84B' },
+      { type: 'DATA WARNING', title: 'INFY', detail: 'Feed has not updated for 18 seconds.', color: '#E7B84B' },
+      { type: 'FLEET DEGRADED', title: 'SBIN', detail: 'Process restarting — 1 of 15 unavailable.', color: '#E7B84B' },
+      { type: 'SYSTEM WARNING', title: 'Ollama', detail: 'LLM explanation service unavailable for new signals.', color: '#8B95A1' },
+    ];
+    if (s.killSwitchActive) attentionItems.unshift({ type: 'TRADING HALTED', title: 'Kill switch active', detail: 'All new paper orders are blocked.', color: '#FF4D5A' });
+
+    const sigMeta = { RELIANCE: { label: 'LONG', color: '#5EA8FF' }, INFY: { label: 'LONG', color: '#5EA8FF' }, TCS: { label: 'WATCH', color: '#8B95A1' } };
+    const watchlist = this.fleetSymbols.map((sym) => {
+      const price = s.prices[sym];
+      const open = this.openPrices[sym];
+      const changePct = (price - open) / open * 100;
+      const isFocus = sym === s.focusSymbol;
+      return {
+        symbol: sym,
+        priceLabel: fmtINR(price),
+        changeLabel: (changePct >= 0 ? '+' : '') + changePct.toFixed(2) + '%',
+        changeColor: changePct >= 0 ? '#35C98A' : '#F05D5E',
+        signalLabel: sigMeta[sym] ? sigMeta[sym].label : '',
+        dotColor: sigMeta[sym] ? sigMeta[sym].color : '#66717D',
+        bg: isFocus ? '#151B21' : 'transparent',
+        borderColor: isFocus ? '#4DA3FF' : 'transparent',
+        select: () => this.setFocus(sym),
+      };
+    });
+
+    const focusSig = signals.find((x) => x.symbol === s.focusSymbol) || null;
+    const hasSignal = !!focusSig;
+    const hasLevels = hasSignal && focusSig.entry != null;
+    const n = 24, chartW = 600, chartH = 150, barWidth = chartW / n, bodyWidth = barWidth * 0.6;
+    const rawBars = this.seededCandles(s.focusSymbol, s.prices[s.focusSymbol], n);
+    const levelVals = hasLevels ? [focusSig.entry, focusSig.stop, focusSig.target] : [];
+    const allVals = rawBars.flatMap((b) => [b.h, b.l]).concat(levelVals);
+    const minV = Math.min(...allVals), maxV = Math.max(...allVals);
+    const pad = (maxV - minV) * 0.12 || 1;
+    const lo = minV - pad, hi = maxV + pad;
+    const yOfNum = (v) => chartH - ((v - lo) / (hi - lo)) * chartH;
+    const candles = rawBars.map((b, i) => {
+      const xCenter = i * barWidth + barWidth / 2;
+      const yO = yOfNum(b.o), yC = yOfNum(b.c), yH = yOfNum(b.h), yL = yOfNum(b.l);
+      const up = b.c >= b.o;
+      const bodyTop = Math.min(yO, yC), bodyBottom = Math.max(yO, yC);
+      return {
+        x: (xCenter - bodyWidth / 2).toFixed(1), y: bodyTop.toFixed(1), w: bodyWidth.toFixed(1), h: Math.max(bodyBottom - bodyTop, 1).toFixed(1),
+        wickX: xCenter.toFixed(1), wickY1: yH.toFixed(1), wickY2: yL.toFixed(1),
+        color: up ? '#35C98A' : '#F05D5E',
+      };
+    });
+    const markerIdx = n - 6;
+    const markerX = (markerIdx * barWidth + barWidth / 2).toFixed(1);
+    const markerY = hasLevels ? yOfNum(focusSig.entry).toFixed(1) : null;
+    const focusWatch = watchlist.find((w) => w.symbol === s.focusSymbol);
+    const aiView = s.aiView;
+    const btn = (view) => ({ border: aiView === view ? '#4DA3FF' : '#252D35', color: aiView === view ? '#4DA3FF' : '#9AA4AF' });
+    const answerTextMap = focusSig ? {
+      explain: "This label comes from the deterministic decision engine; the narrative above is the model's account of that already-fixed evidence — it does not decide or override the label.",
+      invalidation: focusSig.ai.invalidation || 'Not applicable — no active signal to invalidate.',
+      contradicting: 'Only one contradicting factor is currently tracked for this signal (shown above). No additional contradicting evidence is recorded.',
+    } : {};
+    const focus = {
+      symbol: s.focusSymbol,
+      priceLabel: fmtINR(s.prices[s.focusSymbol]),
+      changeLabel: focusWatch.changeLabel,
+      changeColor: focusWatch.changeColor,
+      candles,
+      hasLevels,
+      entryY: hasLevels ? yOfNum(focusSig.entry).toFixed(1) : null,
+      stopY: hasLevels ? yOfNum(focusSig.stop).toFixed(1) : null,
+      targetY: hasLevels ? yOfNum(focusSig.target).toFixed(1) : null,
+      markerX, markerY, markerLabelY: markerY != null ? (parseFloat(markerY) - 8).toFixed(1) : null,
+      hiLabel: hi.toFixed(1), loLabel: lo.toFixed(1),
+      hasSignal,
+      side: focusSig ? focusSig.side : '',
+      statusColor: focusSig ? focusSig.statusColor : '',
+      statusLabel: focusSig ? focusSig.statusLabel : '',
+      confidence: focusSig ? focusSig.confidence : 0,
+      entryLabel: focusSig ? focusSig.entryLabel : '—',
+      stopLabel: focusSig ? focusSig.stopLabel : '—',
+      targetLabel: focusSig ? focusSig.targetLabel : '—',
+      rr: focusSig ? focusSig.rr : '—',
+      riskLine: focusSig && focusSig.quantity != null ? `${focusSig.quantityLabel} · ${focusSig.orderType} · Risk ${focusSig.riskLabel} · ${focusSig.risk.exposure} exposure` : null,
+      evidenceFor: focusSig ? focusSig.evidenceFor : [],
+      contradicting: focusSig ? focusSig.ai.contradicting : '',
+      narrative: focusSig ? focusSig.ai.narrative : '',
+      answerText: focusSig ? (answerTextMap[aiView] || null) : null,
+      hasTimeline: !!(focusSig && focusSig.timeline),
+      timeline: focusSig && focusSig.timeline ? focusSig.timeline : [],
+      viewExplain: () => this.setAiView('explain'),
+      viewInvalidation: () => this.setAiView('invalidation'),
+      viewContradicting: () => this.setAiView('contradicting'),
+      explainBorder: btn('explain').border, explainColor: btn('explain').color,
+      invalidationBorder: btn('invalidation').border, invalidationColor: btn('invalidation').color,
+      contradictingBorder: btn('contradicting').border, contradictingColor: btn('contradicting').color,
+      openDetail: focusSig ? () => this.openSignal(focusSig.id) : () => {},
+    };
+
+    const positions = [
+      { symbol: 'INFY', side: 'LONG', qty: 150, entry: 1605.00, stop: 1580, target: 1665 },
+      { symbol: 'HDFCBANK', side: 'LONG', qty: 90, entry: 1758.20, stop: 1725, target: 1820 },
+    ].map((p) => {
+      const current = s.prices[p.symbol];
+      const pnl = (current - p.entry) * p.qty;
+      const toStopPct = ((current - p.stop) / current * 100);
+      const toTargetPct = ((p.target - current) / current * 100);
+      return {
+        ...p,
+        entryLabel: fmtINR(p.entry),
+        currentLabel: fmtINR(current),
+        stopTargetLabel: `${p.stop} / ${p.target}`,
+        toStopLabel: `-${toStopPct.toFixed(1)}%`,
+        toTargetLabel: `+${toTargetPct.toFixed(1)}%`,
+        exitCondition: `Target ${fmtINR(p.target)} or stop ${fmtINR(p.stop)}`,
+        status: 'HOLDING',
+        pnlLabel: (pnl >= 0 ? '+' : '') + fmtINR(pnl),
+        pnlColor: pnl >= 0 ? '#35C98A' : '#F05D5E',
+      };
+    });
+    const totalUnrealized = positions.reduce((sum, p) => sum + parseFloat(p.pnlLabel.replace(/[^0-9.-]/g, '')), 0);
+
+    const sectorMap = { RELIANCE: 'Energy / Oil & Gas', INFY: 'IT Services', HDFCBANK: 'Private Banks', TCS: 'IT Services', ICICIBANK: 'Private Banks' };
+    const researchSymbol = s.researchSymbol;
+    const rsig = this.signalsBase.find((x) => x.symbol === researchSymbol);
+    const researchData = {
+      sma20: rsig ? rsig.market.sma.split(' / ')[0] : (s.prices[researchSymbol] * 0.99).toFixed(2),
+      sma50: rsig ? rsig.market.sma.split(' / ')[1] : (s.prices[researchSymbol] * 0.975).toFixed(2),
+      rsi14: rsig ? rsig.market.rsi : (45 + Math.random() * 15).toFixed(1),
+      atr14: (s.prices[researchSymbol] * 0.014).toFixed(2),
+      sector: sectorMap[researchSymbol] || 'Requires backend sector mapping',
+      source: 'Yahoo Finance (historical) + NSE live overlay',
+      relativeStrength: researchSymbol === 'TCS' ? '+1.8% vs. NIFTY (20d)' : '+0.4% vs. NIFTY (20d)',
+      rsColor: '#35C98A',
+    };
+    const researchSymbolChips = this.fleetSymbols.slice(0, 6).map((sym) => ({
+      symbol: sym,
+      select: () => this.selectResearchSymbol(sym),
+      borderColor: sym === researchSymbol ? '#4DA3FF' : '#252D35',
+      textColor: sym === researchSymbol ? '#4DA3FF' : '#9AA4AF',
+      bgColor: sym === researchSymbol ? '#4DA3FF14' : 'transparent',
+    }));
+
+    const searchQuery = s.searchQuery || '';
+    const searchResults = this.fleetSymbols
+      .filter((sym) => sym.toLowerCase().includes(searchQuery.toLowerCase()))
+      .slice(0, 6)
+      .map((sym) => ({ symbol: sym, select: () => { const sig = signals.find((x) => x.symbol === sym); this.setState({ searchOpen: false, tab: 'signals', selectedSignalId: sig ? sig.id : null }); } }));
+
+    const navColors = (tab) => ({
+      [`nav${tab}Border`]: s.tab === tab.toLowerCase() ? '#4DA3FF' : 'transparent',
+      [`nav${tab}Color`]: s.tab === tab.toLowerCase() ? '#F2F4F7' : '#66717D',
+    });
+
+    return {
+      isOverview: s.tab === 'overview', isSignals: s.tab === 'signals', isPortfolio: s.tab === 'portfolio',
+      isFleet: s.tab === 'fleet', isSystem: s.tab === 'system', isResearch: s.tab === 'research',
+      goOverview: () => this.setTab('overview'), goSignals: () => this.setTab('signals'), goPortfolio: () => this.setTab('portfolio'),
+      goFleet: () => this.setTab('fleet'), goSystem: () => this.setTab('system'), goResearch: () => this.setTab('research'),
+      navOverviewBorder: s.tab === 'overview' ? '#4DA3FF' : 'transparent', navOverviewColor: s.tab === 'overview' ? '#F2F4F7' : '#66717D',
+      navSignalsBorder: s.tab === 'signals' ? '#4DA3FF' : 'transparent', navSignalsColor: s.tab === 'signals' ? '#F2F4F7' : '#66717D',
+      navPortfolioBorder: s.tab === 'portfolio' ? '#4DA3FF' : 'transparent', navPortfolioColor: s.tab === 'portfolio' ? '#F2F4F7' : '#66717D',
+      navFleetBorder: s.tab === 'fleet' ? '#4DA3FF' : 'transparent', navFleetColor: s.tab === 'fleet' ? '#F2F4F7' : '#66717D',
+      navSystemBorder: s.tab === 'system' ? '#4DA3FF' : 'transparent', navSystemColor: s.tab === 'system' ? '#F2F4F7' : '#66717D',
+      navResearchBorder: s.tab === 'research' ? '#4DA3FF' : 'transparent', navResearchColor: s.tab === 'research' ? '#F2F4F7' : '#66717D',
+
+      niftyVal: s.indices.NIFTY.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      bankniftyVal: s.indices.BANKNIFTY.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      vixVal: s.indices.VIX.toFixed(2),
+      dataLatencyMs: s.dataLatencyMs,
+
+      killSwitchActive: s.killSwitchActive,
+      killSwitchConfirming: s.killSwitchConfirming,
+      armKillSwitch: () => this.armKillSwitch(),
+      killSwitchStateLabel: s.killSwitchActive ? 'ACTIVE' : 'ARMED',
+      killSwitchStateColor: s.killSwitchActive ? '#FF4D5A' : '#35C98A',
+      killSwitchButtonLabel: s.killSwitchActive ? 'RESET KILL SWITCH' : 'ACTIVATE KILL SWITCH',
+      killSwitchButtonColor: s.killSwitchActive ? '#FF4D5A' : '#9AA4AF',
+
+      overallStatus, overallStatusColor: dot(overallStatus),
+
+      signalCount: signals.length, signals, selectedSignal,
+      openSignal: (id) => this.openSignal(id), closeSignal: () => this.closeSignal(),
+      stopPropagation: (e) => e && e.stopPropagation && e.stopPropagation(),
+
+      attentionItems, hasAttention: attentionItems.length > 0,
+      watchlist, focus,
+      fleetRows, fleetHealthyCount, fleetTotal: fleetRows.length, fleetExceptions,
+      fleetStatusColor: fleetHealthyCount === fleetRows.length ? '#35C98A' : '#E7B84B',
+      healthRows,
+
+      positions,
+      unrealizedPnlLabel: (totalUnrealized >= 0 ? '+' : '') + fmtINR(totalUnrealized),
+      unrealizedColor: totalUnrealized >= 0 ? '#35C98A' : '#F05D5E',
+
+      researchData, researchSymbolChips,
+
+      searchOpen: s.searchOpen, searchQuery: s.searchQuery, searchResults,
+      openSearch: () => this.openSearch(), closeSearch: () => this.closeSearch(),
+      onSearchChange: (e) => this.setState({ searchQuery: e.target.value }),
+      onSearchKeyDown: (e) => { if (e.key === 'Enter' && searchResults[0]) searchResults[0].select(); },
+    };
+  }
+}
+
+</script>
+</body>
+</html>

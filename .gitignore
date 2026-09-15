@@ -18,6 +18,11 @@ data/dhan/
 data/ml_research/
 vectorstore/
 
+# Per-symbol runtime state for the multi-symbol paper-live fleet
+# (fleet-supervise --runtime-dir, live/runtime_layout.py) -- generated,
+# local, never a source-of-truth artifact, same rationale as data/*.db.
+runtime/
+
 # Personal/reference documents not part of the published project
 documents/
 

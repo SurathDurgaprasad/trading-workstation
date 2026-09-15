@@ -234,6 +234,23 @@ def get_clock_skew():
         state_store.close()
 
 
+def get_risk_decision_for_pending(record):
+    """UI integration (Claude Design workstation): read-only recompute of
+    the risk breakdown for one PendingApprovalRecord, for display only --
+    the SAME pure, side-effect-free pattern live/prediction_recorder.py's
+    own record_prediction_for_signal() already uses (RiskEngine.evaluate()
+    is a pure function of (signal, account); account state has not
+    changed since this signal was generated, so this reproduces exactly
+    what was, or will be, used for the real decision -- it never creates,
+    approves, or resizes anything). Returns None if the account/risk
+    engine is unavailable for any reason -- never fabricated."""
+    try:
+        engine = get_live_engine()
+        return engine.risk_engine.evaluate(record.signal, engine.account)
+    except Exception:  # noqa: BLE001 -- display-only; a failure here must never break the page
+        return None
+
+
 def approve_pending_signal(signal_id: str, reason: str | None = None) -> dict:
     state_store = new_live_state_store()
     try:
