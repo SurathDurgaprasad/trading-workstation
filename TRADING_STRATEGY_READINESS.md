@@ -65,11 +65,17 @@ entire multi-cycle campaign.
   silent dead end the code did not account for. Fixed with
   `predictions.tracker.resolution_period_for_interval`. See
   `FINAL_FAILURE_MODE_ANALYSIS.md` entry #41.
-- **Still open**: real-time Dhan tick data has REST authentication and
-  WebSocket connectivity LIVE-VERIFIED this cycle (see Section 6 below),
-  but actual live tick reception has not been verified end-to-end — the
-  one real connectivity test available in this environment ran outside
-  NSE market hours.
+- **Closed 2026-09-15**: live tick reception during actual NSE market
+  hours is now real, direct evidence — a full-session market-hours
+  paper-live validation (`docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-15.md`)
+  processed 322 real 1-minute bars for RELIANCE.NS across ~5.5 hours
+  (09:52–15:29 IST), with a real, live stale-tick event correctly
+  suppressed by the freshness guard. No trading signal occurred during
+  that session (a real, honest null result, not a failure) — so
+  prediction recording/resolution/cost-adjusted execution under a LIVE
+  signal remain unexercised; see that report's own "What was NOT
+  exercised" section for the exact, disclosed boundary of what today's
+  session did and did not prove.
 
 ## 3. Strategy readiness
 
@@ -193,11 +199,15 @@ remains, and will always remain, structurally disabled.**
   authentication confirmed (real HTTP 200, 0.78s round-trip); WebSocket
   reached `CONNECTED` and subscribed successfully. See
   `FINAL_FAILURE_MODE_ANALYSIS.md` entry #45.
-- **Still NOT live-verified**: actual live tick reception. The one real
-  test available ran ~4 hours after NSE market close (19:22 IST), so no
-  new tick data existed to receive regardless of connection health. This
-  requires a re-run during real NSE trading hours (09:15–15:30 IST, a
-  trading day) to close.
+- **Now live-verified (2026-09-15)**: actual live tick reception during
+  real NSE trading hours. A full-session `paper-live --source dhan`
+  market-hours validation (`docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-15.md`)
+  processed 322 real bars across ~5.5 hours, including a real, live
+  stale-tick event correctly caught by the freshness guard. Zero trading
+  signals occurred during that session, so the prediction-recording/
+  resolution/cost-adjusted-execution chain remains unexercised under a
+  LIVE signal specifically — a real, disclosed, separate gap from tick
+  reception itself, which IS now closed.
 - No real order has ever been placed, attempted, or simulated-as-real at
   any point in this project's history.
 
@@ -239,7 +249,7 @@ negative/inconclusive, not merely absent.
 | Regime robustness | `learning/regime.py::classify_regime_at` + `compute_regime_performance`; `docs/STRATEGY_EDGE_DISCOVERY_FINAL_OUTPUT.md`'s Regime Consistency column | **NOT DEMONSTRATED** — no bucket outright NEGATIVE for H_EXIT_002, but 5 of 10 candidate buckets lack adequate sample size; genuinely unmeasured for those, not proven robust |
 | Paper track record | `data/predictions.db` (research path, 13 predictions, 0 resolved); `live/prediction_recorder.py` (live path, built and tested this campaign, zero real sessions run outside tests) | **INSUFFICIENT DATA / NOT YET ACCUMULATED** — the machinery to accumulate this evidence is complete and verified; the evidence itself does not yet exist |
 | Statistical confidence | `learning/profitability.py`'s Wilson/mean-return confidence intervals; `MIN_SAMPLE_SIZE_FOR_A_VERDICT = 30`; Bonferroni correction for multiple simultaneous hypotheses | **Methodology READY; underlying data INSUFFICIENT** for a live-path verdict, and the research-path verdict is NEGATIVE/INCONCLUSIVE where it does have enough data |
-| Live validation | `python main.py readiness-check --deep` against the real Dhan API this cycle (`FINAL_FAILURE_MODE_ANALYSIS.md` entry #45) | **PARTIALLY VERIFIED** — REST auth + WebSocket connectivity LIVE-VERIFIED; live tick reception NOT LIVE-VERIFIED (tested outside market hours); order placement structurally disabled and untested by design |
+| Live validation | `python main.py readiness-check --deep` (entry #45) + a full-session `paper-live --source dhan` market-hours run, 2026-09-15 (`docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-15.md`) | **PARTIALLY VERIFIED** — REST auth, WebSocket connectivity, AND live tick reception all LIVE-VERIFIED (322 real bars, ~5.5 real market hours); prediction recording/resolution/cost-adjusted execution under a live signal NOT yet exercised (zero signals occurred that session); order placement structurally disabled and untested by design |
 
 ---
 

@@ -121,15 +121,23 @@ ANALYSIS.md` entries #40-#48.
 - **External-provider verification**: **performed for the first time this
   mission.** Every automated test still uses dependency-injected fake
   transports (unchanged, and correctly so — a test suite should not
-  depend on live network/credentials). But this mission found real Dhan
+  depend on live network/credentials). This mission found real Dhan
   credentials available in this environment and, with explicit user
   authorization, ran the existing `readiness-check --deep` command
   against the real Dhan API: REST authentication confirmed (real HTTP
   200 from `/fundlimit`), WebSocket connectivity confirmed (real
-  `CONNECTED` state, successful subscription). Live tick reception was
-  NOT verified — the test ran outside NSE market hours, so no tick data
-  existed to receive regardless of connection health. See
-  `FINAL_FAILURE_MODE_ANALYSIS.md` entry #45.
+  `CONNECTED` state, successful subscription). See `FINAL_FAILURE_MODE_
+  ANALYSIS.md` entry #45. **A follow-on, full-session market-hours live
+  validation on 2026-09-15** (`docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-15.md`)
+  then closed the specific tick-reception gap entry #45 left open: 322
+  real 1-minute bars for RELIANCE.NS across ~5.5 real market hours,
+  including a real, live stale-tick event correctly suppressed by the
+  freshness guard, a clean restart, and a clean recovery from an abrupt
+  kill. Zero trading signals occurred that session (a real, honest null
+  result) — so prediction recording, automatic resolution, and
+  cost-adjusted paper execution remain unexercised under a genuinely
+  live-generated signal specifically, a real, disclosed, separate gap
+  from tick reception itself.
 - **Crash-atomicity of the new prediction-recording write path**:
   verified against the real SQLite engine this mission, not only
   reasoned about — a manually-abandoned mid-transaction write (the exact
@@ -157,12 +165,15 @@ ANALYSIS.md` entries #40-#48.
 - **Dhan market data**: real client library (`websocket-client`), real
   WebSocket protocol handling — every AUTOMATED TEST still drives it
   through a dependency-injected fake transport (`SIMULATED / VERIFIED`
-  for the test suite itself, unchanged). REST authentication and
-  WebSocket connectivity, specifically, are now `REAL PROVIDER /
-  VERIFIED` as of this mission (a real, one-off, user-authorized
-  connectivity check — see Section 5). Live tick reception remains
-  `SIMULATED / VERIFIED` only — never run against real incoming market
-  data end-to-end.
+  for the test suite itself, unchanged). REST authentication, WebSocket
+  connectivity, AND actual live tick reception are all now `REAL
+  PROVIDER / VERIFIED` (entry #45's connectivity check, closed out by
+  the 2026-09-15 full-session market-hours validation — 322 real bars).
+  Trading-signal generation under that real data, and everything
+  downstream of a signal (prediction recording, resolution, cost-
+  adjusted paper execution), remain `SIMULATED / VERIFIED` only — the
+  live session produced zero signals, so those stages were not exercised
+  against real data end-to-end.
 - **`MockBrokerAdapter`**: not a broker connection at all — delegates
   entirely to `PaperTradingEngine`. The name describes a Protocol-
   conformance rehearsal, not simulated broker access.
@@ -188,8 +199,8 @@ collapsing these into one word:
 | Axis | Status |
 |---|---|
 | Live-capable market data | YES — real `websocket-client` transport, real Dhan REST client |
-| Live-verified market data (REST auth + WebSocket connectivity) | **YES — new this mission**, real HTTP 200 + real `CONNECTED` state against a real Dhan account (entry #45) |
-| Live-verified market data (actual tick reception) | **NO** — the one real connectivity test ran outside NSE market hours; needs a re-run during real trading hours |
+| Live-verified market data (REST auth + WebSocket connectivity) | **YES**, real HTTP 200 + real `CONNECTED` state against a real Dhan account (entry #45) |
+| Live-verified market data (actual tick reception) | **YES — 2026-09-15**, 322 real 1-minute bars for RELIANCE.NS across a full ~5.5-hour NSE session (`docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-15.md`), including a real, live stale-tick event correctly suppressed |
 | Paper execution | YES, real, the sole exercised execution path |
 | Broker connectivity (read-only) | Underlying REST client proven live-working this mission; `DhanAccountReader`'s own specific methods not yet directly exercised |
 | Real broker order execution | **NO** — structurally, unconditionally disabled (`RealOrderPlacementDisabledError`), no bypass exists anywhere in the codebase |
@@ -199,10 +210,11 @@ collapsing these into one word:
 
 - **Paper**: **YES.**
 - **Broker-connected (data only, no orders)**: **YES**, for market data
-  and read-only account/fund/position access — REST authentication and
-  WebSocket connectivity now live-verified against a real account this
-  mission (entry #45); actual live tick reception and the specific
-  `DhanAccountReader` position/holding methods remain unverified.
+  and read-only account/fund/position access — REST authentication,
+  WebSocket connectivity, AND actual live tick reception are all now
+  live-verified against a real account (entry #45; 2026-09-15 full-
+  session validation). The specific `DhanAccountReader` position/holding
+  methods remain unverified.
 - **Real-money**: **NO.** Structurally impossible without a deliberate
   source-code change to remove `RealOrderPlacementDisabledError` and
   wire a real execution adapter into the pipeline — neither of which
@@ -346,7 +358,7 @@ make and did not make.
 | Capability | Implemented | Integrated | Tested | Externally Verified | Real | Safe | Production Ready | Evidence |
 |---|---|---|---|---|---|---|---|---|
 | Market data (Yahoo) | Yes | Yes | Yes | Yes (real provider, unofficial API) | Yes | Yes | Yes | Extensive |
-| Market data (Dhan WebSocket) | Yes | Yes | Yes (fake transport) | **REST auth + connectivity: Yes (this mission)**; tick reception: No | Yes (real library) | Yes | Connectivity live-verified; tick reception not | Cycles 21/22/23/28; entry #45 |
+| Market data (Dhan WebSocket) | Yes | Yes | Yes (fake transport) | **REST auth + connectivity + tick reception: all Yes** | Yes (real library) | Yes | Connectivity and tick reception both live-verified | Cycles 21/22/23/28; entry #45; 2026-09-15 session |
 | Indicators | Yes | Yes | Yes | N/A | Yes | Yes | Yes | Cycle 10 property tests |
 | Deterministic decision/risk engine | Yes | Yes | Yes | N/A | Yes | Yes, mutation-tested | Yes | Cycle 24 (17/17 mutants killed) |
 | Kill switch / circuit breakers | Yes | Yes | Yes | N/A | Yes | Yes, mutation-tested | Yes | Cycles 4/24/25 |
@@ -367,7 +379,8 @@ make and did not make.
 
 | Risk | Severity | Impact | Mitigation | Acceptable? |
 |---|---|---|---|---|
-| Dhan live tick reception never verified | MEDIUM (was: also REST/WebSocket connectivity, now closed) | Real-account tick-streaming behavior (real rate limits, real malformed frames, sustained-connection edge cases) unproven; REST auth + WebSocket connectivity ARE now live-verified (entry #45) | Extensive simulated-protocol testing; structurally cannot place real orders even if data misbehaves; a re-run during real market hours would close the remaining gap | Yes, for a paper-only deployment |
+| Live-generated trading signal, prediction recording, and cost-adjusted execution never exercised together against real market data | MEDIUM (was: tick reception itself, now closed 2026-09-15) | 322 real bars, real tick reception, real freshness enforcement (including one genuine live stale-tick event, correctly suppressed) are ALL now live-verified; zero trading signals occurred that session, so the downstream chain (prediction ledger -> resolution -> cost-adjusted P&L) has not yet been exercised end-to-end against a live-generated signal specifically | Mechanism independently verified via cached historical data and a clean-install smoke run (entries #40/#41/#48); structurally cannot place real orders even if a live signal does occur; further live sessions (ideally on a trending day, or a broader universe) would close this | Yes, for a paper-only deployment |
+| A real, unexplained ~15-minute Dhan tick-delivery gap occurred near market close (2026-09-15), with `state` remaining `CONNECTED` throughout (not a reported disconnect) | LOW-MEDIUM | If recurring, a gap like this would not be visible as a "disconnected" state on the dashboard/health check, only as an absence of new bars; the existing freshness guard safely suppressed the one late bar that arrived, so no incorrect trade could have resulted | Root cause undetermined (Dhan-side, out of this project's visibility); recommend instrumenting explicit bar-to-bar inter-arrival monitoring for future sessions, per `docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-15.md`'s own recommendation | Yes — safely absorbed by an existing control, disclosed rather than hidden |
 | No demonstrated trading edge | HIGH (to any capital-deployment decision), N/A to engineering safety | A live/paper deployment expecting profit would be unsupported by evidence | Verdict is surfaced live by the CLI itself, not hidden; `TRADING_STRATEGY_READINESS.md` states it explicitly across every relevant dimension | Yes, as long as no capital is deployed on this basis |
 | Dashboard has no authentication | LOW–MEDIUM if exposed beyond loopback | Unauthorized access to a locally-reachable dashboard | Documented single-operator/loopback threat model | Yes, for the stated deployment model only |
 | Clean install on an unusually deep Windows install path can hit a `langsmith`/`xxhash` `MAX_PATH` DLL-load failure | LOW | `ollama` reports DEGRADED via a DLL error instead of the normal "not reachable" message, and pytest's own plugin autoload can crash collection, ONLY when installed under an install path within a few characters of Windows' 260-char `MAX_PATH` limit | **Re-verified this mission with a genuine fresh install** (entry #48): root-caused to an unrelated `langsmith` transitive dependency, not this project's own code; the project's own real dev venv path (155 chars) is unaffected; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` works around it for tests specifically | Yes -- avoid extremely deep install paths; not a code defect |
@@ -383,14 +396,16 @@ not assumed from prior documentation:
 
 - **"Live trading"**: never claimed as enabled. Correctly described
   throughout as structurally disabled.
-- **"Real-time"**: connectivity (REST auth + WebSocket) is now
-  live-verified for Dhan (entry #45), but actual real-time TICK DATA
-  flowing through this system has still never been observed end-to-end
-  — the one connectivity test ran outside market hours. This precise
-  distinction (connectivity ≠ tick reception) is stated explicitly
-  rather than letting a passing connectivity check imply more than it
-  proved. Yahoo data is correctly described as delayed/EOD-or-intraday-
-  batch, not tick-real-time.
+- **"Real-time"**: connectivity (REST auth + WebSocket) AND actual live
+  tick data flowing through the full bar-construction/freshness pipeline
+  are both now live-verified for Dhan (entry #45; 2026-09-15 session,
+  322 real bars). What is NOT yet claimed: a live-generated trading
+  signal flowing all the way through prediction recording, resolution,
+  and cost-adjusted execution — that specific chain has not occurred
+  against real data yet (zero signals in the one live session run so
+  far), and this report does not claim otherwise. Yahoo data is
+  correctly described as delayed/EOD-or-intraday-batch, not
+  tick-real-time.
 - **"AI-powered"**: the LLM/RAG layer is real and integrated, but
   verified (via zero-diff sacred files across the entire campaign) to
   have no path into risk, sizing, execution, or kill-switch decisions —
@@ -440,9 +455,11 @@ not assumed from prior documentation:
    #44 and the remaining-risk table above (now removed from that table).
 8. GST and stamp duty are not modeled even in the `india_nse_intraday_
    2026` cost preset — a documented, disclosed approximation.
-9. Live Dhan tick reception has not been verified end-to-end — REST
-   authentication and WebSocket connectivity are now live-verified
-   (entry #45), but the one real test ran outside market hours.
+9. ~~Live Dhan tick reception has not been verified end-to-end~~ —
+   **CLOSED 2026-09-15**: a full-session market-hours `paper-live
+   --source dhan` run processed 322 real bars across ~5.5 hours,
+   including a real, live stale-tick event correctly suppressed by the
+   freshness guard. See `docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-15.md`.
 10. Installing this project at an unusually deep Windows filesystem path
     (within a few characters of the 260-char `MAX_PATH` limit) can
     trigger a DLL-load failure in an unrelated `langsmith` transitive
@@ -451,6 +468,28 @@ not assumed from prior documentation:
     this mission (entry #48) as NOT a defect in this project's own code
     — the project's own real install path is well under the limit and
     unaffected; disclosed as installation guidance.
+11. A prediction recorded by the live `paper-live --record-predictions`
+    path, its automatic outcome resolution, and cost-adjusted paper
+    execution have never yet occurred together against a real,
+    live-generated trading signal — the one full-session live validation
+    run (2026-09-15) produced zero signals (a genuine null result, not a
+    failure). The underlying mechanism is separately verified via cached
+    historical data and a clean-install smoke run (entries #40/#41/#48).
+12. A real, unexplained ~15-minute Dhan tick-delivery gap occurred near
+    market close during the 2026-09-15 session, with the feed's own
+    reported `state` remaining `CONNECTED` throughout (not a reported
+    disconnect). Safely absorbed by the existing freshness guard (the
+    one late bar that arrived was correctly suppressed, not traded on);
+    root cause undetermined (Dhan-side, outside this project's
+    visibility). See that report's own dedicated section and
+    recommendation.
+13. Python's own stdout block-buffering, when `paper-live`'s output is
+    redirected to a file (the only practical way to run an unattended
+    multi-hour session), can hide live progress for up to roughly two
+    hours before a natural flush — found and fixed live, this is an
+    invocation-time concern (`PYTHONUNBUFFERED=1` / `python -u`), not an
+    application defect; documented as the correct operational practice
+    for any future long-running, log-redirected live session.
 
 None of the above represent unsafe behavior. Live order execution
 remains structurally blocked; the deterministic risk/decision core is
@@ -462,10 +501,10 @@ a real fix, a regression test, and mutation-test evidence.
 ## Remaining external dependencies
 
 - Dhan credentials became available in this environment for the first
-  time this mission, and REST authentication + WebSocket connectivity
-  are now live-verified (entry #45) — but live tick reception is still
-  unverified, and there is no guarantee these credentials remain valid
-  or present in any future environment.
+  time this mission, and REST authentication, WebSocket connectivity,
+  AND actual live tick reception are all now live-verified (entry #45;
+  2026-09-15 full-session validation) — but there is no guarantee these
+  credentials remain valid or present in any future environment.
 - Yahoo Finance's continued availability and rate limits (unofficial,
   free-tier API) remain an external dependency with no official
   NSE/BSE/SEBI alternative. A real, previously-undetected Yahoo Finance
@@ -482,7 +521,7 @@ a real fix, a regression test, and mutation-test evidence.
 
 **Live trading: DISABLED, structurally, by design.**
 **Can it place a real order: NO.**
-**Is market data connectivity live-verified: YES for REST auth + WebSocket connection (new this mission); NO for actual tick reception.**
+**Is market data connectivity live-verified: YES — REST auth, WebSocket connection, AND actual live tick reception (322 real bars, ~5.5-hour NSE session, 2026-09-15).**
 **Is it profitable: CURRENT EVIDENCE IS NEGATIVE.**
 **Engineering readiness: READY.**
 **Safety readiness: READY.**
@@ -494,12 +533,19 @@ adversarially-hardened **paper-trading research platform**, now with a
 real, verified, end-to-end bridge from real-time signal generation
 through immutable prediction recording, automatic outcome resolution,
 and statistical evaluation — machinery this mission built, fixed real
-defects in, and proved generalizes correctly, but has not yet been
-exercised in a real, extended paper-trading session. It is not, and
-does not claim to be, a demonstrated source of trading profit. The
-distinction between those two things — engineering quality and trading
-edge — is the single most important fact in this report, and both this
-campaign's original final cycle sequence (27–35) and this mission's own
-work existed specifically to make sure that distinction was never
-allowed to blur. See `TRADING_STRATEGY_READINESS.md` for the complete,
-dimension-by-dimension statement of this same fact.
+defects in, proved generalizes correctly, and has now been run for a
+full real NSE market session (322 real bars, one clean restart, one
+clean recovery from an abrupt kill, one real stale-tick event safely
+suppressed). What has NOT yet happened: a live-generated trading signal
+flowing through that full chain — the one live session run so far
+produced zero signals, an honest null result, not a failure, and not
+grounds to claim more than was observed. It is not, and does not claim
+to be, a demonstrated source of trading profit. The distinction between
+those two things — engineering quality and trading edge — is the single
+most important fact in this report, and this campaign's original final
+cycle sequence (27–35), this mission's own work, and the 2026-09-15
+live session all existed specifically to make sure that distinction was
+never allowed to blur. See `TRADING_STRATEGY_READINESS.md` and
+`docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-15.md` for the complete,
+dimension-by-dimension and session-by-session statements of this same
+fact.
