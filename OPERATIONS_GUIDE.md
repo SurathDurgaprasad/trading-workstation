@@ -55,6 +55,54 @@ slot's worth of work per tick — a second due slot at the same tick is
 simply picked up on the next one. If you rely on overlapping windows,
 put the higher-priority slot first in your YAML.
 
+## Running a multi-symbol `paper-live` fleet
+
+`paper-live` itself only ever runs ONE symbol per process — `CriticGate`
+is symbol-bound (documented "one instance per (symbol, interval)"), and
+`LiveSimPipeline` holds exactly one `critic_gate` object applied to
+every signal, so a single process handling multiple symbols with the
+critic enabled would silently evaluate every signal against the wrong
+symbol's scanner evidence. The production mechanism for running several
+symbols at once is therefore N independent `paper-live` processes, and
+`fleet-supervise` is the supported way to launch and watch all of them
+at once instead of opening N terminal windows by hand:
+
+```bash
+python main.py fleet-supervise --watchlist-file market_data/watchlists/starter_nse.yaml \
+    --runtime-dir runtime --source dhan --max-restarts 2
+```
+
+Each symbol gets its own isolated `runtime/{SYMBOL}/{paper.db,state.db,
+predictions.db,logs/}` tree (`live/runtime_layout.py`) — a manual
+`--db`/`--state-db`/`--predictions-db` typo across 15 hand-typed
+commands can no longer silently mix two symbols' state, because every
+store refuses to start against another symbol's data
+(`CrossSymbolContaminationError`). `fleet-supervise` prints one status
+line per symbol per poll (`RUNNING` / `GAP_DETECTED` / `EXITED_CLEAN` /
+`EXITED_ERROR`) and bounds automatic restarts — a worker that keeps
+crashing is reported as `EXHAUSTED` for a human to look at, never
+retried forever. Ctrl+C stops the whole fleet: on Windows/POSIX this is
+already broadcast to every worker in the same console, so each exits
+through its own existing shutdown path; `fleet-supervise` only force-
+kills a worker that does not exit within 30s on its own.
+
+To run against a plain comma-separated list instead of a watchlist
+file: `--symbols RELIANCE.NS,TCS.NS,...`. `--source mock` (instead of
+the default `dhan`) is useful for a dry rehearsal with no live
+dependency, exactly like `paper-live --source mock` itself.
+
+After (or during) a session, read a consolidated report across every
+symbol's isolated stores, read-only:
+
+```bash
+python main.py fleet-summary --watchlist-file market_data/watchlists/starter_nse.yaml --runtime-dir runtime
+```
+
+This prints Symbol / Bars / Fresh / Signals / Trades / Net P&L plus a
+TOTAL row (`live/fleet_summary.py`). A symbol that never ran (or hasn't
+started yet) shows up with all-zero counts and a `[missing log/db]`
+flag rather than being silently omitted.
+
 ## Checking on it
 
 ```bash

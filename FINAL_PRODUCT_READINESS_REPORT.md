@@ -286,29 +286,42 @@ This conclusion is preserved unchanged.
 **READY.**
 
 35 adversarial hardening cycles, plus a further "real-time strategy
-validation" mission (entries #40-#48); 2421 passing tests (final
-regression, 0 failed); a 110-row executable failure-injection matrix; 46
-documented, evidence-graded failure-mode entries; systematic mutation
-testing throughout, including this mission's own new work (period-
-resolution logic, cost-model wiring, the bounded indicator buffer, and
-the crash-atomicity tests all mutation-tested and confirmed-killed); two
-instances in the earlier campaign where its own new tests were
-themselves caught as initially too weak and fixed before being trusted;
-real OS-subprocess and multi-thread concurrency proof for the
-highest-value locking primitives; a bounded, measured soak test finding
-no leak (one previously-accepted limitation from that soak test —
-`live/pipeline.py`'s unbounded indicator-history buffer — is now a
-genuine fix this mission, not a documented limitation: bounded to 1000
-bars, proven numerically equivalent to unbounded history, benchmarked
-3.10x faster / 74.4% less peak memory over 4000 bars with throughput
-that stabilizes instead of degrading — see `FINAL_FAILURE_MODE_
-ANALYSIS.md` entry #44). All 8 sacred live-execution-safety files
-(`live/dhan/broker_adapter.py`, `live/broker.py`, `live/pipeline.py`,
-`decision_engine/rules.py`, `decision_engine/engine.py`,
-`risk/engine.py`, `risk/sizing.py`, `main.py`) reviewed line-by-line
-after every cycle across both the original campaign and this mission;
-every diff to any of them additive, opt-in-gated, and reviewed before
-commit.
+validation" mission (entries #40-#48) and a "multi-symbol hardening
+pass" mission preparing the first 15-symbol live-paper session (entries
+#49-#53); 2500 passing tests (final regression, 0 failed); a 110-row
+executable failure-injection matrix; 53 documented, evidence-graded
+failure-mode entries; systematic mutation testing throughout, including
+this mission's own new work (period-resolution logic, cost-model
+wiring, the bounded indicator buffer, and the crash-atomicity tests all
+mutation-tested and confirmed-killed) and the multi-symbol hardening
+pass's own six real defects (a non-atomic Dhan instrument-map cache
+write, a Windows `os.replace()` concurrency bug, an environment-
+inheritance bug that broke a real subprocess launch, a silent missing-
+log-file gap, an undercounted bar count, and a silent CLI-subcommand
+misrouting bug — each found via a real test, fixed, and mutation-
+confirmed); two instances in the earlier campaign where its own new
+tests were themselves caught as initially too weak and fixed before
+being trusted; real OS-subprocess and multi-thread concurrency proof
+for the highest-value locking primitives, now extended to the Dhan
+instrument-map cache's own concurrent-download path; a bounded,
+measured soak test finding no leak (one previously-accepted limitation
+from that soak test — `live/pipeline.py`'s unbounded indicator-history
+buffer — is now a genuine fix, not a documented limitation: bounded to
+1000 bars, proven numerically equivalent to unbounded history,
+benchmarked 3.10x faster / 74.4% less peak memory over 4000 bars with
+throughput that stabilizes instead of degrading — see
+`FINAL_FAILURE_MODE_ANALYSIS.md` entry #44). All 8 sacred
+live-execution-safety files (`live/dhan/broker_adapter.py`,
+`live/broker.py`, `live/pipeline.py`, `decision_engine/rules.py`,
+`decision_engine/engine.py`, `risk/engine.py`, `risk/sizing.py`,
+`main.py`) reviewed line-by-line after every cycle across both the
+original campaign and every mission since; `live/pipeline.py` in
+particular remained a hard zero-diff through the entire multi-symbol
+hardening pass, per that mission's own explicit constraint (multi-
+symbol operation is achieved via N independent single-symbol processes,
+never a single process modified to juggle several symbols — see entry
+#51); every diff to any of them additive, opt-in-gated, and reviewed
+before commit.
 
 ## 10. Safety readiness
 

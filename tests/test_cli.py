@@ -6,6 +6,8 @@ from main import (
     run_cache_status_command,
     run_decide_command,
     run_evaluate_command,
+    run_fleet_summary_command,
+    run_fleet_supervise_command,
     run_hypothesis_registry_command,
     run_learn_command,
     run_live_sim_command,
@@ -1381,6 +1383,268 @@ def test_run_paper_live_command_auto_approve_end_to_end(tmp_path, capsys):
     assert "SIGNAL DETECTED" in output
     assert "-> APPROVED" in output
     assert "This is still simulated trading. No real broker is connected. No real order can be placed." in output
+
+
+@pytestmark_paper_live
+def test_run_paper_live_command_runtime_dir_derives_the_documented_layout(tmp_path, capsys):
+    """Real-time strategy validation mission, multi-symbol hardening pass
+    -- proves --runtime-dir through the REAL CLI entrypoint (not just
+    live/runtime_layout.py's own unit tests): the exact
+    {runtime-dir}/{symbol}/{paper.db,state.db,predictions.db,logs/}
+    layout is created and genuinely used, real trading path unaffected."""
+    runtime_dir = tmp_path / "runtime"
+    args = parse_args([
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--runtime-dir", str(runtime_dir),
+        "--record-predictions", "--max-bars", "70", "--auto-approve", "--no-ai-explanation",
+        "--freshness-multiplier", "1000000",
+    ])
+    run_paper_live_command(args)
+    output = capsys.readouterr().out
+
+    symbol_dir = runtime_dir / "AAPL"
+    assert f"RUNTIME DIR: {symbol_dir}" in output
+    assert (symbol_dir / "paper.db").exists()
+    assert (symbol_dir / "state.db").exists()
+    assert (symbol_dir / "predictions.db").exists()
+    assert (symbol_dir / "logs").is_dir()
+    assert "SIGNAL DETECTED" in output
+    assert "-> APPROVED" in output
+
+
+def test_run_paper_live_command_runtime_dir_requires_symbol():
+    args = parse_args(["paper-live", "--runtime-dir", "runtime", "--interval", "1d"])
+    with pytest.raises(SystemExit, match="requires --symbol"):
+        run_paper_live_command(args)
+
+
+def test_run_paper_live_command_runtime_dir_rejects_combination_with_explicit_db(tmp_path):
+    args = parse_args([
+        "paper-live", "--symbol", "AAPL", "--runtime-dir", str(tmp_path / "runtime"),
+        "--db", str(tmp_path / "paper.db"), "--interval", "1d",
+    ])
+    with pytest.raises(SystemExit, match="cannot be combined"):
+        run_paper_live_command(args)
+
+
+@pytestmark_paper_live
+def test_run_paper_live_command_refuses_to_start_against_a_contaminated_store(tmp_path, capsys):
+    """The real, mission-required safety guard: a store that already
+    holds another symbol's trades must refuse to be used by a DIFFERENT
+    symbol's paper-live process -- proven against the real PaperStore
+    the CLI itself opens, not a mock."""
+    from datetime import datetime
+
+    from paper.models import Position, PositionStatus
+    from paper.store import PaperStore
+
+    db_path = tmp_path / "paper.db"
+    seed_store = PaperStore(db_path)
+    seed_store.save_position(Position(
+        position_id="pos-1", symbol="TCS.NS", status=PositionStatus.OPEN,
+        signal_id="sig-1", entry_order_id="order-1", entry_fill_id="fill-1",
+        quantity=1, entry_price=100.0, entry_time=datetime(2024, 1, 1),
+        stop_price=95.0, target_price=110.0,
+    ))
+    seed_store.close()
+
+    args = parse_args([
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--db", str(db_path), "--state-db", str(tmp_path / "state.db"),
+        "--max-bars", "5", "--auto-approve", "--no-ai-explanation",
+    ])
+    from live.runtime_layout import CrossSymbolContaminationError
+
+    with pytest.raises(CrossSymbolContaminationError, match="TCS.NS"):
+        run_paper_live_command(args)
+
+
+@pytestmark_paper_live
+def test_run_paper_live_command_refuses_to_start_against_a_contaminated_predictions_store(tmp_path):
+    """Same guard, the predictions-db path: a predictions.db that
+    already holds another symbol's predictions must refuse a DIFFERENT
+    symbol's --record-predictions session."""
+    from datetime import datetime, timezone
+
+    from decision_engine.models import DecisionLabel
+    from predictions.models import PredictionRecord
+    from predictions.store import PredictionStore
+
+    predictions_db = tmp_path / "predictions.db"
+    seed_store = PredictionStore(predictions_db)
+    seed_store.save_prediction(PredictionRecord(
+        prediction_id=PredictionRecord.new_id(), decision_id="dec-1", symbol="TCS.NS",
+        created_at=datetime.now(timezone.utc), label=DecisionLabel.BUY,
+        entry_price=100.0, stop_price=95.0, target_price=110.0, entry_time=datetime(2024, 1, 2),
+        horizon_bars=20, interval="1d",
+    ))
+    seed_store.close()
+
+    args = parse_args([
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--db", str(tmp_path / "paper.db"), "--state-db", str(tmp_path / "state.db"),
+        "--record-predictions", "--predictions-db", str(predictions_db),
+        "--max-bars", "5", "--auto-approve", "--no-ai-explanation",
+    ])
+    from live.runtime_layout import CrossSymbolContaminationError
+
+    with pytest.raises(CrossSymbolContaminationError, match="TCS.NS"):
+        run_paper_live_command(args)
+
+
+@pytestmark_paper_live
+def test_run_paper_live_command_wires_the_gap_monitor_correctly(tmp_path, monkeypatch, capsys):
+    """Real-time strategy validation mission, multi-symbol hardening pass
+    -- integration/wiring test for the new BarGapMonitor plumbing in
+    _run_paper_live_loop. BarGapMonitor's own timing logic is already
+    thoroughly unit-tested in isolation (tests/test_gap_monitor.py,
+    mutation-tested); this proves the CLI loop actually calls .check()
+    on every iteration and .record_new_bar() whenever a genuine new bar
+    was processed, and prints the gap line when check() reports one --
+    without needing to force a real multi-minute wall-clock wait."""
+    import live.gap_monitor as gap_monitor_module
+    from datetime import timedelta
+
+    from live.gap_monitor import GapStatus
+
+    calls = {"check": 0, "record_new_bar": 0}
+
+    class _FakeGapMonitor:
+        def __init__(self, *, expected_interval):
+            self.expected_interval = expected_interval
+
+        def check(self, *, now):
+            calls["check"] += 1
+            if calls["check"] == 3:  # force exactly one gap report, deterministically
+                return GapStatus(elapsed=timedelta(seconds=999), threshold=timedelta(seconds=180), is_new=True)
+            return None
+
+        def record_new_bar(self, *, now):
+            calls["record_new_bar"] += 1
+
+    monkeypatch.setattr(gap_monitor_module, "BarGapMonitor", _FakeGapMonitor)
+
+    args = parse_args([
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--db", str(tmp_path / "paper.db"), "--state-db", str(tmp_path / "state.db"),
+        "--max-bars", "10", "--auto-approve", "--no-ai-explanation", "--freshness-multiplier", "1000000",
+    ])
+    run_paper_live_command(args)
+    output = capsys.readouterr().out
+
+    assert calls["check"] >= 3, "gap_monitor.check() must be called on every loop iteration, including before the first bar"
+    assert calls["record_new_bar"] == 10, "gap_monitor.record_new_bar() must be called exactly once per genuinely new bar processed"
+    assert "[GAP DETECTED]" in output
+    assert "999s" in output
+    assert "expected within ~180s" in output
+    assert "not necessarily disconnected" in output
+
+
+# --- fleet-supervise -- real-time strategy validation mission, multi-symbol hardening pass -----
+
+
+def test_fleet_supervise_subcommand_is_recognized_without_the_analyze_default_prefix():
+    """Regression test for a real bug found while implementing this
+    subcommand: parse_args() prepends the implicit `analyze` default
+    subcommand whenever argv[0] is not in the module-level
+    _KNOWN_COMMANDS tuple -- adding a NEW subparser without also adding
+    its name to that tuple silently mis-parses every invocation (e.g.
+    `fleet-supervise --help` printed `analyze`'s help instead of
+    fleet-supervise's own, with no error at all)."""
+    args = parse_args(["fleet-supervise", "--symbols", "AAPL", "--runtime-dir", "runtime"])
+    assert args.command == "fleet-supervise"
+    assert args.symbols == "AAPL"
+
+
+def test_fleet_supervise_subcommand_defaults():
+    args = parse_args(["fleet-supervise", "--symbols", "AAPL,MSFT", "--runtime-dir", "runtime"])
+    assert args.watchlist_file is None
+    assert args.source == "dhan", "the only real production value -- never silently mock"
+    assert args.interval == "1m"
+    assert args.cost_model == "india_nse_intraday_2026", "a multi-symbol NSE session must never silently use the generic zero-cost placeholder"
+    assert args.evaluate_every_n_bars == 20
+    assert args.max_bars is None
+    assert args.max_restarts == 2
+    assert args.poll_interval_seconds == 30.0
+    assert args.max_polls is None
+
+
+def test_run_fleet_supervise_command_runs_two_mock_workers_to_clean_completion(tmp_path, capsys):
+    """Real end-to-end test: launches two REAL `paper-live` subprocesses
+    (one per symbol, --source mock, no live dependency), supervises them
+    to natural completion, and verifies the isolated runtime-dir layout
+    (live/runtime_layout.py) came out right for BOTH symbols -- proving
+    the fleet-supervise orchestration itself (argument wiring, process
+    launch, health polling, clean shutdown) works, not just its
+    individual pieces in isolation (already covered by
+    tests/test_fleet_supervisor.py)."""
+    args = parse_args([
+        "fleet-supervise", "--symbols", "AAPL,MSFT", "--runtime-dir", str(tmp_path),
+        "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1", "--max-polls", "10",
+    ])
+    run_fleet_supervise_command(args)
+    output = capsys.readouterr().out
+
+    assert "FLEET SUPERVISE: 2 symbol(s)" in output
+    assert "every worker has exited" in output
+    assert "all workers stopped" in output
+    assert "EXITED_ERROR" not in output
+    assert "EXHAUSTED" not in output
+
+    for symbol in ("AAPL", "MSFT"):
+        symbol_dir = tmp_path / symbol
+        assert (symbol_dir / "paper.db").exists()
+        assert (symbol_dir / "state.db").exists()
+        assert (symbol_dir / "predictions.db").exists()
+        log_text = (symbol_dir / "logs" / "session.log").read_text(encoding="utf-8", errors="replace")
+        assert "bar#" in log_text
+
+
+def test_run_fleet_supervise_command_requires_symbols_or_watchlist_file(tmp_path):
+    args = parse_args(["fleet-supervise", "--runtime-dir", str(tmp_path)])
+    with pytest.raises(SystemExit):
+        run_fleet_supervise_command(args)
+
+
+def test_fleet_summary_subcommand_is_recognized_without_the_analyze_default_prefix():
+    """Same regression class as fleet-supervise's own equivalent test --
+    a new subparser silently gets misrouted through the implicit
+    `analyze` default unless its name is also added to the module-level
+    _KNOWN_COMMANDS tuple."""
+    args = parse_args(["fleet-summary", "--symbols", "AAPL", "--runtime-dir", "runtime"])
+    assert args.command == "fleet-summary"
+
+
+def test_run_fleet_summary_command_reports_a_real_fleet_supervise_session(tmp_path, capsys):
+    """Real end-to-end: runs an actual two-symbol fleet-supervise
+    session (mock source), then proves fleet-summary reads the SAME
+    runtime-dir back correctly, including a THIRD symbol that never
+    ran (must appear with all-zero counts and a [missing log/db] flag,
+    not be silently dropped or raise)."""
+    supervise_args = parse_args([
+        "fleet-supervise", "--symbols", "AAPL,MSFT", "--runtime-dir", str(tmp_path),
+        "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1", "--max-polls", "10",
+    ])
+    run_fleet_supervise_command(supervise_args)
+    capsys.readouterr()  # discard fleet-supervise's own output
+
+    summary_args = parse_args(["fleet-summary", "--symbols", "AAPL,MSFT,RELIANCE.NS", "--runtime-dir", str(tmp_path)])
+    run_fleet_summary_command(summary_args)
+    output = capsys.readouterr().out
+
+    assert "FLEET SUMMARY: runtime-dir=" in output
+    assert "3 symbol(s)" in output
+    assert "AAPL" in output
+    assert "MSFT" in output
+    assert "RELIANCE.NS" in output
+    assert "[missing log/db]" in output
+    assert "TOTAL" in output
+
+
+def test_run_fleet_summary_command_requires_symbols_or_watchlist_file(tmp_path):
+    args = parse_args(["fleet-summary", "--runtime-dir", str(tmp_path)])
+    with pytest.raises(SystemExit):
+        run_fleet_summary_command(args)
 
 
 @pytestmark_paper_live

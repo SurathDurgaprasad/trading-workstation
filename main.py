@@ -46,7 +46,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "evaluate-forecasts", "learn", "review", "shadow-run", "schedule", "universe", "regime", "daily-report", "experiment", "hypothesis-registry", "cache-status", "readiness-check", "health")
+_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "fleet-supervise", "fleet-summary", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "evaluate-forecasts", "learn", "review", "shadow-run", "schedule", "universe", "regime", "daily-report", "experiment", "hypothesis-registry", "cache-status", "readiness-check", "health")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -980,16 +980,95 @@ def _build_critic_gate_for_paper_live(args: argparse.Namespace):
     )
 
 
+class _TeeStream:
+    """Real-time strategy validation mission, multi-symbol hardening
+    pass: writes every .write() to two underlying streams. Used ONLY to
+    mirror a --runtime-dir paper-live session's console output into its
+    own {runtime-dir}/{symbol}/logs/session.log -- discovered as a real
+    gap while building Item 4's fleet summary report: --runtime-dir
+    already created a logs/ directory (matching this mission's own
+    documented layout) but nothing ever wrote into it unless the
+    process happened to be launched through live/fleet_supervisor.py's
+    own subprocess-output redirection. A human manually running
+    `paper-live --runtime-dir ...` in their own terminal -- a
+    perfectly normal way to run one of the fleet's workers -- got an
+    empty logs/ directory and no gap/health/summary tooling could read
+    anything back. Fixing it here makes it work regardless of how the
+    process was started."""
+
+    def __init__(self, *streams) -> None:
+        self._streams = streams
+
+    def write(self, data: str) -> int:
+        for stream in self._streams:
+            stream.write(data)
+        return len(data)
+
+    def flush(self) -> None:
+        for stream in self._streams:
+            stream.flush()
+
+
 def run_paper_live_command(args: argparse.Namespace) -> None:
+    """Thin wrapper: when --runtime-dir is given, mirrors this session's
+    entire console output into its own logs/session.log (see
+    _TeeStream) before delegating to the real implementation -- kept
+    separate so the tee/restore logic (needs a try/finally around EVERY
+    return path, including the early --kill-switch/--reset-kill-switch
+    returns) doesn't have to be threaded through the whole function
+    body below."""
+    if not args.runtime_dir:
+        _run_paper_live_command_body(args)
+        return
+
+    from live.runtime_layout import ensure_symbol_runtime_dirs, symbol_runtime_paths
+
+    if not args.symbol:
+        raise SystemExit("--runtime-dir requires --symbol (it derives a per-SYMBOL runtime directory).")
+    paths = symbol_runtime_paths(args.runtime_dir, args.symbol)
+    ensure_symbol_runtime_dirs(paths)
+    original_stdout = sys.stdout
+    with open(paths.logs_dir / "session.log", "a", encoding="utf-8") as log_file:
+        sys.stdout = _TeeStream(original_stdout, log_file)
+        try:
+            _run_paper_live_command_body(args)
+        finally:
+            sys.stdout = original_stdout
+
+
+def _run_paper_live_command_body(args: argparse.Namespace) -> None:
     from backtesting.costs import CostModel
     from live.freshness import FreshnessPolicy
     from live.pipeline import DEFAULT_APPROVAL_TIMEOUT_SECONDS, LiveSimPipeline
+    from live.runtime_layout import ensure_symbol_runtime_dirs, symbol_runtime_paths, verify_no_cross_symbol_contamination
     from live.state_store import LiveStateStore
     from paper.engine import PaperTradingEngine
     from paper.reconciliation import reconcile
     from paper.store import PaperStore
 
-    state_db_path = args.state_db or DEFAULT_LIVE_STATE_DB_PATH
+    # Real-time strategy validation mission, multi-symbol hardening pass:
+    # --runtime-dir derives --db/--state-db/--predictions-db automatically
+    # as {runtime-dir}/{symbol}/... (see live/runtime_layout.py's own
+    # module docstring) -- removes the risk of a manually-typed path
+    # mismatch across tomorrow's multi-symbol fleet. Mutually exclusive
+    # with explicitly passing any of the three paths it would otherwise
+    # derive: allowing both would silently let one override the other
+    # with no clear rule about which wins, exactly the ambiguity this
+    # flag exists to eliminate.
+    runtime_paths = None
+    if args.runtime_dir:
+        if not args.symbol:
+            raise SystemExit("--runtime-dir requires --symbol (it derives a per-SYMBOL runtime directory).")
+        if args.db or args.state_db or args.predictions_db:
+            raise SystemExit(
+                "--runtime-dir cannot be combined with --db/--state-db/--predictions-db -- it derives all "
+                "three automatically. Pass only --runtime-dir, or the three paths explicitly without it."
+            )
+        runtime_paths = symbol_runtime_paths(args.runtime_dir, args.symbol)
+        ensure_symbol_runtime_dirs(runtime_paths)
+        print(f"RUNTIME DIR: {runtime_paths.root}")
+
+    state_db_path = runtime_paths.state_db if runtime_paths else (args.state_db or DEFAULT_LIVE_STATE_DB_PATH)
     state_store = LiveStateStore(state_db_path)
 
     if args.kill_switch:
@@ -1007,8 +1086,20 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
 
     _run_startup_gate(command_name="paper-live")
 
-    db_path = args.db or DEFAULT_LIVE_SIM_DB_PATH
+    db_path = runtime_paths.paper_db if runtime_paths else (args.db or DEFAULT_LIVE_SIM_DB_PATH)
     store = PaperStore(db_path)
+    # Real-time strategy validation mission, multi-symbol hardening pass:
+    # "startup cannot accidentally reuse another symbol's DB/state" --
+    # catches a manual --db typo, a --runtime-dir mixup, or a copy-pasted
+    # command where one flag was not updated, BEFORE any bar is
+    # processed. Cheap (a per-symbol store's own trade/position/order
+    # count is small) and applies regardless of whether --runtime-dir was
+    # used -- the underlying risk (this store secretly belongs to another
+    # symbol) is the same either way.
+    verify_no_cross_symbol_contamination(
+        expected_symbol=args.symbol,
+        observed_symbols={t.symbol for t in store.list_trades()} | {p.symbol for p in store.list_positions()} | {o.symbol for o in store.list_pending_orders()},
+    )
     # Phase 8 fix (real-time strategy validation mission): this is the
     # command the whole mission is centered on, and it previously always
     # defaulted to CostModel()'s generic placeholder here -- ZERO STT/
@@ -1080,8 +1171,13 @@ def run_paper_live_command(args: argparse.Namespace) -> None:
         if args.record_predictions:
             from predictions.store import PredictionStore
 
-            prediction_store = PredictionStore(args.predictions_db or DEFAULT_PREDICTIONS_DB_PATH)
-            print(f"PREDICTIONS: recording to {args.predictions_db or DEFAULT_PREDICTIONS_DB_PATH} (horizon={args.prediction_horizon_bars} bars)")
+            predictions_db_path = runtime_paths.predictions_db if runtime_paths else (args.predictions_db or DEFAULT_PREDICTIONS_DB_PATH)
+            prediction_store = PredictionStore(predictions_db_path)
+            verify_no_cross_symbol_contamination(
+                expected_symbol=args.symbol,
+                observed_symbols={p.symbol for p in prediction_store.list_predictions()},
+            )
+            print(f"PREDICTIONS: recording to {predictions_db_path} (horizon={args.prediction_horizon_bars} bars)")
             if args.evaluate_every_n_bars > 0:
                 # Phase C: a SEPARATE MarketDataProvider from the live bar
                 # feed above -- evaluate_pending_predictions fetches
@@ -1127,9 +1223,35 @@ def _run_paper_live_loop(
     args: argparse.Namespace, pipeline, engine, store, status_label: str, processed: int,
     *, prediction_store=None, evaluation_provider=None,
 ) -> int:
+    from datetime import datetime, timezone
+
+    from live.freshness import interval_to_timedelta
+    from live.gap_monitor import BarGapMonitor
+
+    # Real-time strategy validation mission, multi-symbol hardening pass:
+    # a real, live-observed ~15-minute Dhan tick-delivery gap (2026-09-15
+    # session, docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-15.md) occurred
+    # with the feed's own state remaining CONNECTED throughout -- not a
+    # disconnect, so the existing FEED_DISCONNECTED message never fired,
+    # and nothing else surfaced the gap while it was happening (only
+    # reconstructable afterward from bar timestamps). Pure observability:
+    # never influences a trading decision, never gated behind a flag --
+    # interval_to_timedelta(args.interval) is already exercised via the
+    # SAME args.interval by freshness_policy above this loop, so if it
+    # were an invalid format the session would already have failed
+    # before reaching here.
+    gap_monitor = BarGapMonitor(expected_interval=interval_to_timedelta(args.interval))
+
     bars_since_last_evaluation = 0
     while args.max_bars is None or processed < args.max_bars:
         result = pipeline.process_next()
+        gap_status = gap_monitor.check(now=datetime.now(timezone.utc))
+        if gap_status is not None:
+            verb = "GAP DETECTED" if gap_status.is_new else "GAP ONGOING"
+            print(
+                f"\n[{args.symbol}] [{verb}] connected, no new bar for {gap_status.elapsed.total_seconds():.0f}s "
+                f"(expected within ~{gap_status.threshold.total_seconds():.0f}s) -- feed may be delayed, not necessarily disconnected."
+            )
         for expired_id in result.expired_signal_ids:
             print(f"\n[EXPIRED] signal {expired_id[:12]} -- approval window elapsed without a decision.")
 
@@ -1159,6 +1281,7 @@ def _run_paper_live_loop(
             continue  # feed alive, nothing new this poll -- not an error, don't spam output or count as a processed bar
 
         processed += 1
+        gap_monitor.record_new_bar(now=datetime.now(timezone.utc))
 
         if prediction_store is not None and evaluation_provider is not None and args.evaluate_every_n_bars > 0:
             bars_since_last_evaluation += 1
@@ -1211,6 +1334,122 @@ def _run_paper_live_loop(
         print(line)
 
     return processed
+
+
+# --------------------------------------------------------------------------
+# `fleet-supervise` — real-time strategy validation mission, multi-symbol
+# hardening pass: launches and supervises N INDEPENDENT `paper-live`
+# subprocesses, one per symbol. Pure orchestration -- imports nothing from
+# live/pipeline.py, decision_engine, risk, or critic; it only builds and
+# launches the SAME `paper-live` command a human would type, once per
+# symbol, via live/fleet_supervisor.py (see that module's own docstring for
+# why a single process is never used for more than one symbol: CriticGate
+# is documented "one instance per (symbol, interval)").
+# --------------------------------------------------------------------------
+
+
+def run_fleet_supervise_command(args: argparse.Namespace) -> None:
+    import signal
+    import time as time_module
+
+    from live.fleet_supervisor import WorkerHealth, format_fleet_status_line, launch_worker, poll_fleet_once, shutdown_fleet
+    from market_data.universe import MarketUniverse
+
+    if args.watchlist_file:
+        universe = MarketUniverse.from_yaml_file(args.watchlist_file)
+        symbols = universe.symbols
+    elif args.symbols:
+        symbols = [s for s in args.symbols.split(",") if s.strip()]
+    else:
+        print("fleet-supervise: one of --symbols or --watchlist-file is required.", file=sys.stderr)
+        sys.exit(2)
+    if not symbols:
+        print("fleet-supervise: the resolved symbol list is empty.", file=sys.stderr)
+        sys.exit(2)
+
+    extra_args = ["--max-bars", str(args.max_bars)] if args.max_bars is not None else None
+
+    def _relaunch(symbol: str, _next_restart_count: int):
+        handle = launch_worker(
+            symbol=symbol, runtime_dir=args.runtime_dir, source=args.source, interval=args.interval,
+            cost_model=args.cost_model, evaluate_every_n_bars=args.evaluate_every_n_bars, extra_args=extra_args,
+        )
+        handle.restarts = _next_restart_count
+        return handle
+
+    print(f"FLEET SUPERVISE: {len(symbols)} symbol(s), runtime-dir={args.runtime_dir}, max-restarts={args.max_restarts}")
+    print("Each symbol below runs as an INDEPENDENT `paper-live` subprocess -- see live/fleet_supervisor.py.")
+    print("PAPER ONLY. No real order can be placed by any worker this launches.")
+    print(", ".join(symbols))
+
+    handles = {}
+    for symbol in symbols:
+        handles[symbol] = _relaunch(symbol, 0)
+        print(f"  launched {symbol} (pid={handles[symbol].process.pid})")
+
+    stop_requested = False
+
+    def _handle_sigint(_signum, _frame):
+        nonlocal stop_requested
+        stop_requested = True
+        print(
+            "\nFLEET SUPERVISE: shutdown requested. On Windows/POSIX consoles this Ctrl+C is "
+            "already broadcast to every worker in this console's process group, so each one "
+            "exits through its OWN existing shutdown path -- this process now only waits for "
+            "them, with a bounded force-kill as a safety net if one does not exit in time."
+        )
+
+    previous_handler = signal.signal(signal.SIGINT, _handle_sigint)
+    try:
+        polls = 0
+        while args.max_polls is None or polls < args.max_polls:
+            if stop_requested:
+                break
+            time_module.sleep(args.poll_interval_seconds)
+            snapshot = poll_fleet_once(handles, max_restarts=args.max_restarts, relaunch=_relaunch)
+            for status in snapshot.statuses:
+                print(format_fleet_status_line(status))
+            if snapshot.restarted_symbols:
+                print(f"  RESTARTED: {', '.join(snapshot.restarted_symbols)}")
+            if snapshot.exhausted_symbols:
+                print(f"  EXHAUSTED (restart budget used up -- needs a human to look): {', '.join(snapshot.exhausted_symbols)}")
+            polls += 1
+            if all(status.health in (WorkerHealth.EXITED_CLEAN, WorkerHealth.EXITED_ERROR) for status in snapshot.statuses):
+                print("FLEET SUPERVISE: every worker has exited -- ending supervision loop.")
+                break
+    finally:
+        signal.signal(signal.SIGINT, previous_handler)
+        shutdown_fleet(handles)
+        print("FLEET SUPERVISE: all workers stopped.")
+
+
+# --------------------------------------------------------------------------
+# `fleet-summary` — real-time strategy validation mission, multi-symbol
+# hardening pass, Item 4: read-only consolidated report across every
+# symbol's isolated runtime-dir stores. Never launches a process, never
+# writes to any trading store.
+# --------------------------------------------------------------------------
+
+
+def run_fleet_summary_command(args: argparse.Namespace) -> None:
+    from live.fleet_summary import format_fleet_summary_table, summarize_fleet_session
+    from market_data.universe import MarketUniverse
+
+    if args.watchlist_file:
+        universe = MarketUniverse.from_yaml_file(args.watchlist_file)
+        symbols = universe.symbols
+    elif args.symbols:
+        symbols = [s for s in args.symbols.split(",") if s.strip()]
+    else:
+        print("fleet-summary: one of --symbols or --watchlist-file is required.", file=sys.stderr)
+        sys.exit(2)
+    if not symbols:
+        print("fleet-summary: the resolved symbol list is empty.", file=sys.stderr)
+        sys.exit(2)
+
+    summary = summarize_fleet_session(args.runtime_dir, symbols)
+    print(f"FLEET SUMMARY: runtime-dir={args.runtime_dir}, {len(symbols)} symbol(s)")
+    print(format_fleet_summary_table(summary))
 
 
 # --------------------------------------------------------------------------
@@ -3850,6 +4089,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     paper_live_parser.add_argument("--strategy", default="trend_momentum_baseline", help="Registered strategy name.")
     paper_live_parser.add_argument("--db", type=str, default=None, help=f"SQLite paper-trading journal path (default: {DEFAULT_LIVE_SIM_DB_PATH}).")
     paper_live_parser.add_argument("--state-db", type=str, default=None, help=f"SQLite pending-approval/kill-switch state path (default: {DEFAULT_LIVE_STATE_DB_PATH}).")
+    paper_live_parser.add_argument(
+        "--runtime-dir", type=str, default=None,
+        help=(
+            "Real-time strategy validation mission: if given, derives --db/--state-db/--predictions-db "
+            "and a logs/ directory automatically as {runtime-dir}/{symbol}/{paper.db,state.db,predictions.db,logs/} "
+            "-- removes the risk of a manually-typed path mismatch across a multi-symbol fleet (one "
+            "independent paper-live PROCESS per symbol; see live/runtime_layout.py). Requires --symbol. "
+            "Mutually exclusive with explicitly passing --db/--state-db/--predictions-db."
+        ),
+    )
     paper_live_parser.add_argument("--max-bars", type=int, default=None, help="Stop after this many bars (default: run to feed exhaustion).")
     paper_live_parser.add_argument("--freshness-multiplier", type=float, default=2.0, help="Freshness threshold = multiplier x interval duration (default: 2.0).")
     paper_live_parser.add_argument("--no-human-approval", action="store_true", help="Auto-execute approved signals instead of stopping for human approval (default: human approval required).")
@@ -3912,6 +4161,44 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--evaluate-every-n-bars", type=int, default=20,
         help="Only used with --record-predictions: automatically resolve outstanding predictions (same logic as `python main.py evaluate`) every N processed bars, so evidence accumulates without a separate manual step (default: 20; pass 0 to disable automatic evaluation and rely on a separate `evaluate` invocation instead).",
     )
+
+    fleet_supervise_parser = subparsers.add_parser(
+        "fleet-supervise",
+        help=(
+            "Real-time strategy validation mission, multi-symbol hardening pass: launches and "
+            "supervises N INDEPENDENT `paper-live` subprocesses, one per symbol (see "
+            "live/fleet_supervisor.py's own module docstring -- CriticGate is symbol-bound, so a "
+            "single process handling multiple symbols is never used; this command never imports "
+            "or touches live/pipeline.py itself, it only launches this SAME `paper-live` command "
+            "as a subprocess per symbol). PAPER ONLY, same as paper-live; no real order can ever "
+            "be placed by any worker this launches."
+        ),
+    )
+    fleet_supervise_parser.add_argument("--symbols", type=str, default=None, help="Comma-separated symbol list (e.g. RELIANCE.NS,TCS.NS). Required unless --watchlist-file is given.")
+    fleet_supervise_parser.add_argument("--watchlist-file", type=str, default=None, help="Path to a YAML file with a top-level `market_universe: {mode: watchlist, symbols: [...]}` key (e.g. market_data/watchlists/starter_nse.yaml).")
+    fleet_supervise_parser.add_argument("--runtime-dir", type=str, required=True, help="Root directory under which EVERY symbol gets its own isolated {symbol}/{paper.db,state.db,predictions.db,logs/} tree -- see live/runtime_layout.py. Required (there is no single-symbol default to fall back on here).")
+    fleet_supervise_parser.add_argument("--source", choices=["mock", "dhan"], default="dhan", help="Market data source for every worker (default: dhan -- the only real production value; 'mock' exists for rehearsal/testing).")
+    fleet_supervise_parser.add_argument("--interval", default="1m", help="Bar interval for every worker (default: 1m).")
+    fleet_supervise_parser.add_argument("--cost-model", choices=["default", "india_nse_intraday_2026"], default="india_nse_intraday_2026", help="CostModel preset for every worker (default: india_nse_intraday_2026, unlike paper-live's own default -- a multi-symbol NSE session should never silently run the generic zero-cost placeholder).")
+    fleet_supervise_parser.add_argument("--evaluate-every-n-bars", type=int, default=20, help="Passed through to every worker's own --evaluate-every-n-bars (default: 20).")
+    fleet_supervise_parser.add_argument("--max-bars", type=int, default=None, help="Passed through to every worker's own --max-bars, if given (default: run until fed exhaustion / stopped).")
+    fleet_supervise_parser.add_argument("--max-restarts", type=int, default=2, help="Bounded restart budget PER SYMBOL for a worker that exits with a non-zero code (default: 2). A worker that reaches --max-bars and exits 0 is never restarted. A worker that is merely reporting a feed gap while still alive is never restarted either -- see live/fleet_supervisor.py's should_restart().")
+    fleet_supervise_parser.add_argument("--poll-interval-seconds", type=float, default=30.0, help="How often the supervisor checks every worker's health and prints a status line (default: 30s).")
+    fleet_supervise_parser.add_argument("--max-polls", type=int, default=None, help="Stop supervising after this many poll cycles (default: run until every worker has exited, or until Ctrl+C). Mainly useful for tests / bounded rehearsals.")
+
+    fleet_summary_parser = subparsers.add_parser(
+        "fleet-summary",
+        help=(
+            "Real-time strategy validation mission, multi-symbol hardening pass, Item 4: read-only "
+            "consolidated report (Symbol | Bars | Fresh | Signals | Trades | Net P&L, plus a TOTAL "
+            "row) across every symbol's isolated runtime-dir stores (see live/runtime_layout.py). "
+            "Safe to run DURING a live fleet-supervise session (read-only, never touches a lock a "
+            "worker holds) or after it ends."
+        ),
+    )
+    fleet_summary_parser.add_argument("--symbols", type=str, default=None, help="Comma-separated symbol list -- same set you passed to fleet-supervise. Required unless --watchlist-file is given.")
+    fleet_summary_parser.add_argument("--watchlist-file", type=str, default=None, help="Path to a YAML file with a top-level `market_universe: {mode: watchlist, symbols: [...]}` key.")
+    fleet_summary_parser.add_argument("--runtime-dir", type=str, required=True, help="The SAME --runtime-dir the fleet was launched with.")
 
     dashboard_parser = subparsers.add_parser(
         "dashboard",
@@ -4367,6 +4654,10 @@ def main() -> None:
                 print("paper-live: --symbol is required unless using --kill-switch/--reset-kill-switch.", file=sys.stderr)
                 sys.exit(2)
             run_paper_live_command(args)
+        elif args.command == "fleet-supervise":
+            run_fleet_supervise_command(args)
+        elif args.command == "fleet-summary":
+            run_fleet_summary_command(args)
         elif args.command == "dashboard":
             run_dashboard_command(args)
         elif args.command == "scan":

@@ -26,6 +26,8 @@ SEM_SEGMENT values (VERIFIED, Column Description table): C=Currency,
 D=Derivatives, E=Equity, M=Commodity.
 """
 
+import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +37,34 @@ from core.config import PROJECT_ROOT
 
 DHAN_SCRIP_MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
 DEFAULT_INSTRUMENT_CACHE_PATH = PROJECT_ROOT / "data" / "dhan" / "scrip-master.csv"
+
+
+def _replace_with_retry(src: Path, dst: Path, *, attempts: int = 6, initial_delay: float = 0.02) -> None:
+    """Real-time strategy validation mission, multi-symbol hardening pass
+    -- found via a real, threaded concurrency test, not assumed:
+    `os.replace()` on Windows can raise `PermissionError` ([WinError 5]
+    "Access is denied") when another thread/process has `dst` open at
+    that exact instant (e.g. a concurrent reader mid-`read_csv`, or
+    another worker's own `from_csv` call) -- POSIX `rename()` has no such
+    restriction (it atomically replaces the destination regardless of
+    open handles), so this is a genuine Windows-specific failure mode a
+    POSIX-first mental model misses. The lock is expected to be brief
+    (a reader holds the file open only for the few milliseconds it takes
+    to read+parse a ~a few-MB CSV, not indefinitely), so a short, bounded
+    retry-with-backoff resolves the transient case; if `dst` is
+    genuinely locked for longer than this budget (~1.3s total across 6
+    attempts), that is a real, different problem this function
+    deliberately does not paper over -- it re-raises the last error."""
+    delay = initial_delay
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
 
 # (SEM_EXM_EXCH_ID, SEM_SEGMENT) -> the WebSocket/REST "ExchangeSegment" string.
 # VERIFIED against the Annexure's Exchange Segment table (same enum names used
@@ -88,11 +118,38 @@ class DhanInstrumentMap:
         Dhan, so callers running a live session should force-refresh at
         the start of each trading day rather than relying on a stale
         multi-day-old cache."""
+        import tempfile
         import urllib.request
 
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         if force or not cache_path.exists():
-            urllib.request.urlretrieve(DHAN_SCRIP_MASTER_URL, cache_path)  # noqa: S310 -- fixed, hardcoded HTTPS URL, not user input
+            # Real-time strategy validation mission, multi-symbol hardening
+            # pass: multiple independent `paper-live` worker PROCESSES (one
+            # per symbol in tomorrow's fleet) can all reach this branch at
+            # the same moment on a cold/force-refreshed cache. The original
+            # urlretrieve(URL, cache_path) wrote DIRECTLY to the shared
+            # final path -- not atomic, so two concurrent writers could
+            # interleave and leave a torn/truncated CSV that a third reader
+            # (from_csv below, in this or another process) could load
+            # mid-write. Download to a unique temp file in the SAME
+            # directory (so the final os.replace() is a same-filesystem
+            # atomic rename on both POSIX and Windows -- never a partial
+            # file visible to any reader) and only then publish it under
+            # the real name. If two processes race, the loser's completed
+            # temp file is simply discarded; both downloads fetch the SAME
+            # public, unauthenticated, static content, so whichever
+            # process's rename lands last is equally correct -- this is a
+            # safety fix (never expose a torn file), not a claim of
+            # avoiding redundant downloads under a startup burst.
+            fd, tmp_name = tempfile.mkstemp(dir=cache_path.parent, prefix=f"{cache_path.name}.", suffix=".tmp")
+            os.close(fd)
+            tmp_path = Path(tmp_name)
+            try:
+                urllib.request.urlretrieve(DHAN_SCRIP_MASTER_URL, tmp_path)  # noqa: S310 -- fixed, hardcoded HTTPS URL, not user input
+                _replace_with_retry(tmp_path, cache_path)
+            except BaseException:
+                tmp_path.unlink(missing_ok=True)
+                raise
         return cls.from_csv(cache_path)
 
     def lookup(self, *, trading_symbol: str, exchange: str, segment: str = "E") -> DhanInstrument:

@@ -6,6 +6,8 @@ AAPL_CACHE_PATH skip pattern already used throughout this project for
 real-data-dependent tests.
 """
 import io
+import threading
+import time as time_module
 
 import pandas as pd
 import pytest
@@ -152,3 +154,78 @@ def test_real_instrument_master_maps_reliance_ns_correctly():
     instrument = real_map.lookup_yahoo_symbol("RELIANCE.NS")
     assert instrument.security_id == "2885"
     assert instrument.exchange_segment == "NSE_EQ"
+
+
+# --- download() concurrency: multi-symbol hardening pass ---------------------
+# Tomorrow's fleet is N independent `paper-live` PROCESSES, one per symbol,
+# all calling DhanInstrumentMap.download() against the SAME shared cache
+# file at startup. These tests use real threads with a barrier (this
+# project's own established real-concurrency discipline, e.g.
+# test_scheduler_store.py's subprocess-based lock proof) to force genuine
+# concurrent writes, not just reason about them.
+
+
+def _slow_write(dest, content: str, *, delay: float = 0.05) -> None:
+    """Simulates a real download taking measurable wall-clock time to
+    complete, widening the race window a non-atomic implementation would
+    need to be caught reliably rather than occasionally."""
+    with open(dest, "w") as f:
+        f.write(content[: len(content) // 2])
+        time_module.sleep(delay)
+        f.write(content[len(content) // 2 :])
+
+
+def test_download_never_exposes_a_torn_file_to_a_concurrent_reader(tmp_path, monkeypatch):
+    """Two 'worker' threads, released simultaneously by a real
+    threading.Barrier, both call DhanInstrumentMap.download(force=True)
+    against the SAME cache path -- exactly what happens when tomorrow's
+    15 independent paper-live processes cold-start together. A third
+    thread continuously tries to read+parse the cache path throughout.
+    Proves the atomic-rename fix: the reader NEVER observes a partial/
+    torn file, and the final file is always the complete, valid CSV."""
+    cache_path = tmp_path / "scrip-master.csv"
+    barrier = threading.Barrier(2)
+
+    def _racing_urlretrieve(url, dest):
+        barrier.wait(timeout=5)
+        _slow_write(dest, _FIXTURE_CSV)
+
+    monkeypatch.setattr("urllib.request.urlretrieve", _racing_urlretrieve)
+
+    saw_torn_file = threading.Event()
+    stop_reading = threading.Event()
+
+    def _reader():
+        while not stop_reading.is_set():
+            if cache_path.exists():
+                try:
+                    frame = pd.read_csv(cache_path, dtype=str, keep_default_na=False)
+                except Exception:
+                    saw_torn_file.set()
+                    continue
+                # A fully-written file always has all 16 columns and either
+                # 0 rows (impossible here, content is never empty) or all 9
+                # data rows -- any other shape means a reader observed the
+                # file mid-write.
+                if list(frame.columns) != _FIXTURE_CSV.splitlines()[0].split(",") or len(frame) not in (0, 9):
+                    saw_torn_file.set()
+            time_module.sleep(0.005)
+
+    reader_thread = threading.Thread(target=_reader)
+    reader_thread.start()
+
+    def _download_worker():
+        DhanInstrumentMap.download(cache_path=cache_path, force=True)
+
+    workers = [threading.Thread(target=_download_worker) for _ in range(2)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+    stop_reading.set()
+    reader_thread.join(timeout=5)
+
+    assert not saw_torn_file.is_set(), "a concurrent reader observed a torn/partial instrument-master file during a racing download"
+    final_map = DhanInstrumentMap.download(cache_path=cache_path, force=False)
+    assert len(final_map._frame) == 9  # matches _FIXTURE_CSV's real row count -- the final file is complete, not corrupted
+    assert not any(cache_path.parent.glob(f"{cache_path.name}.*.tmp")), "a leftover temp file was not cleaned up"
