@@ -174,6 +174,27 @@ def _check_disk(probe_dir: Path) -> ComponentHealth:
 
 
 def _check_ollama() -> ComponentHealth:
+    """Final repository integrity audit finding: this always checked
+    Ollama reachability regardless of which provider is actually
+    configured (core.config.Settings.llm_provider) -- since
+    AI_PROVIDER=openai was added, a session running entirely on OpenAI
+    would still see a misleading "ollama: DEGRADED" in `health`/the
+    dashboard System tab for a daemon it was never going to use. Fixed by
+    reporting DISABLED (not DEGRADED) when Ollama is not the active
+    provider -- Ollama itself is genuinely never contacted in that case,
+    so DISABLED is the honest status, matching the existing `dhan`
+    component's own DISABLED-when-not-configured convention below.
+    Component name stays "ollama" (not made provider-dynamic) so this
+    remains the same, already-tested signal when Ollama IS the active
+    provider -- the common/default case today."""
+    from core.config import LLMProvider, get_settings
+
+    settings = get_settings()
+    if settings.llm_provider != LLMProvider.OLLAMA:
+        return ComponentHealth(
+            "ollama", ComponentStatus.DISABLED,
+            f"Not the active AI provider (llm_provider={settings.llm_provider.value}) -- not checked.",
+        )
     try:
         from llm.provider import check_ollama_availability
 

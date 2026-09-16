@@ -279,6 +279,34 @@ def test_dhan_check_is_disabled_without_credentials(tmp_path, monkeypatch):
     assert health.get("dhan").status == ComponentStatus.DISABLED
 
 
+def test_ollama_component_is_disabled_not_degraded_when_openai_is_the_active_provider(tmp_path, monkeypatch):
+    """Final repository integrity audit finding: `health`/the dashboard
+    System tab previously showed "ollama: DEGRADED" even when
+    AI_PROVIDER=openai was configured and Ollama was never going to be
+    used -- a misleading false-alarm signal for a daemon this session
+    doesn't need. Fixed: DISABLED (not DEGRADED) when Ollama is not the
+    active provider."""
+    import core.config as config_module
+    from core.config import LLMProvider, Settings
+
+    monkeypatch.setattr(config_module, "get_settings", lambda: Settings(llm_provider=LLMProvider.OPENAI))
+
+    health = collect_system_health(db_paths={}, probe_dir=tmp_path, check_ollama=True)
+    ollama = health.get("ollama")
+    assert ollama.status == ComponentStatus.DISABLED
+    assert "not the active" in ollama.detail.lower()
+
+
+def test_ollama_component_is_checked_normally_when_ollama_is_the_active_provider(tmp_path):
+    # The common/default case today must be completely unaffected by the
+    # fix above -- Ollama unreachable still reports DEGRADED, exactly as
+    # every other existing test in this file already assumes.
+    health = collect_system_health(db_paths={}, probe_dir=tmp_path, check_ollama=True)
+    ollama = health.get("ollama")
+    assert ollama.status in (ComponentStatus.HEALTHY, ComponentStatus.DEGRADED)
+    assert "not the active" not in ollama.detail.lower()
+
+
 def test_ollama_check_is_skipped_when_check_ollama_is_false(tmp_path):
     health = collect_system_health(db_paths={}, probe_dir=tmp_path, check_ollama=False)
     assert health.get("ollama") is None
