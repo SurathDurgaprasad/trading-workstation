@@ -1656,6 +1656,53 @@ def test_run_fleet_supervise_command_runs_two_mock_workers_to_clean_completion(t
         assert "bar#" in log_text
 
 
+def test_run_fleet_supervise_command_writes_a_supervisor_heartbeat_and_graceful_marker(tmp_path, capsys):
+    """Operational-reliability mission: the SAME heartbeat/graceful-
+    shutdown pattern proven for individual paper-live workers, extended
+    to the fleet-supervise process itself -- a future incident needs to
+    be able to tell "the supervisor died" apart from "every worker died
+    independently," previously indistinguishable from worker-side
+    evidence alone. A real two-invocation sequence: the first run
+    completes normally and leaves both files under runtime/_supervisor/;
+    the second run reports the first as GRACEFUL_SHUTDOWN."""
+    base_args = [
+        "fleet-supervise", "--symbols", "AAPL,MSFT", "--runtime-dir", str(tmp_path),
+        "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1", "--max-polls", "10",
+    ]
+
+    run_fleet_supervise_command(parse_args(base_args))
+    first_output = capsys.readouterr().out
+    assert "PREVIOUS SUPERVISOR SESSION" not in first_output
+
+    supervisor_dir = tmp_path / "_supervisor"
+    heartbeat_path = supervisor_dir / "heartbeat.json"
+    shutdown_path = supervisor_dir / "graceful_shutdown.json"
+    assert heartbeat_path.exists()
+    assert shutdown_path.exists()
+
+    run_fleet_supervise_command(parse_args(base_args))
+    second_output = capsys.readouterr().out
+    assert "PREVIOUS SUPERVISOR SESSION: GRACEFUL_SHUTDOWN" in second_output
+
+
+def test_run_fleet_supervise_command_reports_abnormal_termination_when_the_supervisor_marker_is_missing(tmp_path, capsys):
+    # Simulates a supervisor that was itself killed abruptly (crash,
+    # SIGKILL, or an OS reboot like the real 2026-09-16 incident) --
+    # a real heartbeat exists from the prior run but no graceful marker.
+    base_args = [
+        "fleet-supervise", "--symbols", "AAPL,MSFT", "--runtime-dir", str(tmp_path),
+        "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1", "--max-polls", "10",
+    ]
+    run_fleet_supervise_command(parse_args(base_args))
+    capsys.readouterr()
+
+    (tmp_path / "_supervisor" / "graceful_shutdown.json").unlink()
+
+    run_fleet_supervise_command(parse_args(base_args))
+    output = capsys.readouterr().out
+    assert "PREVIOUS SUPERVISOR SESSION: ABNORMAL_TERMINATION" in output
+
+
 def test_run_fleet_supervise_command_requires_symbols_or_watchlist_file(tmp_path):
     args = parse_args(["fleet-supervise", "--runtime-dir", str(tmp_path)])
     with pytest.raises(SystemExit):

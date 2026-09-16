@@ -1380,6 +1380,7 @@ def _run_paper_live_loop(
 def run_fleet_supervise_command(args: argparse.Namespace) -> None:
     import signal
     import time as time_module
+    from pathlib import Path
 
     from live.fleet_supervisor import WorkerHealth, format_fleet_status_line, launch_worker, poll_fleet_once, shutdown_fleet
     from market_data.universe import MarketUniverse
@@ -1411,6 +1412,25 @@ def run_fleet_supervise_command(args: argparse.Namespace) -> None:
     print("PAPER ONLY. No real order can be placed by any worker this launches.")
     print(", ".join(symbols))
 
+    # Operational-reliability mission: the same heartbeat/graceful-shutdown
+    # pattern already added to paper-live's per-symbol workers, applied to
+    # the SUPERVISOR process itself -- a future incident needs to be able
+    # to tell "the supervisor died" apart from "every worker died on its
+    # own" (previously indistinguishable from the worker-side evidence
+    # alone). Deliberately under `_supervisor/` (leading underscore, never
+    # a valid ticker) so it can never collide with a real symbol's own
+    # runtime directory.
+    from live.heartbeat import classify_previous_session, write_graceful_shutdown_marker, write_heartbeat
+
+    supervisor_dir = Path(args.runtime_dir) / "_supervisor"
+    supervisor_dir.mkdir(parents=True, exist_ok=True)
+    supervisor_heartbeat_path = supervisor_dir / "heartbeat.json"
+    supervisor_shutdown_path = supervisor_dir / "graceful_shutdown.json"
+    previous_supervisor_session = classify_previous_session(supervisor_heartbeat_path, supervisor_shutdown_path)
+    if previous_supervisor_session.classification != "NO_PREVIOUS_SESSION":
+        print(f"PREVIOUS SUPERVISOR SESSION: {previous_supervisor_session.classification} -- {previous_supervisor_session.detail}")
+    write_heartbeat(supervisor_heartbeat_path)
+
     handles = {}
     for symbol in symbols:
         handles[symbol] = _relaunch(symbol, 0)
@@ -1435,6 +1455,7 @@ def run_fleet_supervise_command(args: argparse.Namespace) -> None:
             if stop_requested:
                 break
             time_module.sleep(args.poll_interval_seconds)
+            write_heartbeat(supervisor_heartbeat_path)
             snapshot = poll_fleet_once(handles, max_restarts=args.max_restarts, relaunch=_relaunch)
             for status in snapshot.statuses:
                 print(format_fleet_status_line(status))
@@ -1446,6 +1467,13 @@ def run_fleet_supervise_command(args: argparse.Namespace) -> None:
             if all(status.health in (WorkerHealth.EXITED_CLEAN, WorkerHealth.EXITED_ERROR) for status in snapshot.statuses):
                 print("FLEET SUPERVISE: every worker has exited -- ending supervision loop.")
                 break
+        # Reached only when the while loop above exited normally (poll
+        # budget exhausted, stop_requested via the SIGINT handler, or
+        # every worker exited on its own) -- never reached if an
+        # unexpected exception propagated out of the loop body, which
+        # `finally` below would still run for (cleanup must always
+        # happen), but must NOT be marked graceful.
+        write_graceful_shutdown_marker(supervisor_shutdown_path, reason="poll loop ended normally")
     finally:
         signal.signal(signal.SIGINT, previous_handler)
         shutdown_fleet(handles)
