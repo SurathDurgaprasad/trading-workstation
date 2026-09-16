@@ -1412,6 +1412,62 @@ def test_run_paper_live_command_runtime_dir_derives_the_documented_layout(tmp_pa
     assert "-> APPROVED" in output
 
 
+def test_run_paper_live_command_writes_a_heartbeat_and_a_graceful_shutdown_marker(tmp_path, capsys):
+    """Operational-reliability mission: real forensic gap found and
+    root-caused 2026-09-16 -- an entire 15-symbol fleet stopped
+    simultaneously with zero error in any log; the only way to find out
+    why was manual Windows Event Log archaeology (a real OS reboot).
+    Proves live/heartbeat.py's wiring through the REAL CLI entrypoint: a
+    normal (max-bars-reached) run leaves BOTH files, and a SECOND
+    invocation against the same runtime-dir correctly reports the first
+    run as GRACEFUL_SHUTDOWN."""
+    runtime_dir = tmp_path / "runtime"
+    base_args = [
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--runtime-dir", str(runtime_dir),
+        "--max-bars", "70", "--auto-approve", "--no-ai-explanation",
+        "--freshness-multiplier", "1000000",
+    ]
+
+    run_paper_live_command(parse_args(base_args))
+    first_output = capsys.readouterr().out
+    assert "PREVIOUS SESSION" not in first_output  # first-ever run for this symbol/runtime-dir
+
+    symbol_dir = runtime_dir / "AAPL"
+    heartbeat_path = symbol_dir / "heartbeat.json"
+    shutdown_path = symbol_dir / "graceful_shutdown.json"
+    assert heartbeat_path.exists()
+    assert shutdown_path.exists()
+
+    run_paper_live_command(parse_args(base_args))
+    second_output = capsys.readouterr().out
+    assert "PREVIOUS SESSION: GRACEFUL_SHUTDOWN" in second_output
+
+
+def test_run_paper_live_command_reports_abnormal_termination_when_the_shutdown_marker_is_missing(tmp_path, capsys):
+    # Simulates exactly the 2026-09-16 incident's own signature: a real
+    # heartbeat from a prior run, but no graceful-shutdown marker (as a
+    # SIGKILL/power-loss/OS-reboot would leave it) -- the NEXT invocation
+    # against the same runtime-dir must say so plainly, not silently.
+    runtime_dir = tmp_path / "runtime"
+    base_args = [
+        "paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y",
+        "--runtime-dir", str(runtime_dir),
+        "--max-bars", "70", "--auto-approve", "--no-ai-explanation",
+        "--freshness-multiplier", "1000000",
+    ]
+    run_paper_live_command(parse_args(base_args))
+    capsys.readouterr()
+
+    symbol_dir = runtime_dir / "AAPL"
+    (symbol_dir / "graceful_shutdown.json").unlink()
+
+    run_paper_live_command(parse_args(base_args))
+    output = capsys.readouterr().out
+    assert "PREVIOUS SESSION: ABNORMAL_TERMINATION" in output
+    assert "crash, kill, power loss, or OS reboot" in output
+
+
 def test_run_paper_live_command_runtime_dir_requires_symbol():
     args = parse_args(["paper-live", "--runtime-dir", "runtime", "--interval", "1d"])
     with pytest.raises(SystemExit, match="requires --symbol"):

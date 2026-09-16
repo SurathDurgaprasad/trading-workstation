@@ -41,6 +41,11 @@ class SymbolRuntimePaths:
     state_db: Path
     predictions_db: Path
     logs_dir: Path
+    heartbeat_path: Path
+    """live/heartbeat.py: overwritten periodically while a paper-live
+    process for this symbol is running -- see that module's docstring."""
+    graceful_shutdown_path: Path
+    """live/heartbeat.py: written only on a normal/caught exit."""
 
 
 def symbol_runtime_paths(runtime_dir: str | Path, symbol: str) -> SymbolRuntimePaths:
@@ -64,6 +69,8 @@ def symbol_runtime_paths(runtime_dir: str | Path, symbol: str) -> SymbolRuntimeP
         state_db=root / "state.db",
         predictions_db=root / "predictions.db",
         logs_dir=root / "logs",
+        heartbeat_path=root / "heartbeat.json",
+        graceful_shutdown_path=root / "graceful_shutdown.json",
     )
 
 

@@ -1068,6 +1068,18 @@ def _run_paper_live_command_body(args: argparse.Namespace) -> None:
         ensure_symbol_runtime_dirs(runtime_paths)
         print(f"RUNTIME DIR: {runtime_paths.root}")
 
+        # Operational-reliability mission: real forensic gap found and
+        # root-caused 2026-09-16 -- an entire 15-symbol fleet stopped
+        # simultaneously with zero error in any log; the only way to find
+        # out why was manual Windows Event Log archaeology (it was a real
+        # OS reboot). Classify BEFORE this process's own first heartbeat
+        # write, so a genuinely prior session's trail is what gets read.
+        from live.heartbeat import classify_previous_session
+
+        previous_session = classify_previous_session(runtime_paths.heartbeat_path, runtime_paths.graceful_shutdown_path)
+        if previous_session.classification != "NO_PREVIOUS_SESSION":
+            print(f"PREVIOUS SESSION: {previous_session.classification} -- {previous_session.detail}")
+
     state_db_path = runtime_paths.state_db if runtime_paths else (args.state_db or DEFAULT_LIVE_STATE_DB_PATH)
     state_store = LiveStateStore(state_db_path)
 
@@ -1190,9 +1202,23 @@ def _run_paper_live_command_body(args: argparse.Namespace) -> None:
         processed = _run_paper_live_loop(
             args, pipeline, engine, store, status_label, processed,
             prediction_store=prediction_store, evaluation_provider=evaluation_provider,
+            runtime_paths=runtime_paths,
         )
     except KeyboardInterrupt:
         print(f"\n[{status_label}] Interrupted by user (Ctrl+C) -- shutting down cleanly.")
+        if runtime_paths is not None:
+            from live.heartbeat import write_graceful_shutdown_marker
+
+            write_graceful_shutdown_marker(runtime_paths.graceful_shutdown_path, reason="KeyboardInterrupt (Ctrl+C)")
+    else:
+        # Deliberately NOT in `finally` -- this must run only when the try
+        # block above completed without ANY exception (a genuine crash
+        # must NOT be marked graceful; see live/heartbeat.py's own
+        # docstring for why that absence is the actual signal).
+        if runtime_paths is not None:
+            from live.heartbeat import write_graceful_shutdown_marker
+
+            write_graceful_shutdown_marker(runtime_paths.graceful_shutdown_path, reason="loop completed normally")
     finally:
         # Lifecycle fix (Phase 17, found via code review — no live network involved): source.close()
         # was never called on ANY exit path, including normal completion. For --source dhan this left
@@ -1221,12 +1247,13 @@ def _run_paper_live_command_body(args: argparse.Namespace) -> None:
 
 def _run_paper_live_loop(
     args: argparse.Namespace, pipeline, engine, store, status_label: str, processed: int,
-    *, prediction_store=None, evaluation_provider=None,
+    *, prediction_store=None, evaluation_provider=None, runtime_paths=None,
 ) -> int:
     from datetime import datetime, timezone
 
     from live.freshness import interval_to_timedelta
     from live.gap_monitor import BarGapMonitor
+    from live.heartbeat import write_heartbeat
 
     # Real-time strategy validation mission, multi-symbol hardening pass:
     # a real, live-observed ~15-minute Dhan tick-delivery gap (2026-09-15
@@ -1245,6 +1272,8 @@ def _run_paper_live_loop(
     bars_since_last_evaluation = 0
     while args.max_bars is None or processed < args.max_bars:
         result = pipeline.process_next()
+        if runtime_paths is not None:
+            write_heartbeat(runtime_paths.heartbeat_path)
         gap_status = gap_monitor.check(now=datetime.now(timezone.utc))
         if gap_status is not None:
             verb = "GAP DETECTED" if gap_status.is_new else "GAP ONGOING"
