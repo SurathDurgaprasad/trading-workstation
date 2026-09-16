@@ -57,23 +57,49 @@ def parse_session_log_counts(log_path: Path) -> dict:
     bar reaches the STALE_SIGNAL_SUPPRESSED outcome instead (handled by
     the default "bar#" branch, fresh=False), never PENDING_HUMAN_
     APPROVAL, so a signal could only have been detected on a fresh
-    bar."""
+    bar.
+
+    Only counts lines AFTER the most recent "RUNTIME DIR:" banner (the
+    first line _run_paper_live_loop prints on every process start,
+    verified live -- see main.py's startup sequence). session.log is
+    append-only and accumulates across every separate launch of the
+    same symbol on the same calendar day (e.g. a scale-up rehearsal
+    that started, stopped, and restarted a fleet several times before
+    the main session), but live/pipeline.py's _SymbolBuffer is
+    in-memory-only and starts empty on every process (re)start -- so a
+    bars_processed figure summed across restarts overstates what the
+    CURRENTLY RUNNING process's indicator buffer has actually
+    accumulated (and therefore overstates progress toward the
+    strategy's sma_50 warmup threshold). Real defect found during the
+    2026-09-16 live 15-symbol validation: fleet-summary reported
+    RELIANCE.NS at 50 bars (cumulative across that day's 4 scale-up
+    phases) while the actual running process's own bar# counter -- and
+    therefore its indicator buffer -- had only reached 42, so the
+    strategy could not yet evaluate entry conditions despite the
+    dashboard/CLI implying warmup was complete."""
     counts = {"bars_processed": 0, "fresh_bars": 0, "stale_bars": 0, "gap_events": 0}
     if not log_path.exists():
         return counts
     with open(log_path, encoding="utf-8", errors="replace") as f:
-        for line in f:
-            if "bar#" in line:
-                counts["bars_processed"] += 1
-                if "fresh=True" in line:
-                    counts["fresh_bars"] += 1
-                elif "fresh=False" in line:
-                    counts["stale_bars"] += 1
-            elif "SIGNAL DETECTED" in line:
-                counts["bars_processed"] += 1
+        lines = f.readlines()
+
+    current_run_start = 0
+    for index, line in enumerate(lines):
+        if line.startswith("RUNTIME DIR:"):
+            current_run_start = index
+
+    for line in lines[current_run_start:]:
+        if "bar#" in line:
+            counts["bars_processed"] += 1
+            if "fresh=True" in line:
                 counts["fresh_bars"] += 1
-            if "[GAP DETECTED]" in line:
-                counts["gap_events"] += 1
+            elif "fresh=False" in line:
+                counts["stale_bars"] += 1
+        elif "SIGNAL DETECTED" in line:
+            counts["bars_processed"] += 1
+            counts["fresh_bars"] += 1
+        if "[GAP DETECTED]" in line:
+            counts["gap_events"] += 1
     return counts
 
 

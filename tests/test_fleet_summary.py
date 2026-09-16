@@ -51,6 +51,47 @@ def test_parse_session_log_counts_a_pending_approval_bar_counts_as_processed_and
     assert counts["stale_bars"] == 0
 
 
+def test_parse_session_log_counts_only_counts_the_current_process_not_earlier_restarts(tmp_path):
+    """Real defect found live, 2026-09-16: session.log accumulates across
+    every separate launch of the same symbol on the same day (a 4-phase
+    scale-up rehearsal, in the real incident), but live/pipeline.py's
+    in-memory _SymbolBuffer resets on every restart -- so a currently-
+    running process with only 2 bars in its own buffer must be reported
+    as 2, not as the 5 bars an earlier, now-dead process contributed to
+    the same log file before it restarted."""
+    log_path = tmp_path / "session.log"
+    log_path.write_text(
+        "RUNTIME DIR: runtime\\RELIANCE.NS\n"
+        "[RELIANCE.NS] bar#   1 T1  close=1.00  NO_SIGNAL  fresh=True\n"
+        "[RELIANCE.NS] bar#   2 T2  close=1.00  NO_SIGNAL  fresh=True\n"
+        "[RELIANCE.NS] bar#   3 T3  close=1.00  NO_SIGNAL  fresh=True\n"
+        "[RELIANCE.NS] bar#   4 T4  close=1.00  NO_SIGNAL  fresh=True\n"
+        "[RELIANCE.NS] bar#   5 T5  close=1.00  NO_SIGNAL  fresh=True\n"
+        "RUNTIME DIR: runtime\\RELIANCE.NS\n"
+        "[RELIANCE.NS] bar#   1 T6  close=1.00  NO_SIGNAL  fresh=True\n"
+        "[RELIANCE.NS] bar#   2 T7  close=1.00  NO_SIGNAL  fresh=False\n",
+        encoding="utf-8",
+    )
+    counts = parse_session_log_counts(log_path)
+    assert counts["bars_processed"] == 2
+    assert counts["fresh_bars"] == 1
+    assert counts["stale_bars"] == 1
+
+
+def test_parse_session_log_counts_with_no_restart_marker_behaves_as_before(tmp_path):
+    # A log with no "RUNTIME DIR:" line at all (e.g. hand-written fixture,
+    # or an older log format) must still count every bar -- current_run_start
+    # defaults to the top of the file, not an empty range.
+    log_path = tmp_path / "session.log"
+    log_path.write_text(
+        "[AAPL] bar#   1 T1  close=1.00  NO_SIGNAL  fresh=True\n"
+        "[AAPL] bar#   2 T2  close=1.00  NO_SIGNAL  fresh=True\n",
+        encoding="utf-8",
+    )
+    counts = parse_session_log_counts(log_path)
+    assert counts["bars_processed"] == 2
+
+
 def test_parse_session_log_counts_missing_file_returns_zeros(tmp_path):
     counts = parse_session_log_counts(tmp_path / "does_not_exist.log")
     assert counts == {"bars_processed": 0, "fresh_bars": 0, "stale_bars": 0, "gap_events": 0}
