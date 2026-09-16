@@ -23,6 +23,12 @@ vectorstore/
 # local, never a source-of-truth artifact, same rationale as data/*.db.
 runtime/
 
+# One-off ad-hoc evidence/demonstration DBs (e.g. shadow-run/full-pipeline
+# proof runs against dedicated scratch stores) -- same rationale as
+# data/*.db above; the evidence lives in the report that cites the run,
+# not in a committed binary SQLite file.
+evidence_run/
+
 # Personal/reference documents not part of the published project
 documents/
 
