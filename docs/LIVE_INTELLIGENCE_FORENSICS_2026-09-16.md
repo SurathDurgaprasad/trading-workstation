@@ -291,7 +291,105 @@ on this machine, not CPU or the Dhan connection count.
 
 ---
 
-## 10. Honest summary
+## 10. Post-warmup re-verification and the OpenAI advisory-layer addition (REAL, 10:30–10:47 IST)
+
+**A third real defect was found and fixed: fleet-summary's own BARS
+column was itself wrong**, and it directly affected trust in the
+warmup-completion evidence below.
+
+`live/fleet_summary.py::parse_session_log_counts` counted every `bar#`
+line in the WHOLE `session.log` file. That file is append-only and
+accumulates across every separate `fleet-supervise` launch on the same
+calendar day — today's own 4-phase scale-up rehearsal (A→B→C→D)
+restarted RELIANCE.NS/TCS.NS's workers multiple times before the main
+Phase D session began. But `live/pipeline.py`'s in-memory
+`_SymbolBuffer` (the actual indicator input) resets to empty on every
+restart. Result: at 10:37 IST, `fleet-summary` reported RELIANCE.NS/
+TCS.NS at **50 bars** (cumulative across the day's four launches) while
+the real, currently-running Phase D process — the only one whose buffer
+matters for `sma_50` — had only reached **42 bars**. Every OTHER symbol,
+launched only once (Phase D), was correctly reported. This was caught
+by manually diffing the log's own `RUNTIME DIR:`/`MARKET SESSION:`
+launch banners against the reported bar count, not assumed.
+
+**Fixed** in `live/fleet_summary.py` (read-only reporting code — never
+`live/pipeline.py`, never the trading path itself): only count lines
+after the most recent `RUNTIME DIR:` banner, i.e. only what the
+currently-running process has actually buffered. Two new regression
+tests (a synthetic multi-restart log, and a backward-compatibility case
+with no restart marker at all), mutation-tested (reverted the
+truncation, confirmed the new test failed with `7 != 2`, restored it).
+**Live re-verification**: immediately after the fix, all 15
+simultaneously-launched symbols reported the identical real value (44,
+then 48, then 50 as the session progressed) instead of the previous
+skewed, restart-history-dependent numbers. Committed as a standalone
+fix, pushed, not yet merged to `main`.
+
+**True warmup completion, verified with the corrected metric**: all 15
+symbols reached exactly 50 bars simultaneously at **10:47:31 IST**
+(they were all launched together at 09:57:51 IST, so this is expected —
+50 bars × ~1 bar/min ≈ 50 min). At that moment:
+
+- `SIGNALS` and `TRADES` were still **0** for all 15 symbols.
+- `grep -riE "SIGNAL DETECTED|CRITIC|RISK "` across every symbol's
+  `session.log` found nothing new (the one match, ITC.NS's `SAFE_STOP`,
+  is the same pre-existing Phase C entry already covered in §7/§9 of
+  this report — not a new event).
+- Every symbol's `predictions.db` still had **0 rows**.
+- Zero new `[GAP DETECTED]`/`FEED DISCONNECTED` events fleet-wide.
+- 15 real worker interpreters (>50MB RSS) confirmed still alive.
+
+This is now a **stronger** result than before warmup: `sma_50` is
+genuinely non-NaN and the strategy's NaN guard is genuinely passing, yet
+its trend/momentum/breakout entry conditions still are not being met by
+today's actual price action. Zero signals after warmup is a legitimate
+"no candidate" outcome from the deterministic strategy, not a warmup
+artifact — the same honest "PREDICTION PATH NOT EXERCISED BY LIVE
+SIGNAL — mechanism verified by historical/integration tests" conclusion
+from §1 stands, now on firmer ground.
+
+**Separately, this session also added the OpenAI advisory-intelligence
+provider** (a distinct, explicitly-scoped follow-up mission), entirely
+inside the existing `llm.provider` abstraction and never touching the
+live trading path:
+
+- `core/config.py`: `AI_PROVIDER`/`OPENAI_*` env-var overrides (Settings
+  previously had none at all); `OPENAI_API_KEY` deliberately never
+  stored in `Settings`, read from the environment only at call time.
+- `llm/provider.py`: `_create_openai_chat_model` (`langchain_openai.
+  ChatOpenAI`, same `with_structured_output()` interface every existing
+  caller already uses), `check_openai_availability()`, and a
+  provider-agnostic `check_llm_availability()` dispatcher now used by
+  all 5 existing call sites (decision narration, signal explanation,
+  research summaries, decision review, `analyze`).
+- `llm/budget.py` (new): a SQLite-backed call budget/audit ledger —
+  hourly cap (10), per-session cap (30), 20s minimum interval, 4000-char
+  max input — the single choke point every real OpenAI call passes
+  through, wired into `agents.analyst.invoke_structured`.
+- `main.py ai-health` (new command): configuration + a free
+  `models.retrieve()` connectivity check, plus an opt-in `--smoke-test`
+  that spends one real minimal completion.
+- Dashboard System tab: new **AI INTELLIGENCE STATUS** panel (provider,
+  model, AVAILABLE/UNAVAILABLE, calls today, last call) — reads
+  `llm/budget.py`'s real ledger, never a static claim; never renders the
+  key.
+
+**Real evidence, not simulated**: `ai-health` reached `api.openai.com`
+with a genuine HTTP 200 (2843ms) and a genuine `gpt-4o-mini` structured
+completion (2676ms) via `--smoke-test`, both recorded to the ledger.
+Immediately re-running `--smoke-test` was correctly **rejected** by the
+20s minimum-interval budget gate without spending a second completion —
+the rate limiter is real, not just configured. This advisory layer
+remains **inactive by default** (`AI_PROVIDER`/`OPENAI_ENABLED` unset)
+and was never wired into any of the 15 live workers — Phase 9's own
+explicit caution ("do NOT immediately connect the LLM to every worker")
+was honored; today's zero organic candidates gave no real trigger to
+integrate it into the live path, so that remains a designed-but-not-yet-
+activated boundary, documented as a known limitation rather than forced.
+
+---
+
+## 11. Honest summary
 
 The **data plane** is genuinely working: 15 independent workers, real
 Dhan WebSockets, 335 real bars, 100% fresh, zero gaps, zero

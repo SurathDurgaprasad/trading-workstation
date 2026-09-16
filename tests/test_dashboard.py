@@ -186,6 +186,60 @@ def test_market_feed_table_shows_n_a_when_last_price_was_never_recorded(client):
     assert "n/a" in response.text
 
 
+# --- AI status section (OpenAI Intelligence Integration mission, Phase 14) ---
+
+
+def test_system_page_shows_ai_status_not_active_by_default(client, monkeypatch):
+    # Default Settings() has llm_provider=ollama -- the dashboard must say
+    # so honestly, never imply OpenAI is active just because the code
+    # exists.
+    monkeypatch.delenv("AI_PROVIDER", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    import core.config as config_module
+
+    config_module.get_settings.cache_clear()
+
+    response = client.get("/system")
+    assert "AI INTELLIGENCE STATUS" in response.text
+    assert "NOT ACTIVE" in response.text
+
+
+def test_system_page_shows_ai_available_when_openai_configured_and_enabled(client, monkeypatch):
+    monkeypatch.setenv("AI_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-a-real-key")
+    monkeypatch.setenv("OPENAI_ENABLED", "true")
+    import core.config as config_module
+
+    config_module.get_settings.cache_clear()
+    try:
+        response = client.get("/system")
+        assert "AVAILABLE" in response.text
+        assert "openai" in response.text
+    finally:
+        monkeypatch.delenv("AI_PROVIDER", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_ENABLED", raising=False)
+        config_module.get_settings.cache_clear()
+
+
+def test_system_page_never_renders_the_openai_api_key_value(client, monkeypatch):
+    fake_key = "sk-THIS-VALUE-MUST-NEVER-APPEAR-ON-THE-DASHBOARD-xyz789"
+    monkeypatch.setenv("AI_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", fake_key)
+    monkeypatch.setenv("OPENAI_ENABLED", "true")
+    import core.config as config_module
+
+    config_module.get_settings.cache_clear()
+    try:
+        response = client.get("/system")
+        assert fake_key not in response.text
+    finally:
+        monkeypatch.delenv("AI_PROVIDER", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_ENABLED", raising=False)
+        config_module.get_settings.cache_clear()
+
+
 # --- _data_health_label (LIVE SYSTEM HARDENING mission, Part 3) -- pure unit tests ---
 
 

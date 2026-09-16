@@ -1008,6 +1008,57 @@ def _collect_health(*, check_ollama: bool = True) -> dict:
     }
 
 
+def _ai_status_section() -> str:
+    """OpenAI Intelligence Integration mission, Phase 14: honest AI status.
+
+    Reads settings + the real llm/budget.py ledger only -- never claims AI
+    is "active" beyond what those actually show, and never makes a network
+    call from a page load (no models.retrieve() here; that's `ai-health`'s
+    job, run deliberately from the CLI). Never renders the API key or any
+    request/response content -- the ledger schema has no column for either."""
+    import os
+
+    from core.config import LLMProvider, get_settings
+    from llm import budget
+
+    settings = get_settings()
+    provider = settings.llm_provider.value
+    is_openai = settings.llm_provider == LLMProvider.OPENAI
+    key_configured = bool(os.environ.get("OPENAI_API_KEY"))
+
+    if is_openai:
+        available = "AVAILABLE" if (key_configured and settings.openai_enabled) else "UNAVAILABLE"
+        avail_class = "tag-long" if available == "AVAILABLE" else "tag-warn"
+    else:
+        available = "NOT ACTIVE"
+        avail_class = "tag-sim"
+
+    summary = budget.summarize_today()
+    last_call = summary["last_call"]
+    last_call_row = (
+        f"{html.escape(last_call['ts_utc'])} &mdash; {html.escape(last_call['status'])} "
+        f"({html.escape(str(last_call['model']))}, {last_call['latency_ms']:.0f}ms)"
+        if last_call is not None and last_call["latency_ms"] is not None
+        else (f"{html.escape(last_call['ts_utc'])} &mdash; {html.escape(last_call['status'])}" if last_call is not None else "none recorded")
+    )
+
+    return f"""
+<h2>AI INTELLIGENCE STATUS</h2>
+<p class="muted">Advisory-only layer (decision narration, signal explanation, research summaries, decision review) &mdash;
+never in the live trading/critic/risk/execution path. Real data from llm/provider.py's active provider and the
+llm/budget.py call ledger, not a static claim.</p>
+<table>
+<tr><td class="label">AI Provider</td><td>{html.escape(provider)}</td></tr>
+<tr><td class="label">Model</td><td>{html.escape(settings.openai_model if is_openai else settings.chat_model)}</td></tr>
+<tr><td class="label">Status</td><td><span class="tag {avail_class}">{available}</span></td></tr>
+<tr><td class="label">OPENAI_API_KEY configured</td><td>{'yes' if key_configured else 'no'}</td></tr>
+<tr><td class="label">Calls today</td><td>{summary['calls_today']} ({summary['successes_today']} succeeded)</td></tr>
+<tr><td class="label">Last call</td><td>{last_call_row}</td></tr>
+</table>
+<p class="muted">Run <code>python main.py ai-health</code> for a live connectivity check (no completion cost).</p>
+"""
+
+
 async def system_page(request: Request) -> HTMLResponse:
     """UI integration -- System tab: the SAME core.health.
     collect_system_health() the existing `/health` route already uses
@@ -1048,6 +1099,8 @@ async def system_page(request: Request) -> HTMLResponse:
 <p>Overall status: <span class="tag {overall_class}">{html.escape(health['overall'])}</span></p>
 <table><tr><th>Component</th><th>Status</th><th>Detail</th></tr>{health_rows}</table>
 <p class="muted">Same source as <code>python main.py health</code> and <a href="/health">/health</a> (core/health.py).</p>
+
+{_ai_status_section()}
 
 <h2>MARKET FEED</h2>
 <p class="muted">The last bar actually delivered by whatever is driving the feed (the paper-live CLI, in another process) &mdash; never fabricated here.</p>
