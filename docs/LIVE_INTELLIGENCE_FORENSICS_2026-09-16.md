@@ -256,7 +256,42 @@ database they are reading.
 
 ---
 
-## 9. Honest summary
+## 9. Process & resource forensics (REAL, 10:20 IST)
+
+A process census initially looked alarming — 30 processes matching
+`paper-live` when 15 were expected — and was run down rather than
+assumed benign:
+
+```
+real interpreters (>50MB):  15
+launcher stubs   (<=50MB):  15
+distinct symbols among real: 15
+supervisor processes:         2  (same stub+real pair)
+```
+
+**Not orphans.** On Windows, `venv/Scripts/python.exe` is a small
+launcher that spawns the real interpreter as a child; both carry the
+same command line. Every pair shares one parent (the supervisor, PID
+14448) and **all 30 were created at 09:57:47** — the Phase D launch
+instant. **Zero processes survived from Phase A/B/C**, independently
+confirming those phases' `shutdown_fleet()` terminations were clean and
+left no orphaned workers competing for the same per-symbol databases.
+
+Real resource figures for a 15-symbol 1-minute fleet:
+
+| Metric | Value |
+|---|---|
+| Total fleet RSS | **≈ 2,958 MB (~2.9 GB)** |
+| Mean per-worker RSS (real interpreter) | **≈ 193 MB** |
+| Logical workers | 15 (1 per symbol, verified distinct) |
+| OS processes | 32 (15 workers × 2 + supervisor × 2) |
+
+At ~193 MB per worker, memory is the binding constraint on fleet width
+on this machine, not CPU or the Dhan connection count.
+
+---
+
+## 10. Honest summary
 
 The **data plane** is genuinely working: 15 independent workers, real
 Dhan WebSockets, 335 real bars, 100% fresh, zero gaps, zero
