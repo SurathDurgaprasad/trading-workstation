@@ -86,14 +86,13 @@ Not re-measured this cycle (no live fleet running to measure).
 
 ## Remaining risks
 
-- No live fleet is currently running — today's captured evidence ends at 14:35 IST (reboot) plus this cycle's offline/historical work. A fresh live session has not yet exercised the new heartbeat/observability code against a real, sustained multi-hour run.
-- The heartbeat mechanism has not yet been extended to `live/fleet_supervisor.py` itself (only the per-symbol `paper-live` worker) — the supervisor's own liveness is not yet separately tracked.
+- No live fleet is currently running — today's captured evidence ends at 14:35 IST (reboot) plus this cycle's offline/historical work. A fresh live multi-hour session has not yet exercised the new heartbeat/observability code (worker- or supervisor-level) under real, sustained load — only under real but short (`--max-bars`) CLI-level test runs.
 - BSE, global markets, sector/VIX/breadth context: unchanged, not re-audited this cycle (carried forward from the prior forensics report).
 - Strategy remains **NO DEMONSTRATED EDGE** — no new positive evidence, and none manufactured.
 
 ## Next highest-value experiment
 
-Per the mission's own priority order (safety → data correctness → execution correctness → prediction correctness → statistical validity → operational reliability → market intelligence → AI usefulness), operational reliability now has real, tested observability where it had none. The next highest-value item is extending the same heartbeat/graceful-shutdown pattern to `live/fleet_supervisor.py` (the supervisor process itself, not just each worker) so a future incident can also distinguish "supervisor died" from "all workers died independently" — currently indistinguishable from the worker-side evidence alone.
+Both worker-level (`live/heartbeat.py` wired into `paper-live`) and supervisor-level (wired into `fleet-supervise`) liveness observability are now real, tested, and merged. The next highest-value item is exercising this new code in an actual multi-hour live session (the next NSE market open) — real short CLI-test runs prove the wiring is correct, but only a real sustained session proves the heartbeat cadence and graceful-shutdown path behave correctly under real multi-hour operation. After that, per the mission's own priority order, the next unaddressed tier is market intelligence (Phase 8/9: NIFTY is implemented but not live-executed; sector/VIX/breadth/global markets remain not implemented in the live path).
 
 ## Final capability matrix
 
@@ -118,7 +117,7 @@ Per the mission's own priority order (safety → data correctness → execution 
 | Regime | YES (module exists) | NO | — | NO | IMPLEMENTED — NOT EXECUTED TODAY |
 | OpenAI | YES | NO (this cycle) | YES (prior cycle) | NO (advisory only) | YES (prior cycle) |
 | Dashboard | YES | NO (not re-opened this cycle) | YES | N/A | YES (prior cycle) |
-| Supervisor/recovery | PARTIAL (worker-level heartbeat new this cycle; supervisor-level not yet) | YES (new code, CLI-tested) | YES | N/A | YES (worker-level); NOT YET (supervisor-level) |
+| Supervisor/recovery | YES (worker-level AND supervisor-level heartbeat, both new this cycle) | YES (new code, real end-to-end CLI-tested) | YES | N/A | YES at CLI-test scale; NOT YET under a real multi-hour live session |
 
 ## Final verdicts
 
