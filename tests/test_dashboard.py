@@ -597,6 +597,69 @@ def test_fleet_page_shows_real_fleet_summary_data_once_configured(client, monkey
     dashboard_app.configure(schedule_config_path=None)  # reset for other tests in this module
 
 
+def test_fleet_page_counts_a_degraded_but_arriving_feed_as_healthy(client, monkeypatch, tmp_path):
+    """15-symbol live-fleet validation mission, real defect found live:
+    `_data_health_label` grades any feed whose last bar is >30s old as
+    DEGRADED -- deliberately conservative for a display badge, but for
+    the fleet's own `--interval 1m` cadence a 30-60s age is simply the
+    NORMAL gap between consecutive bars. Counting DEGRADED as unhealthy
+    made a continuously-healthy 15-symbol fleet report "0 / 15 HEALTHY"
+    for roughly half of every minute (observed live oscillating
+    0 -> 0 -> 13 -> 15 within 36 seconds). A feed that is still
+    delivering bars must count as healthy."""
+    import dashboard.app as dashboard_app
+    from datetime import datetime, timedelta, timezone
+    from live.runtime_layout import ensure_symbol_runtime_dirs, symbol_runtime_paths
+    from live.state_store import LiveStateStore
+
+    dashboard_app.configure(schedule_config_path=None, fleet_runtime_dir=str(tmp_path), fleet_symbols=["RELIANCE.NS"])
+
+    paths = symbol_runtime_paths(tmp_path, "RELIANCE.NS")
+    ensure_symbol_runtime_dirs(paths)
+    (paths.logs_dir / "session.log").write_text(
+        "[RELIANCE.NS] bar#   1 2026-09-16T09:15:00  close=1248.70  BAR_PROCESSED  fresh=True\n", encoding="utf-8",
+    )
+    # 45s old: past the 30s DEGRADED threshold, well inside a normal 1m bar gap.
+    aging = datetime.now(timezone.utc) - timedelta(seconds=45)
+    state_store = LiveStateStore(paths.state_db)
+    state_store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=aging, received_at=aging, connection_state="CONNECTED")
+    state_store.close()
+
+    response = client.get("/fleet")
+    assert "DEGRADED" in response.text  # still labelled honestly...
+    assert "1 / 1 HEALTHY" in response.text  # ...but counted as a working feed
+
+    dashboard_app.configure(schedule_config_path=None)
+
+
+def test_fleet_page_counts_a_genuinely_stale_feed_as_unhealthy(client, monkeypatch, tmp_path):
+    """The other side of the same boundary: a feed whose last bar is
+    older than the STALE threshold is NOT healthy, and must not be
+    counted as one."""
+    import dashboard.app as dashboard_app
+    from datetime import datetime, timedelta, timezone
+    from live.runtime_layout import ensure_symbol_runtime_dirs, symbol_runtime_paths
+    from live.state_store import LiveStateStore
+
+    dashboard_app.configure(schedule_config_path=None, fleet_runtime_dir=str(tmp_path), fleet_symbols=["RELIANCE.NS"])
+
+    paths = symbol_runtime_paths(tmp_path, "RELIANCE.NS")
+    ensure_symbol_runtime_dirs(paths)
+    (paths.logs_dir / "session.log").write_text(
+        "[RELIANCE.NS] bar#   1 2026-09-16T09:15:00  close=1248.70  BAR_PROCESSED  fresh=True\n", encoding="utf-8",
+    )
+    stale = datetime.now(timezone.utc) - timedelta(seconds=600)
+    state_store = LiveStateStore(paths.state_db)
+    state_store.save_feed_status(symbol="RELIANCE.NS", source="DHAN", status="LIVE", bar_timestamp=stale, received_at=stale, connection_state="CONNECTED")
+    state_store.close()
+
+    response = client.get("/fleet")
+    assert "STALE" in response.text
+    assert "0 / 1 HEALTHY" in response.text
+
+    dashboard_app.configure(schedule_config_path=None)
+
+
 def test_portfolio_page_computes_position_pnl_from_the_real_last_observed_price(client):
     """UI integration: per-position current price/P&L is a pure
     arithmetic readout of two already-real numbers (Position.entry_price

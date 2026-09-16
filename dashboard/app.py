@@ -932,7 +932,19 @@ async def fleet_page(request: Request) -> HTMLResponse:
             own = next((r for r in rows_status if r.symbol == s.symbol), None)
             if own is not None:
                 data_label, data_class = _feed_health(own)
-        is_healthy = s.log_found and data_label in ("CONNECTED", "LIVE")
+        # 15-symbol live-fleet validation mission, real defect found live:
+        # this used to require data_label in ("CONNECTED", "LIVE"), which
+        # counted DEGRADED as unhealthy. `_data_health_label` assigns
+        # DEGRADED to any feed whose last bar is >30s old -- deliberately
+        # conservative for a DISPLAY badge, but for the fleet's actual
+        # `--interval 1m` cadence a 30-60s age is the NORMAL gap between
+        # consecutive bars. The result: a continuously-healthy 15-symbol
+        # fleet reported "0 / 15 HEALTHY" for roughly the second half of
+        # every minute, observed live oscillating 0 -> 0 -> 13 -> 15 within
+        # 36 seconds. DEGRADED means data IS arriving, just not in the last
+        # 30s; only a genuinely broken feed (STALE / DISCONNECTED /
+        # RECONNECTING / SOURCE_UNAVAILABLE / NOT AVAILABLE) is unhealthy.
+        is_healthy = s.log_found and data_label in ("CONNECTED", "LIVE", "DEGRADED")
         if is_healthy:
             healthy += 1
         else:
