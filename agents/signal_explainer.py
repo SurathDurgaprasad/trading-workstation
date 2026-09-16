@@ -59,4 +59,5 @@ only comment on them.
         label="Signal Explainer",
         prompt=prompt,
         schema=SignalExplanation,
+        trigger="candidate_generated",
     )

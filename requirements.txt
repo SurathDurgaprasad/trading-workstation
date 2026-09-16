@@ -90,3 +90,11 @@ hypothesis==6.168.0
 # the rest of this file.
 scikit-learn==1.9.0
 pyarrow==25.0.1
+
+# OpenAI Intelligence Integration mission (2026-09-16): the advisory LLM
+# provider used when AI_PROVIDER=openai (core/config.py, llm/provider.py).
+# langchain-openai gives ChatOpenAI the same with_structured_output()
+# interface agents/analyst.py already uses for ChatOllama, so no callers
+# needed to change. Newly installed for this phase; not present before.
+langchain-openai==1.6.2
+openai==3.14.1

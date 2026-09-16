@@ -56,4 +56,7 @@ Provide:
 - overall_assessment: a short, balanced summary. You cannot state or imply a different label.
 """
 
-    return invoke_structured(role="decision_reviewer", label="Decision Reviewer", prompt=prompt, schema=DecisionReview)
+    return invoke_structured(
+        role="decision_reviewer", label="Decision Reviewer", prompt=prompt, schema=DecisionReview,
+        trigger="operator_requested_analysis",
+    )

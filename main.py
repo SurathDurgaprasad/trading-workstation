@@ -46,7 +46,7 @@ Suggest improvements.
 
 DEFAULT_PAPER_DB_PATH = PROJECT_ROOT / "data" / "paper_trading.db"
 
-_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "fleet-supervise", "fleet-summary", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "evaluate-forecasts", "learn", "review", "shadow-run", "schedule", "universe", "regime", "daily-report", "experiment", "hypothesis-registry", "cache-status", "readiness-check", "health")
+_KNOWN_COMMANDS = ("analyze", "backtest", "backtest-universe", "paper", "live-sim", "paper-live", "fleet-supervise", "fleet-summary", "dashboard", "scan", "research", "decide", "size", "predict", "evaluate", "evaluate-forecasts", "learn", "review", "shadow-run", "schedule", "universe", "regime", "daily-report", "experiment", "hypothesis-registry", "cache-status", "readiness-check", "health", "ai-health")
 
 # Known, controlled failure modes. Anything else is an unexpected bug and is
 # allowed to raise with its real traceback rather than being masked here.
@@ -85,13 +85,13 @@ _CONTROLLED_ERRORS = (
 def run(symbol: str, question: str | None = None) -> TradingState:
     # Deferred: see the import-cost note at the top of this file.
     from graph import graph
-    from llm.provider import check_ollama_availability
+    from llm.provider import check_llm_availability
     from rag.retriever import get_context
 
     resolved_question = question if question is not None else DEFAULT_QUESTION
 
     logger.info("Checking Ollama availability")
-    check_ollama_availability()
+    check_llm_availability()
 
     logger.info("Retrieving document context")
     context = get_context(resolved_question)
@@ -862,10 +862,10 @@ def _try_ai_explain(pipeline, result) -> str | None:
     never block the workflow if Ollama is unavailable."""
     try:
         from agents.signal_explainer import explain_signal
-        from llm.provider import check_ollama_availability
+        from llm.provider import check_llm_availability
         from market.context import MarketContext
 
-        check_ollama_availability()
+        check_llm_availability()
         indicators = pipeline.latest_indicators(result.symbol)
         if indicators is None:
             return None
@@ -3147,7 +3147,7 @@ def _print_shadow_run_footer(
 # adversarial second opinion on the latest persisted Decision. Requires
 # Ollama (unlike `decide`'s optional narrative, there is no meaningful
 # evidence-only fallback for a command whose entire purpose is the AI
-# critique) -- fails clearly via check_ollama_availability if unavailable,
+# critique) -- fails clearly via check_llm_availability if unavailable,
 # same posture as the `analyze` command. NOT an order; agents/
 # decision_reviewer.py cannot change the label, only critique it.
 # --------------------------------------------------------------------------
@@ -3157,7 +3157,7 @@ def run_review_command(args: argparse.Namespace) -> None:
     from pathlib import Path
 
     from decision_engine.store import DecisionStore
-    from llm.provider import check_ollama_availability
+    from llm.provider import check_llm_availability
 
     normalized = args.symbol.strip().upper()
 
@@ -3172,7 +3172,7 @@ def run_review_command(args: argparse.Namespace) -> None:
         print(f"review: no decision found for {normalized} in {decision_db} -- run `decide --symbol {normalized}` first.", file=sys.stderr)
         sys.exit(1)
 
-    check_ollama_availability()
+    check_llm_availability()
 
     from agents.decision_reviewer import review_decision
 
@@ -3517,6 +3517,121 @@ def run_health_command(args: argparse.Namespace) -> None:
     print(f"OVERALL STATUS: {health.overall.value}")
     if health.overall == OverallStatus.FAILED:
         sys.exit(1)
+
+
+def run_ai_health_command(args: argparse.Namespace) -> None:
+    """Safe CLI health check for the OpenAI advisory layer (Phase 7).
+
+    Never prints the API key. The connectivity check is a real
+    models.retrieve() call (auth+reachability only, no completion tokens)
+    -- this command intentionally does NOT spend a completion; that is
+    `ai-health --smoke-test`'s job, gated separately and off by default so
+    routine health checks never burn credit.
+    """
+    import os
+    import time
+
+    from core.config import LLMProvider, get_settings
+    from llm import budget
+    from llm.errors import AIBudgetExceededError, OpenAIDisabledError, OpenAINotConfiguredError, OpenAIUnavailableError
+
+    settings = get_settings()
+
+    print("=" * 70)
+    print("AI HEALTH CHECK (OpenAI advisory intelligence layer)")
+    print("=" * 70)
+    print(f"AI_PROVIDER (settings.llm_provider): {settings.llm_provider.value}")
+    print(f"OPENAI_MODEL:                        {settings.openai_model}")
+    print(f"OPENAI_ENABLED:                       {settings.openai_enabled}")
+    print(f"OPENAI_TIMEOUT:                       {settings.openai_timeout_seconds}s")
+    print(f"OPENAI_MAX_RETRIES:                   {settings.openai_max_retries}")
+    print(f"OPENAI_MAX_OUTPUT_TOKENS:              {settings.openai_max_output_tokens}")
+
+    key_present = bool(os.environ.get("OPENAI_API_KEY"))
+    print(f"OPENAI_API_KEY configured:            {'yes' if key_present else 'no'} (value never printed)")
+
+    if settings.llm_provider != LLMProvider.OPENAI:
+        print()
+        print("[INFO] llm_provider is not 'openai' -- set AI_PROVIDER=openai to activate this provider.")
+        print("OVERALL STATUS: NOT ACTIVE")
+        return
+
+    if not key_present:
+        print("[FAIL] OPENAI_API_KEY is not set.")
+        print("OVERALL STATUS: FAILED")
+        sys.exit(1)
+
+    if not settings.openai_enabled:
+        print("[FAIL] OPENAI_ENABLED is not true -- provider is administratively disabled.")
+        print("OVERALL STATUS: FAILED")
+        sys.exit(1)
+
+    print()
+    print("Checking connectivity/authentication (models.retrieve, no completion cost)...")
+    start = time.monotonic()
+    try:
+        from llm.provider import check_openai_availability
+
+        check_openai_availability()
+        latency_ms = (time.monotonic() - start) * 1000
+        print(f"[PASS] Reached OpenAI, model '{settings.openai_model}' is valid. Latency: {latency_ms:.0f}ms")
+    except (OpenAINotConfiguredError, OpenAIDisabledError, OpenAIUnavailableError) as exc:
+        print(f"[FAIL] {type(exc).__name__}: {exc}")
+        print("OVERALL STATUS: FAILED")
+        sys.exit(1)
+
+    summary = budget.summarize_today()
+    print()
+    print(f"Calls today: {summary['calls_today']} (successes: {summary['successes_today']})")
+    if summary["last_call"] is not None:
+        lc = summary["last_call"]
+        print(f"Last call: {lc['ts_utc']} status={lc['status']} model={lc['model']} latency_ms={lc['latency_ms']}")
+    else:
+        print("Last call: none recorded yet.")
+
+    if getattr(args, "smoke_test", False):
+        print()
+        print("Running ONE real minimal structured-output request (spends real API credit)...")
+        try:
+            budget.check_budget(input_chars=64)
+        except AIBudgetExceededError as exc:
+            print(f"[FAIL] Budget check rejected the smoke test: {exc}")
+            print("OVERALL STATUS: FAILED")
+            sys.exit(1)
+
+        from pydantic import BaseModel
+
+        class _HealthCheckReply(BaseModel):
+            acknowledged: bool
+            note: str
+
+        from agents.analyst import get_analyst_llm
+
+        smoke_start = time.monotonic()
+        try:
+            llm = get_analyst_llm("signal_explainer").with_structured_output(_HealthCheckReply)
+            result = llm.invoke(
+                "Reply with acknowledged=true and a one-sentence note confirming this is a real, "
+                "working structured-output response. Do not mention trading or make any recommendation."
+            )
+            latency_ms = (time.monotonic() - smoke_start) * 1000
+            budget.record_call(
+                role="signal_explainer", model=settings.openai_model, trigger="operator_requested_analysis",
+                status="SUCCESS", latency_ms=latency_ms, input_chars=64,
+            )
+            print(f"[PASS] REAL OpenAI response in {latency_ms:.0f}ms: acknowledged={result.acknowledged!r} note={result.note!r}")
+        except Exception as exc:  # noqa: BLE001 -- report, never crash
+            latency_ms = (time.monotonic() - smoke_start) * 1000
+            budget.record_call(
+                role="signal_explainer", model=settings.openai_model, trigger="operator_requested_analysis",
+                status="FAILURE", latency_ms=latency_ms, input_chars=64, error_class=type(exc).__name__,
+            )
+            print(f"[FAIL] Smoke test request failed: {type(exc).__name__}: {exc}")
+            print("OVERALL STATUS: FAILED")
+            sys.exit(1)
+
+    print()
+    print("OVERALL STATUS: HEALTHY")
 
 
 def _run_deep_readiness_checks(*, deep_timeout_seconds: float, deep_symbol: str) -> None:
@@ -4284,6 +4399,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     health_parser.add_argument("--no-ollama", action="store_true", help="Skip the Ollama reachability check (the one real network call this command makes, to localhost).")
 
+    ai_health_parser = subparsers.add_parser(
+        "ai-health",
+        help=(
+            "OpenAI advisory-intelligence layer health check: configuration, provider selection, "
+            "and (without --smoke-test) one free models.retrieve() connectivity/auth call. Never prints "
+            "the API key. Safe to run anytime -- never touches the live trading path."
+        ),
+    )
+    ai_health_parser.add_argument(
+        "--smoke-test", action="store_true",
+        help="Also run ONE real minimal structured-output completion request (spends real API credit; "
+             "still gated by the same budget limiter as every other AI call).",
+    )
+
     scan_parser = subparsers.add_parser(
         "scan",
         help=(
@@ -4700,6 +4829,8 @@ def main() -> None:
             run_readiness_check_command(args)
         elif args.command == "health":
             run_health_command(args)
+        elif args.command == "ai-health":
+            run_ai_health_command(args)
         elif args.command == "regime":
             run_regime_command(args)
         elif args.command == "daily-report":

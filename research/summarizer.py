@@ -72,7 +72,10 @@ Provide:
 - unknowns: a list of important questions this evidence does not answer.
 """
 
-    return invoke_structured(role="research_summarizer", label="Research Summarizer", prompt=prompt, schema=ResearchSummary)
+    return invoke_structured(
+        role="research_summarizer", label="Research Summarizer", prompt=prompt, schema=ResearchSummary,
+        trigger="operator_requested_analysis",
+    )
 
 
 def build_research_report(
@@ -108,9 +111,9 @@ def build_research_report(
             ai_summary_unavailable_reason = "No evidence (news/sector/scanner) was available to summarize."
         else:
             try:
-                from llm.provider import check_ollama_availability
+                from llm.provider import check_llm_availability
 
-                check_ollama_availability()
+                check_llm_availability()
                 ai_summary = summarize_research(
                     symbol=normalized, news=news, sector=sector, candidate_explanation=candidate_explanation
                 )

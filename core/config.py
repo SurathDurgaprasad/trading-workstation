@@ -1,3 +1,4 @@
+import os
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
@@ -35,6 +36,18 @@ class Settings(BaseModel):
     # single-inference time under load — 60s proved too tight in practice.
     ollama_timeout_seconds: float = 180.0
 
+    # OpenAI provider settings. Deliberately does NOT include the API key --
+    # llm/provider.py reads OPENAI_API_KEY from the process environment at
+    # the moment a real OpenAI call is about to be made, never at import
+    # time or into this cached Settings singleton, matching the existing
+    # live/dhan/config.py convention for the same reason (never store a
+    # secret in a long-lived object that could be logged/dumped/repr'd).
+    openai_model: str = "gpt-4o-mini"
+    openai_timeout_seconds: float = 30.0
+    openai_max_retries: int = 2
+    openai_max_output_tokens: int = 1024
+    openai_enabled: bool = False
+
     chat_temperature_default: float = 0.2
     technical_temperature: float = 0.2
     risk_temperature: float = 0.2
@@ -70,6 +83,40 @@ class Settings(BaseModel):
         }[role]
 
 
+def _env_overrides() -> dict:
+    """Read the small, explicit set of env vars this project supports for
+    provider selection and OpenAI tuning (never the API key itself -- see
+    the comment on the openai_* fields above). Everything else in Settings
+    stays a hardcoded default, matching the existing project convention;
+    this is deliberately NOT a blanket pydantic-settings env-to-field
+    mapping, since most Settings fields (role temperatures, retrieval_top_k,
+    etc.) were never meant to be environment-configurable and a blanket
+    mapping would silently change that for all of them at once.
+    """
+    overrides: dict = {}
+
+    provider_env = os.environ.get("AI_PROVIDER")
+    if provider_env:
+        overrides["llm_provider"] = LLMProvider(provider_env.strip().lower())
+
+    if os.environ.get("OPENAI_MODEL"):
+        overrides["openai_model"] = os.environ["OPENAI_MODEL"]
+
+    if os.environ.get("OPENAI_TIMEOUT"):
+        overrides["openai_timeout_seconds"] = float(os.environ["OPENAI_TIMEOUT"])
+
+    if os.environ.get("OPENAI_MAX_RETRIES"):
+        overrides["openai_max_retries"] = int(os.environ["OPENAI_MAX_RETRIES"])
+
+    if os.environ.get("OPENAI_MAX_OUTPUT_TOKENS"):
+        overrides["openai_max_output_tokens"] = int(os.environ["OPENAI_MAX_OUTPUT_TOKENS"])
+
+    if os.environ.get("OPENAI_ENABLED"):
+        overrides["openai_enabled"] = os.environ["OPENAI_ENABLED"].strip().lower() in ("1", "true", "yes", "on")
+
+    return overrides
+
+
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return Settings(**_env_overrides())

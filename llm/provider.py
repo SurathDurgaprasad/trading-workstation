@@ -1,10 +1,17 @@
+import os
 from functools import lru_cache
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from core.config import AgentRole, LLMProvider, get_settings
-from llm.errors import ModelNotAvailableError, OllamaUnavailableError
+from llm.errors import (
+    ModelNotAvailableError,
+    OllamaUnavailableError,
+    OpenAIDisabledError,
+    OpenAINotConfiguredError,
+    OpenAIUnavailableError,
+)
 
 
 def get_chat_model(
@@ -33,8 +40,9 @@ def get_chat_model(
         )
 
     if settings.llm_provider == LLMProvider.OPENAI:
-        raise NotImplementedError(
-            "OpenAI chat models are not implemented yet. Use llm_provider=ollama in config."
+        return _create_openai_chat_model(
+            model=settings.openai_model,
+            temperature=resolved_temperature,
         )
 
     raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
@@ -77,6 +85,39 @@ def _create_ollama_chat_model(
         base_url=base_url,
         temperature=temperature,
         client_kwargs={"timeout": settings.ollama_timeout_seconds},
+    )
+
+
+def _create_openai_chat_model(
+    *,
+    model: str,
+    temperature: float,
+) -> BaseChatModel:
+    """Build a langchain_openai.ChatOpenAI instance.
+
+    Reads OPENAI_API_KEY directly from the process environment at call
+    time, never from Settings (see core/config.py's comment on the
+    openai_* fields) and never logs it. Raises OpenAINotConfiguredError
+    (not a bare KeyError/langchain validation error) so callers -- and
+    `ai-health` -- get one clear, consistent message.
+    """
+    from langchain_openai import ChatOpenAI
+
+    settings = get_settings()
+
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise OpenAINotConfiguredError()
+    if not settings.openai_enabled:
+        raise OpenAIDisabledError()
+
+    return ChatOpenAI(
+        model=model,
+        api_key=api_key,
+        temperature=temperature,
+        timeout=settings.openai_timeout_seconds,
+        max_retries=settings.openai_max_retries,
+        max_completion_tokens=settings.openai_max_output_tokens,
     )
 
 
@@ -130,6 +171,47 @@ def check_ollama_availability(
     for required in resolved_required:
         if not _model_available(required, available):
             raise ModelNotAvailableError(required, available)
+
+
+def check_openai_availability() -> None:
+    """Fail fast with a clear error if OpenAI is not configured/reachable.
+
+    A real network call (models.list()) -- this is the connectivity/auth
+    check, not a completion, so it costs no completion tokens. Intended to
+    run once before a narration/explanation/health-check request, same
+    role as check_ollama_availability for the Ollama path.
+    """
+    settings = get_settings()
+    if settings.llm_provider != LLMProvider.OPENAI:
+        return
+
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise OpenAINotConfiguredError()
+    if not settings.openai_enabled:
+        raise OpenAIDisabledError()
+
+    from openai import OpenAI
+
+    client = OpenAI(api_key=api_key, timeout=settings.openai_timeout_seconds, max_retries=settings.openai_max_retries)
+    try:
+        client.models.retrieve(settings.openai_model)
+    except Exception as exc:
+        raise OpenAIUnavailableError(cause=exc) from exc
+
+
+def check_llm_availability() -> None:
+    """Provider-agnostic dispatcher: checks whichever provider is currently
+    configured (settings.llm_provider). Callers that used to call
+    check_ollama_availability() directly should call this instead so they
+    correctly follow AI_PROVIDER instead of always assuming Ollama."""
+    settings = get_settings()
+    if settings.llm_provider == LLMProvider.OLLAMA:
+        check_ollama_availability()
+    elif settings.llm_provider == LLMProvider.OPENAI:
+        check_openai_availability()
+    else:
+        raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
 
 def _model_available(required: str, available: list[str]) -> bool:

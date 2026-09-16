@@ -61,7 +61,10 @@ using only the evidence above. Do not state or imply a different label, a price 
 investment advice.
 """
 
-    result = invoke_structured(role="decision_narrator", label="Decision Narrator", prompt=prompt, schema=DecisionNarrative)
+    result = invoke_structured(
+        role="decision_narrator", label="Decision Narrator", prompt=prompt, schema=DecisionNarrative,
+        trigger="decision_narration",
+    )
     return result.narrative
 
 
@@ -107,9 +110,9 @@ def make_decision(
         return decision
 
     try:
-        from llm.provider import check_ollama_availability
+        from llm.provider import check_llm_availability
 
-        check_ollama_availability()
+        check_llm_availability()
         narrative = narrate_decision(decision)
         return decision.model_copy(update={"narrative": narrative})
     except Exception as exc:  # noqa: BLE001 -- AI narration must never block a decision
