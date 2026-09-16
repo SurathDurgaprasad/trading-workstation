@@ -122,6 +122,45 @@ def test_record_call_never_writes_the_prompt_text_or_api_key(ledger_db):
     assert not (columns & forbidden), f"ai_calls table has a column that could hold sensitive content: {columns & forbidden}"
 
 
+def test_check_budget_and_record_call_honor_a_monkeypatched_default_ledger_path(monkeypatch, tmp_path):
+    # Real production incident this session: record_call/check_budget's
+    # db_path parameter previously defaulted to the module-level
+    # DEFAULT_LEDGER_DB_PATH VALUE bound once at import time --
+    # monkeypatching llm.budget.DEFAULT_LEDGER_DB_PATH afterward (exactly
+    # what tests/conftest.py's autouse _isolate_ai_call_ledger fixture
+    # does for every test in this suite) had NO effect on already-defined
+    # functions' default arguments, so every caller that omits db_path
+    # (agents.analyst.invoke_structured always does) kept silently
+    # writing to the REAL production ledger no matter what was patched.
+    # This test proves the fix (db_path=None, resolved inside the
+    # function body) actually honors the patched value -- independent of
+    # tests/conftest.py's own autouse fixture (which has already patched
+    # DEFAULT_LEDGER_DB_PATH to its OWN tmp_path by the time this test
+    # body runs), so it re-patches to a second, distinct fake path here
+    # and asserts writes land there, not wherever conftest last pointed.
+    import llm.budget as budget_module
+
+    ledger_before_this_test = budget_module.DEFAULT_LEDGER_DB_PATH  # conftest's per-test tmp_path, not production
+    fake_ledger = tmp_path / "isolated.db"
+    monkeypatch.setattr(budget_module, "DEFAULT_LEDGER_DB_PATH", fake_ledger)
+
+    check_budget(input_chars=10)  # no db_path passed -- must resolve to the patched value
+    record_call(role="r", model="m", trigger="t", status="SUCCESS")  # same
+
+    # Query fake_ledger directly rather than just checking existence --
+    # check_budget's own read-only _connect() call creates an empty
+    # SQLite file as a side effect regardless of whether record_call's
+    # write actually lands there, so file existence alone would not have
+    # caught the original bug (a mutation confirmed this: the mutated
+    # record_call() still passed a fake_ledger.exists()-only assertion,
+    # because check_budget innocently created the empty file first).
+    row_count_in_fake_ledger = summarize_today(db_path=fake_ledger)["calls_today"]
+    assert row_count_in_fake_ledger == 1, (
+        f"expected record_call's row in the monkeypatched ledger {fake_ledger}, found {row_count_in_fake_ledger}"
+    )
+    assert fake_ledger != ledger_before_this_test
+
+
 def test_summarize_today_reports_the_most_recent_call(ledger_db):
     record_call(role="r1", model="m1", trigger="t1", status="FAILURE", error_class="TimeoutError", db_path=ledger_db)
     time.sleep(0.01)

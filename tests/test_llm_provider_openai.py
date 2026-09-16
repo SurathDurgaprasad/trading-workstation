@@ -19,9 +19,21 @@ from llm.errors import OpenAIDisabledError, OpenAINotConfiguredError
 
 @pytest.fixture(autouse=True)
 def _clear_settings_cache():
-    config_module.get_settings.cache_clear()
+    # Capture the real, cache_clear()-bearing function object up front --
+    # several tests in this file monkeypatch config_module.get_settings to
+    # a plain lambda for the duration of the test. monkeypatch restores
+    # the original attribute on its OWN teardown, but fixture teardown
+    # order is not guaranteed to run this fixture's cleanup after that
+    # restore (it depends on when `monkeypatch` itself was first set up
+    # relative to this fixture -- conftest.py's autouse
+    # _isolate_ai_call_ledger fixture also depends on `monkeypatch`,
+    # which can make it set up before this one and therefore tear down
+    # after it). Holding our own reference sidesteps the ordering
+    # question entirely.
+    real_get_settings = config_module.get_settings
+    real_get_settings.cache_clear()
     yield
-    config_module.get_settings.cache_clear()
+    real_get_settings.cache_clear()
 
 
 def _openai_settings(**overrides) -> Settings:

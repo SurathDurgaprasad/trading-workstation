@@ -87,7 +87,7 @@ def _connect(db_path: Path):
 def check_budget(
     *,
     input_chars: int,
-    db_path: Path = DEFAULT_LEDGER_DB_PATH,
+    db_path: Path | None = None,
     limits: BudgetLimits = DEFAULT_LIMITS,
 ) -> None:
     """Raise AIBudgetExceededError if firing a call now would violate any limit.
@@ -95,7 +95,22 @@ def check_budget(
     Must be called immediately before every real OpenAI request, with no
     other gate in between -- callers must not cache a "budget OK" result
     across calls.
-    """
+
+    db_path defaults to None (resolved to the CURRENT value of
+    DEFAULT_LEDGER_DB_PATH inside the function body, not at def time) so
+    that tests/conftest.py's autouse fixture -- which monkeypatches
+    llm.budget.DEFAULT_LEDGER_DB_PATH to an isolated tmp_path for every
+    test -- actually takes effect. A plain `db_path: Path =
+    DEFAULT_LEDGER_DB_PATH` default is bound once at import time and would
+    silently keep pointing at the real production ledger no matter what a
+    test patches afterward -- exactly the real defect this project's own
+    test suite hit: every mocked/fake LLM call exercised by
+    agents.analyst.invoke_structured's tests (decision narration, research
+    summarizer, decision reviewer, etc., none of which pass a db_path)
+    was being recorded into data/ai_call_ledger.db, corrupting the
+    real ai-health/dashboard call history with sub-millisecond,
+    obviously-fake test latencies."""
+    resolved_db_path = db_path if db_path is not None else DEFAULT_LEDGER_DB_PATH
     global _session_call_count
 
     if input_chars > limits.max_input_chars:
@@ -109,7 +124,7 @@ def check_budget(
                 f"session call count {_session_call_count} >= max_calls_per_session={limits.max_calls_per_session}"
             )
 
-        with _connect(db_path) as conn:
+        with _connect(resolved_db_path) as conn:
             now = datetime.now(timezone.utc)
             one_hour_ago = (now - timedelta(hours=1)).isoformat()
             hour_count = conn.execute(
@@ -146,11 +161,14 @@ def record_call(
     input_chars: int | None = None,
     output_tokens: int | None = None,
     error_class: str | None = None,
-    db_path: Path = DEFAULT_LEDGER_DB_PATH,
+    db_path: Path | None = None,
 ) -> None:
     """Append one row to the audit ledger. status is a short label, e.g.
-    'SUCCESS', 'FAILURE', 'TIMEOUT', 'BUDGET_REJECTED'."""
-    with _connect(db_path) as conn:
+    'SUCCESS', 'FAILURE', 'TIMEOUT', 'BUDGET_REJECTED'.
+
+    db_path resolved lazily -- see check_budget's docstring for why."""
+    resolved_db_path = db_path if db_path is not None else DEFAULT_LEDGER_DB_PATH
+    with _connect(resolved_db_path) as conn:
         conn.execute(
             "INSERT INTO ai_calls (ts_utc, role, model, trigger, status, latency_ms, "
             "input_chars, output_tokens, error_class) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -177,10 +195,13 @@ def _reset_session_count_for_tests() -> None:
         _session_call_count = 0
 
 
-def summarize_today(db_path: Path = DEFAULT_LEDGER_DB_PATH) -> dict:
-    """Read-only rollup used by `ai-health` and the dashboard AI status panel."""
+def summarize_today(db_path: Path | None = None) -> dict:
+    """Read-only rollup used by `ai-health` and the dashboard AI status panel.
+
+    db_path resolved lazily -- see check_budget's docstring for why."""
+    resolved_db_path = db_path if db_path is not None else DEFAULT_LEDGER_DB_PATH
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    with _connect(db_path) as conn:
+    with _connect(resolved_db_path) as conn:
         total = conn.execute("SELECT COUNT(*) FROM ai_calls WHERE ts_utc >= ?", (today_start,)).fetchone()[0]
         success = conn.execute(
             "SELECT COUNT(*) FROM ai_calls WHERE ts_utc >= ? AND status = 'SUCCESS'", (today_start,)

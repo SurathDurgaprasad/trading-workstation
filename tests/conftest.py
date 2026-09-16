@@ -16,6 +16,33 @@ from schemas.technical import TechnicalAnalysis
 AAPL_CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "market" / "AAPL" / "1d.csv"
 
 
+@pytest.fixture(autouse=True)
+def _isolate_ai_call_ledger(tmp_path, monkeypatch):
+    """Real defect found during this session's own full-regression run:
+    agents.analyst.invoke_structured unconditionally calls
+    llm.budget.record_call() for every LLM invocation (Ollama or OpenAI),
+    and record_call's db_path previously defaulted to the real production
+    ledger (data/ai_call_ledger.db). Every test in this suite that
+    exercises invoke_structured (decision narration, research summarizer,
+    decision reviewer, signal explainer, and their many fakes/mocks) was
+    silently writing sub-millisecond fake-latency rows into the SAME file
+    `ai-health`/the dashboard AI status panel reads for real evidence --
+    corrupting production audit data on every `pytest` run.
+
+    llm/budget.py was fixed to resolve DEFAULT_LEDGER_DB_PATH lazily
+    (inside each function body, not as a bound default-argument value) so
+    this autouse fixture can redirect EVERY test in the suite to an
+    isolated per-test tmp_path ledger, with no test needing to know this
+    exists. Tests that explicitly pass their own db_path (e.g.
+    tests/test_llm_budget.py) are unaffected either way."""
+    import llm.budget as budget_module
+
+    monkeypatch.setattr(budget_module, "DEFAULT_LEDGER_DB_PATH", tmp_path / "ai_call_ledger.db")
+    budget_module._reset_session_count_for_tests()
+    yield
+    budget_module._reset_session_count_for_tests()
+
+
 def real_aapl_mock_script(symbol: str = "AAPL"):
     """Phase 13: a MockScriptEvent list built from REAL cached AAPL daily
     history, re-tagged for a different symbol name if requested. Used
