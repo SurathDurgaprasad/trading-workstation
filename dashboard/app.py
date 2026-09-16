@@ -370,6 +370,39 @@ def _risk_halt_banner() -> str:
     )
 
 
+def _fleet_mode_banner() -> str:
+    """Dashboard truthfulness fix (OpenAI Intelligence Integration mission,
+    Phase 14 / real defect disclosed in docs/LIVE_INTELLIGENCE_FORENSICS_
+    2026-09-16.md #7): Overview/Signals/Portfolio/System read the FIXED
+    default single-workstation DBs (live/workstation.py's module-level
+    LIVE_STATE_DB_PATH etc.), never the per-symbol `runtime/<SYMBOL>/`
+    stores a `fleet-supervise` session actually writes to -- verified live
+    on 2026-09-16: these tabs showed week-old rows from a previous
+    single-symbol session while a real 15-symbol fleet ran, correctly
+    badged STALE (never fabricated) but misleading by omission (a viewer
+    could easily miss that STALE here means "wrong data source", not
+    merely "a few minutes old").
+
+    Full aggregation across N independent per-symbol paper accounts into
+    one Overview is a genuine architecture change (which account's
+    equity/P&L is "the" number when there are 15 independent $100,000
+    paper accounts? do open positions list per-symbol or merge?) -- not
+    attempted here while a real live session is running, to avoid
+    introducing an untested change into the exact pages operators are
+    watching. This banner is the safe, additive fix available right now:
+    an unmissable pointer to the ONE page that IS fleet-aware, on every
+    page that is NOT, whenever fleet mode is actually configured (never
+    shown otherwise -- a single-symbol workstation session is unaffected
+    and sees nothing new)."""
+    if _fleet_runtime_dir is None or not _fleet_symbols:
+        return ""
+    return (
+        '<div class="banner kill-active">FLEET MODE ACTIVE &mdash; this page reads the default single-workstation '
+        "database, NOT the running fleet's per-symbol runtime stores. "
+        '<a href="/fleet">See the Fleet tab</a> for real data from the currently running symbols.</div>'
+    )
+
+
 def _page(body: str, *, active_path: str = "/") -> str:
     """UI integration (Claude Design "Trading Workstation" approved
     canvas): visual shell only -- dark charcoal/near-black background,
@@ -618,6 +651,7 @@ async def overview(request: Request) -> HTMLResponse:
     body = f"""
 {_kill_switch_banner()}
 {_risk_halt_banner()}
+{_fleet_mode_banner()}
 <div style="display:grid;grid-template-columns:220px minmax(0,1fr) 280px;gap:20px;align-items:start;">
   <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
     <div style="font-size:10px;font-weight:700;letter-spacing:0.06em;color:#66717D;margin-bottom:8px;">WATCHLIST &mdash; observed this session</div>
@@ -699,6 +733,7 @@ async def signals_page(request: Request) -> HTMLResponse:
     body = f"""
 {_kill_switch_banner()}
 {_risk_halt_banner()}
+{_fleet_mode_banner()}
 <h2>SIGNALS <span class="tag tag-mock">from pending approvals</span></h2>
 <p class="muted">Derived from the latest signal seen for each symbol currently awaiting approval.</p>
 <table><tr><th>Symbol</th><th>Direction</th><th>Reference Price</th><th>As Of</th></tr>{market_rows}</table>
@@ -761,6 +796,7 @@ async def signal_detail_page(request: Request) -> HTMLResponse:
     body = f"""
 {_kill_switch_banner()}
 {_risk_halt_banner()}
+{_fleet_mode_banner()}
 <p><a href="/signals">&larr; back to Signals</a></p>
 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
   <div>
@@ -859,6 +895,7 @@ async def portfolio_page(request: Request) -> HTMLResponse:
     body = f"""
 {_kill_switch_banner()}
 {_risk_halt_banner()}
+{_fleet_mode_banner()}
 <h2>ACCOUNT</h2>
 <div class="kv">
 <div>Initial Capital</div><div>{_fmt_money(account.initial_capital)}</div>
@@ -1095,6 +1132,7 @@ async def system_page(request: Request) -> HTMLResponse:
     body = f"""
 {_kill_switch_banner()}
 {_risk_halt_banner()}
+{_fleet_mode_banner()}
 <h2>SYSTEM HEALTH</h2>
 <p>Overall status: <span class="tag {overall_class}">{html.escape(health['overall'])}</span></p>
 <table><tr><th>Component</th><th>Status</th><th>Detail</th></tr>{health_rows}</table>

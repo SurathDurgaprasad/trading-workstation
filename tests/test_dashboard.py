@@ -651,6 +651,42 @@ def test_fleet_page_shows_real_fleet_summary_data_once_configured(client, monkey
     dashboard_app.configure(schedule_config_path=None)  # reset for other tests in this module
 
 
+# --- fleet mode banner (dashboard truthfulness fix, disclosed defect #7 in ---
+# --- docs/LIVE_INTELLIGENCE_FORENSICS_2026-09-16.md, now partly addressed) ---
+
+
+def test_no_fleet_banner_on_any_page_when_fleet_mode_is_not_configured(client):
+    # The default (single-workstation) case must see nothing new -- this
+    # banner exists only to disclose a real gap that appears in fleet mode.
+    for path in ("/", "/signals", "/portfolio", "/system"):
+        response = client.get(path)
+        assert "FLEET MODE ACTIVE" not in response.text
+
+
+def test_fleet_banner_appears_on_overview_signals_portfolio_system_once_fleet_mode_is_configured(client, tmp_path):
+    import dashboard.app as dashboard_app
+
+    dashboard_app.configure(schedule_config_path=None, fleet_runtime_dir=str(tmp_path), fleet_symbols=["RELIANCE.NS"])
+    try:
+        for path in ("/", "/signals", "/portfolio", "/system"):
+            response = client.get(path)
+            assert "FLEET MODE ACTIVE" in response.text, f"{path} should disclose it is not fleet-aware"
+            assert "/fleet" in response.text
+    finally:
+        dashboard_app.configure(schedule_config_path=None)
+
+
+def test_fleet_banner_does_not_appear_on_the_fleet_tab_itself(client, tmp_path):
+    import dashboard.app as dashboard_app
+
+    dashboard_app.configure(schedule_config_path=None, fleet_runtime_dir=str(tmp_path), fleet_symbols=["RELIANCE.NS"])
+    try:
+        response = client.get("/fleet")
+        assert "FLEET MODE ACTIVE" not in response.text
+    finally:
+        dashboard_app.configure(schedule_config_path=None)
+
+
 def test_fleet_page_counts_a_degraded_but_arriving_feed_as_healthy(client, monkeypatch, tmp_path):
     """15-symbol live-fleet validation mission, real defect found live:
     `_data_health_label` grades any feed whose last bar is >30s old as
