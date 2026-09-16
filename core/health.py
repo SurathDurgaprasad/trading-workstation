@@ -134,10 +134,27 @@ check below."""
 
 
 def _check_disk(probe_dir: Path) -> ComponentHealth:
+    """15-symbol live-fleet validation mission, real defect found live:
+    the probe filename used to be a single fixed name shared by every
+    caller. With N `paper-live` worker processes (fleet-supervise) all
+    starting within the same second and all running this SAME startup
+    gate against the SAME probe_dir (PROJECT_ROOT), one process's
+    probe.unlink() could delete another process's probe file between
+    ITS OWN write_text() and unlink() calls -- a real TOCTOU race, not
+    hypothetical: observed live as a genuine SAFE_STOP (`[WinError 2]
+    The system cannot find the file specified`) for one worker in a
+    10-symbol Phase C run, correctly triggering this project's own
+    bounded-restart mechanism (which recovered it on retry) rather than
+    corrupting anything -- but the race itself was a real, closeable
+    defect, not something to just tolerate. Fixed by giving every
+    caller its own uniquely-named probe file (PID + a random suffix),
+    so concurrent callers never touch the same path."""
+    import os
     import shutil
+    import uuid
 
     try:
-        probe = Path(probe_dir) / "tradingagents_health_write_probe.tmp"
+        probe = Path(probe_dir) / f"tradingagents_health_write_probe_{os.getpid()}_{uuid.uuid4().hex[:8]}.tmp"
         probe.write_text("ok")
         probe.unlink()
     except OSError as exc:

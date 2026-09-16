@@ -316,3 +316,38 @@ def test_overall_status_is_failed_when_database_integrity_check_fails():
 def test_get_returns_none_for_an_unknown_component_name(tmp_path):
     health = collect_system_health(db_paths={}, probe_dir=tmp_path, check_ollama=False)
     assert health.get("does-not-exist") is None
+
+
+def test_disk_check_survives_many_real_concurrent_callers_against_the_same_probe_dir(tmp_path):
+    """15-symbol live-fleet validation mission, real defect found live:
+    a single fixed probe filename let one process's unlink() delete
+    another concurrently-running process's own probe file (a real
+    TOCTOU race), causing a genuine, observed SAFE_STOP
+    ("[WinError 2] The system cannot find the file specified") for one
+    worker during a real 10-symbol fleet-supervise run. Real threads
+    (not simulated), same probe_dir, hammering _check_disk() far harder
+    than 15 fleet-supervise workers starting a second apart ever would
+    -- every single call must report HEALTHY, never a false FAILED from
+    another caller's own probe file."""
+    import threading
+
+    from core.health import ComponentStatus, _check_disk
+
+    results: list[ComponentStatus] = []
+    lock = threading.Lock()
+
+    def _call():
+        health = _check_disk(tmp_path)
+        with lock:
+            results.append(health.status)
+
+    threads = [threading.Thread(target=_call) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert len(results) == 20
+    assert all(status == ComponentStatus.HEALTHY for status in results), results
+    # No probe files left behind by any caller.
+    assert list(tmp_path.glob("tradingagents_health_write_probe_*.tmp")) == []
