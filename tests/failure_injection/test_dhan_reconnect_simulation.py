@@ -32,7 +32,7 @@ import time
 
 import pytest
 
-from live.contracts import FeedDisconnectedError
+from live.contracts import NO_NEW_BAR, FeedDisconnectedError
 from live.dhan.market_data_source import DhanConnectionState
 
 from tests.test_dhan_market_data_source import _source, credentials, instrument_map  # noqa: F401 -- reused fixtures/helpers, not redefined
@@ -246,3 +246,90 @@ def test_connected_idle_timeout_none_disables_the_check(instrument_map, credenti
 
     assert len(factory.instances) == 1  # disabled -- exact pre-fix behavior preserved for a caller that wants it
     assert source.state == DhanConnectionState.CONNECTED
+
+
+# --- Adversarial hardening pass (autonomous mission, same day): reconnect --
+# --- machinery deep-audit findings, closed same day -------------------------
+#
+# A dedicated audit agent traced every DhanMarketDataSource callback path
+# and found on_message was the ONE callback never generation-tagged --
+# on_open/on_close/on_error all check `generation != self._connection_
+# generation` before doing anything (see e.g. _on_connect_timeout above),
+# but on_message was bound as a bare `self._on_raw_message` with no
+# generation argument at all. A message physically in flight from an
+# already-superseded transport (on_error fired for the OLD generation, but
+# its socket/read-thread hadn't fully torn down before the NEW one reached
+# CONNECTED) would previously have been processed identically to genuinely
+# current data -- fed into the live CandleBuilder and the shared bar queue.
+# Fixed by tagging on_message with its own generation, checked the same way
+# every other callback already is; _connect() was also hardened to
+# explicitly close() the previous transport rather than merely abandoning
+# it (a real resource-leak risk over many reconnects, independent of the
+# correctness fix). See live/dhan/market_data_source.py's own docstrings
+# on _on_raw_message and _connect for the full writeup.
+
+
+def _ticker_packet(security_id: int, price: float, epoch: int) -> bytes:
+    import struct
+
+    header = struct.pack("<BhBi", 2, 16, 1, security_id)
+    body = struct.pack("<fi", price, epoch)
+    return header + body
+
+
+def test_a_stale_generation_message_is_never_processed_as_current_data(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials, backoff_base_seconds=0.01, backoff_max_seconds=0.01)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    old_transport = factory.current
+    assert len(factory.instances) == 1
+
+    old_transport.simulate_close(code=1006, reason="simulated transient drop")
+    assert source.state == DhanConnectionState.CONNECTED  # reconnected successfully
+    assert len(factory.instances) == 2
+    new_transport = factory.current
+    assert new_transport is not old_transport
+
+    # A message physically in flight from the OLD (superseded) transport --
+    # must be silently ignored, never merged into the live CandleBuilder or
+    # the shared bar queue as if it were current data.
+    old_transport.simulate_message(_ticker_packet(2885, 9999.0, epoch=0))
+
+    # A genuine message on the CURRENT transport, crossing a bucket
+    # boundary -- the resulting bar must reflect ONLY real, current-
+    # generation data. If the stale message above had leaked in, this
+    # bar's open/high would show the implausible 9999.0 price instead.
+    new_transport.simulate_message(_ticker_packet(2885, 100.0, epoch=10))
+    new_transport.simulate_message(_ticker_packet(2885, 101.0, epoch=61))  # crosses into the next bucket
+
+    event = source.next_bar()
+    assert event is not NO_NEW_BAR
+    assert event.bar.open == pytest.approx(100.0)
+    assert event.bar.high == pytest.approx(100.0)  # never touched by the stale 9999.0 tick
+
+
+def test_connect_closes_the_previous_transport_on_reconnect(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials, backoff_base_seconds=0.01, backoff_max_seconds=0.01)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    old_transport = factory.current
+    assert old_transport.closed is False
+
+    old_transport.simulate_close(code=1006, reason="simulated transient drop")
+
+    assert old_transport.closed is True  # explicitly closed, not merely abandoned
+    assert factory.current is not old_transport
+    assert factory.current.closed is False  # the NEW transport is untouched
+
+
+def test_close_state_raises_feed_disconnected_from_next_bar_instead_of_looping_forever(instrument_map, credentials):
+    """Adversarial hardening pass finding: next_bar() previously only
+    checked state == FAILED before touching the queue -- CLOSED (a
+    deliberate close() call) was never checked at all, so a caller polling
+    next_bar() after close() would silently time out and return NO_NEW_BAR
+    forever instead of ever being told the feed is gone for good."""
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    source.close()
+    assert source.state == DhanConnectionState.CLOSED
+
+    with pytest.raises(FeedDisconnectedError):
+        source.next_bar()

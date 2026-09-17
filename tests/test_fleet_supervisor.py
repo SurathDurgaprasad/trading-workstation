@@ -301,6 +301,66 @@ def test_poll_fleet_once_covers_every_symbol_in_the_fleet(tmp_path):
     assert {status.symbol for status in snapshot.statuses} == {"RELIANCE.NS", "TCS.NS"}
 
 
+# --- poll_fleet_once -- adversarial hardening pass: per-symbol exception ------
+# --- isolation ("one symbol failure cannot stop another symbol") --------------
+#
+# Real gap found by a dedicated audit agent: the per-symbol loop body had no
+# exception boundary at all. A single symbol raising during check_worker_
+# health (e.g. a transient log-file read error) or during relaunch (e.g.
+# subprocess.Popen failing: missing interpreter, OS process-table
+# exhaustion) propagated straight out of poll_fleet_once, out of
+# run_fleet_supervise_command's while loop, into its own `finally:
+# shutdown_fleet(handles)` -- terminating EVERY worker, including every
+# other, perfectly healthy symbol. Fixed with a per-symbol try/except and a
+# new WorkerHealth.SUPERVISION_ERROR status that surfaces the failure
+# instead of letting it escape.
+
+
+def test_poll_fleet_once_isolates_a_relaunch_failure_to_only_the_failing_symbol(tmp_path):
+    # Built directly (not via the `_handle()` shortcut, which hardcodes
+    # symbol="RELIANCE.NS" regardless of the dict key -- fine for the
+    # single-symbol tests above, but this test needs two GENUINELY
+    # distinct symbols to prove isolation between them).
+    handles = {
+        "RELIANCE.NS": WorkerHandle(symbol="RELIANCE.NS", process=_FakeProcess([]), log_path=tmp_path / "r.log"),  # healthy, must be entirely unaffected
+        "TCS.NS": WorkerHandle(symbol="TCS.NS", process=_FakeProcess([1]), log_path=tmp_path / "t.log", restarts=0),  # crashed, its relaunch will fail
+    }
+    original_tcs_handle = handles["TCS.NS"]
+
+    def relaunch(symbol, next_restart_count):
+        raise OSError("simulated subprocess.Popen failure: no such file or directory")
+
+    snapshot = poll_fleet_once(handles, max_restarts=3, relaunch=relaunch)
+
+    by_symbol = {status.symbol: status for status in snapshot.statuses}
+    assert by_symbol["RELIANCE.NS"].health == WorkerHealth.RUNNING  # entirely unaffected by TCS.NS's failure
+    assert by_symbol["TCS.NS"].health == WorkerHealth.SUPERVISION_ERROR
+    assert "simulated subprocess.Popen failure" in by_symbol["TCS.NS"].detail
+    assert snapshot.restarted_symbols == []  # never counted as a successful restart
+    assert handles["TCS.NS"] is original_tcs_handle  # previous handle preserved, not dropped or half-replaced
+    assert handles["RELIANCE.NS"] is not None  # still present, untouched
+
+
+def test_poll_fleet_once_isolates_a_health_check_failure_to_only_the_failing_symbol(tmp_path):
+    class _RaisingProcess:
+        pid = 9999
+
+        def poll(self):
+            raise OSError("simulated transient Windows file-handle error")
+
+    handles = {
+        "RELIANCE.NS": _handle([], tmp_path),
+        "TCS.NS": WorkerHandle(symbol="TCS.NS", process=_RaisingProcess(), log_path=tmp_path / "t.log"),
+    }
+
+    snapshot = poll_fleet_once(handles, max_restarts=3, relaunch=lambda s, r: _handle([], tmp_path))
+
+    by_symbol = {status.symbol: status for status in snapshot.statuses}
+    assert by_symbol["RELIANCE.NS"].health == WorkerHealth.RUNNING  # entirely unaffected by TCS.NS's failure
+    assert by_symbol["TCS.NS"].health == WorkerHealth.SUPERVISION_ERROR
+    assert "simulated transient Windows file-handle error" in by_symbol["TCS.NS"].detail
+
+
 # --- shutdown_fleet -- deterministic (fake processes, no real subprocess timing) --
 
 

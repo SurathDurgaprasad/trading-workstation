@@ -557,3 +557,288 @@ def test_cold_start_self_recovery_does_not_weaken_the_existing_mid_session_singl
     assert bar is not None
     assert bar.open == 100.0
     assert bar.close == 102.0  # the single bad tick never merged in, original baseline preserved throughout
+
+
+# --- Adversarial hardening pass (autonomous mission, same day) --------------
+# Broader adversarial coverage requested against CandleBuilder as a critical
+# financial-data boundary. Several scenarios are ALREADY covered above and
+# are not duplicated here (previous-day first tick, wildly-future timestamp
+# mid-session, out-of-order ticks, repeated disagreeing startup ticks). Two
+# scenarios are explicitly OUT OF SCOPE for this file: malformed WIRE packets
+# (handled upstream by live/dhan/wire.py's parse_packet + DhanWireFormatError,
+# before anything ever reaches on_tick) and cross-symbol contamination at the
+# DhanMarketDataSource level (structurally prevented there by one dict entry
+# per symbol -- test_independent_instances_never_share_state below covers
+# the CandleBuilder-level half of that guarantee).
+
+
+def test_previous_day_first_two_consecutive_stale_ticks_falsely_confirm_a_bad_baseline():
+    """Documented, NOT fixed today -- a genuine, narrower residual gap found
+    during this adversarial pass, in the same honest spirit as
+    test_corrupted_very_first_tick_is_a_documented_residual_gap. The
+    two-tick-confirmation mechanism (see __init__'s own docstring) assumes
+    the SECOND disagreeing tick that agrees with the first is independent
+    evidence the ORIGINAL baseline was bad -- but if BOTH of the first two
+    ticks a fresh builder ever receives are themselves stale (e.g. two
+    fragments of the same corrupted overnight snapshot delivered moments
+    apart), they trivially agree with each other and PERMANENTLY confirm
+    the wrong baseline, exactly reproducing the pre-fix "rejects forever"
+    failure mode for every genuinely current tick afterward. Not fixed
+    because: (a) the real 2026-09-17 incident that motivated the fix
+    always showed exactly ONE stale seed tick, never two, so there is no
+    real-world evidence this specific pattern occurs; (b) the only fixes
+    available (a wall-clock comparison, or allowing an already-confirmed
+    baseline to be re-challenged) each reintroduce a version of a problem
+    this design deliberately avoided elsewhere -- see __init__'s own
+    docstring on why wall-clock comparison was rejected, and
+    test_cold_start_self_recovery_does_not_weaken_the_existing_mid_session_
+    single_bad_tick_protection for why re-challenging a confirmed baseline
+    is dangerous."""
+    builder = CandleBuilder(symbol="HINDUNILVR", interval="1m")
+    stale_seed = builder.on_tick(price=100.0, volume=0, timestamp=_ts(0), received_at=_ts(0))
+    assert stale_seed is None
+
+    # A second fragment of the SAME stale snapshot, moments later -- agrees
+    # with the first stale tick, not with reality. Falsely confirms.
+    stale_confirm = builder.on_tick(price=100.5, volume=0, timestamp=_ts(5), received_at=_ts(5))
+    assert stale_confirm is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 0  # this tick AGREED with the (bad) baseline -- not rejected, confirmed
+
+    # Every genuinely current tick from here on is rejected FOREVER --
+    # the exact pre-fix failure mode, for this specific two-bad-ticks
+    # pattern only.
+    real_tick_1 = builder.on_tick(price=2500.0, volume=0, timestamp=_ts(30 * 86400), received_at=_ts(30 * 86400))
+    assert real_tick_1 is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1
+    real_tick_2 = builder.on_tick(price=2501.0, volume=0, timestamp=_ts(30 * 86400 + 60), received_at=_ts(30 * 86400 + 60))
+    assert real_tick_2 is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 2  # still growing -- no self-heal available once confirmed
+
+
+def test_previous_day_stale_tick_then_current_day_ticks_self_heals_with_real_calendar_dates():
+    """Same self-healing property as
+    test_a_poisoned_first_tick_self_heals_once_a_second_consistent_tick_
+    arrives, but with genuine calendar-crossing datetimes (2026-09-16 ->
+    2026-09-17) rather than relative epoch offsets, to make the
+    previous-day/current-day framing this scenario is named for concrete
+    and undeniable -- mirrors the exact real HINDUNILVR.NS incident dates."""
+    builder = CandleBuilder(symbol="HINDUNILVR", interval="1m")
+    poisoned = builder.on_tick(
+        price=2500.0, volume=0,
+        timestamp=datetime(2026, 9, 16, 10, 26, 9, tzinfo=timezone.utc),
+        received_at=datetime(2026, 9, 16, 10, 26, 9, tzinfo=timezone.utc),
+    )
+    assert poisoned is None
+
+    real_tick_1 = builder.on_tick(
+        price=2510.0, volume=0,
+        timestamp=datetime(2026, 9, 17, 9, 15, 30, tzinfo=timezone.utc),
+        received_at=datetime(2026, 9, 17, 9, 15, 30, tzinfo=timezone.utc),
+    )
+    assert real_tick_1 is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1
+
+    real_tick_2 = builder.on_tick(
+        price=2511.0, volume=0,
+        timestamp=datetime(2026, 9, 17, 9, 15, 45, tzinfo=timezone.utc),
+        received_at=datetime(2026, 9, 17, 9, 15, 45, tzinfo=timezone.utc),
+    )
+    assert real_tick_2 is None  # switches baseline to 2026-09-17, starts a fresh bucket
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1  # not incremented -- confirmed, not rejected
+
+    bar = builder.on_tick(
+        price=2512.0, volume=0,
+        timestamp=datetime(2026, 9, 17, 9, 16, 30, tzinfo=timezone.utc),
+        received_at=datetime(2026, 9, 17, 9, 16, 30, tzinfo=timezone.utc),
+    )
+    assert bar is not None
+    assert bar.open == 2511.0  # the 2026-09-16 tick never merged into any bucket
+
+
+def test_baseline_confirmed_state_survives_a_simulated_reconnect_and_rejects_a_replayed_stale_packet():
+    """A CandleBuilder instance is created once per (symbol, interval) and
+    persists for the life of the worker process -- DhanMarketDataSource
+    keys `_candle_builders` by symbol via `setdefault`, so a WebSocket
+    reconnect (handled entirely inside DhanMarketDataSource) never creates
+    a fresh CandleBuilder; the SAME instance, with its already-confirmed
+    baseline, keeps receiving ticks after `_on_transport_open` resubscribes.
+    This test proves that property is actually safe: once confirmed, a
+    reconnect that happens to redeliver a stale snapshot tick (Dhan's own
+    overnight-LTP-on-subscribe behavior, the same mechanism that caused the
+    real incident, could plausibly also fire again on a mid-session
+    reconnect) is rejected via the ordinary CONFIRMED-baseline path --
+    permanently correctly, not treated as a fresh cold start that a second
+    agreeing bad tick could fool again."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=1250.0, volume=0, timestamp=_ts(0), received_at=_ts(0))
+    builder.on_tick(price=1251.0, volume=0, timestamp=_ts(10), received_at=_ts(10))
+    bar = builder.on_tick(price=1252.0, volume=0, timestamp=_ts(65), received_at=_ts(65))
+    assert bar is not None  # baseline now confirmed, real candle production underway
+
+    # Simulated reconnect: a stale snapshot tick arrives, matching the
+    # real incident's own mechanism (Dhan resends an old LTP on a fresh
+    # subscribe). Rejected via the confirmed path -- a single rejection,
+    # not a re-opened cold-start window.
+    replayed_stale = builder.on_tick(price=1200.0, volume=0, timestamp=_ts(30 * 86400), received_at=_ts(90))
+    assert replayed_stale is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1
+
+    # A SECOND tick agreeing with that stale replay must NOT be able to
+    # re-poison an already-confirmed baseline -- unlike the cold-start
+    # case, there is no pending-candidate mechanism active anymore.
+    replayed_stale_2 = builder.on_tick(price=1201.0, volume=0, timestamp=_ts(30 * 86400 + 5), received_at=_ts(95))
+    assert replayed_stale_2 is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 2  # rejected too, baseline never moved
+
+    # Real, current ticks continue to be accepted normally throughout.
+    bar2 = builder.on_tick(price=1253.0, volume=0, timestamp=_ts(125), received_at=_ts(125))
+    assert bar2 is not None
+    assert bar2.close == 1252.0  # unaffected by either replayed stale tick
+
+
+def test_missing_minute_buckets_are_skipped_not_fabricated():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=1, timestamp=_ts(0), received_at=_ts(0))  # bucket 0
+    builder.on_tick(price=101.0, volume=1, timestamp=_ts(30), received_at=_ts(30))  # still bucket 0
+
+    # Jumps straight to bucket 240 (minute 4) -- buckets 60/120/180 (minutes
+    # 1-3) see zero ticks. Only bucket 0's bar is ever produced; the empty
+    # buckets never get a synthetic/fabricated bar of their own.
+    bar = builder.on_tick(price=105.0, volume=1, timestamp=_ts(245), received_at=_ts(245))
+    assert bar is not None
+    assert bar.timestamp == _ts(0)
+    assert bar.close == 101.0  # bucket 0's own last real tick, not interpolated
+
+    # The new bucket (240) was freshly seeded from this tick alone -- no
+    # fabricated open/high/low/close for the skipped minutes leaked in.
+    partial = builder.flush()
+    assert partial.timestamp == _ts(240)
+    assert partial.open == partial.high == partial.low == partial.close == 105.0
+
+
+def test_duplicate_timestamp_and_price_tick_is_merged_not_deduplicated_as_documented():
+    """Enforces, as a real assertion, the exact-duplicate-tick limitation
+    already documented in on_tick's own docstring: Dhan's packets carry no
+    per-message sequence number, so an exact duplicate (same price, volume,
+    timestamp) cannot be told apart from a second genuinely distinct trade
+    that happens to share those values -- it is NOT deduplicated, and
+    merges into the bucket again. This project's actual configuration
+    (Ticker-mode, always volume=0.0) makes this harmless in practice; this
+    test uses a nonzero volume specifically to make the non-dedup visible
+    and keep it an enforced property, not just a comment."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10.0, timestamp=_ts(5), received_at=_ts(5))
+    builder.on_tick(price=100.0, volume=10.0, timestamp=_ts(5), received_at=_ts(5))  # exact duplicate
+    bar = builder.on_tick(price=101.0, volume=1.0, timestamp=_ts(61), received_at=_ts(61))
+    assert bar is not None
+    assert bar.volume == 20.0  # both copies counted -- documented, not a bug
+    assert bar.open == 100.0
+    assert bar.close == 100.0  # idempotent for price -- the duplicate didn't change close, only volume
+
+
+def test_a_delayed_first_tick_with_a_valid_exchange_timestamp_still_works_normally():
+    """Bucketing uses the tick's OWN exchange timestamp, never received_at
+    -- a first tick that arrives very late in wall-clock terms (e.g. a
+    queued/backlogged delivery after a brief network hiccup) but carries a
+    perfectly valid exchange timestamp must be treated exactly like an
+    ordinary first tick, never penalized for its late receipt."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    result = builder.on_tick(price=100.0, volume=1, timestamp=_ts(0), received_at=_ts(500))
+    assert result is None
+    assert builder.rejected_tick_counts == {
+        "non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0,
+        "late_out_of_order": 0, "implausible_timestamp": 0,
+    }
+    assert builder.last_known_price == 100.0
+
+
+def test_timestamp_regression_after_baseline_confirmed_is_rejected_via_the_correct_path():
+    """Two sub-cases, both after baseline confirmation: a small regression
+    (still within the skew tolerance) must hit the ordinary late/out-of-
+    order path -- exactly the pre-existing, already-tested mid-session
+    protection, not a new mechanism -- while a large regression (exceeding
+    the skew tolerance) must hit the implausible-timestamp path instead,
+    proving both existing guards remain correctly reachable once a
+    baseline is confirmed, not just during the unconfirmed cold-start
+    window."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=1, timestamp=_ts(0), received_at=_ts(0))
+    builder.on_tick(price=101.0, volume=1, timestamp=_ts(10), received_at=_ts(10))  # confirms baseline
+
+    small_regression = builder.on_tick(price=999.0, volume=1, timestamp=_ts(-5), received_at=_ts(15))
+    assert small_regression is None
+    assert builder.rejected_tick_counts["late_out_of_order"] == 1
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 0
+
+    large_regression = builder.on_tick(price=998.0, volume=1, timestamp=_ts(10 - 4000), received_at=_ts(16))
+    assert large_regression is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1
+    assert builder.rejected_tick_counts["late_out_of_order"] == 1  # unchanged by the second rejection
+
+
+def test_a_rapid_packet_burst_within_one_bucket_aggregates_correctly():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    prices = [100.0 + ((i * 37) % 23) * 0.1 for i in range(200)]  # a deterministic pseudo-random-looking walk, all within one bucket
+    for i, price in enumerate(prices):
+        result = builder.on_tick(price=price, volume=1.0, timestamp=_ts(i % 59), received_at=_ts(i % 59))
+        assert result is None  # every tick lands in bucket 0 -- never completes mid-burst
+
+    bar = builder.on_tick(price=200.0, volume=1.0, timestamp=_ts(61), received_at=_ts(61))
+    assert bar is not None
+    assert bar.open == prices[0]
+    assert bar.close == prices[-1]
+    assert bar.high == max(prices)
+    assert bar.low == min(prices)
+    assert bar.volume == float(len(prices))
+
+
+def test_independent_candle_builder_instances_never_share_state():
+    """Cheap regression guard for the isolation guarantee the rest of the
+    live pipeline depends on (DhanMarketDataSource keys one CandleBuilder
+    per symbol): two separate instances must never observe each other's
+    ticks, rejections, or price/timestamp baselines, even when driven
+    concurrently with deliberately conflicting data."""
+    a = CandleBuilder(symbol="RELIANCE", interval="1m")
+    b = CandleBuilder(symbol="TCS", interval="1m")
+
+    a.on_tick(price=100.0, volume=1, timestamp=_ts(0), received_at=_ts(0))
+    b.on_tick(price=-1.0, volume=1, timestamp=_ts(0), received_at=_ts(0))  # deliberately invalid, only for b
+
+    assert a.last_known_price == 100.0
+    assert b.last_known_price is None
+    assert a.rejected_tick_counts["non_positive_price"] == 0
+    assert b.rejected_tick_counts["non_positive_price"] == 1
+    assert a._state is not b._state  # not the same object, not aliased
+
+
+def test_an_overnight_gap_after_baseline_confirmed_is_a_documented_residual_gap_not_a_bug_in_practice():
+    """Documented, not fixed: once `_baseline_confirmed` is True, ANY tick
+    disagreeing by more than `_max_timestamp_skew_seconds` is rejected
+    PERMANENTLY via the confirmed path -- there is no self-heal mechanism
+    left once confirmed (by design: see
+    test_baseline_confirmed_state_survives_a_simulated_reconnect_and_
+    rejects_a_replayed_stale_packet above for why re-opening that window
+    would be dangerous). This means a CandleBuilder instance that
+    genuinely persisted, unrestarted, across a multi-day gap (e.g. late
+    Friday close to Monday open, a ~64-hour real exchange gap far
+    exceeding the default 3600s threshold) would permanently reject the
+    new session's data too. NOT exercised by this project's actual
+    deployment: the real fleet's workers (and therefore every
+    CandleBuilder instance) are launched fresh each trading morning via
+    `fleet-supervise`, confirmed via this session's own real launch
+    evidence -- a CandleBuilder instance never actually lives across a
+    session boundary in production today. Documented here so this
+    boundary is explicit rather than silently assumed, exactly like
+    test_corrupted_very_first_tick_is_a_documented_residual_gap above."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=1, timestamp=_ts(0), received_at=_ts(0))
+    builder.on_tick(price=101.0, volume=1, timestamp=_ts(10), received_at=_ts(10))  # confirms baseline
+
+    weekend_gap_seconds = 64 * 3600  # Friday 15:29 IST -> Monday 09:15 IST, roughly
+    next_session_tick_1 = builder.on_tick(price=105.0, volume=1, timestamp=_ts(10 + weekend_gap_seconds), received_at=_ts(10 + weekend_gap_seconds))
+    assert next_session_tick_1 is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1
+
+    next_session_tick_2 = builder.on_tick(price=106.0, volume=1, timestamp=_ts(10 + weekend_gap_seconds + 60), received_at=_ts(10 + weekend_gap_seconds + 60))
+    assert next_session_tick_2 is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 2  # still rejected -- no self-heal once confirmed, unlike the cold-start case

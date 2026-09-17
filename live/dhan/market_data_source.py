@@ -299,8 +299,15 @@ class DhanMarketDataSource:
         source never returns bare `None`: unlike a finite scripted replay,
         a live WebSocket feed has no "permanently ended" state short of a
         FeedDisconnectedError. Raises FeedDisconnectedError once
-        reconnection attempts are exhausted (state == FAILED)."""
-        if self.state == DhanConnectionState.FAILED:
+        reconnection attempts are exhausted (state == FAILED) OR once this
+        source has been deliberately close()'d (state == CLOSED) --
+        adversarial hardening pass finding: CLOSED was previously not
+        checked here at all, so a caller polling next_bar() after close()
+        would silently time out and return NO_NEW_BAR forever instead of
+        ever being told the feed is gone for good."""
+        if self.state in (DhanConnectionState.FAILED, DhanConnectionState.CLOSED):
+            if self.state == DhanConnectionState.CLOSED:
+                raise FeedDisconnectedError("Dhan feed was deliberately closed by close() -- no further bars will ever arrive.")
             raise FeedDisconnectedError(f"Dhan feed permanently disconnected after {self._reconnect_attempts} reconnect attempts: {self._last_disconnect_reason}")
         self._check_connected_idle_timeout()  # dispatches asynchronously (see its own docstring) -- never blocks this call
         try:
@@ -421,16 +428,37 @@ class DhanMarketDataSource:
         with self._lock:
             if self.state == DhanConnectionState.CLOSED:
                 return  # a close() raced ahead of this (re)connect attempt -- honor it, never revive after close()
+            old_transport = self._transport
             self.state = DhanConnectionState.CONNECTING
             self._connection_generation += 1
             generation = self._connection_generation
             transport = self.transport_factory()
             self._transport = transport
+        if old_transport is not None:
+            # Adversarial hardening pass (same-day audit finding): a
+            # PREVIOUS generation's transport was never explicitly closed
+            # here -- on_error/on_close firing (which is what got us to
+            # _connect() again) does not guarantee the underlying socket
+            # and its background read thread have actually torn down by
+            # the time this runs. Left alone, that old transport could
+            # keep running indefinitely, consuming a real Dhan WebSocket
+            # connection slot (Dhan caps at 5 per client ID, see
+            # DhanMarketDataSource's own module docstring) and a thread for
+            # the rest of the process's life, purely as a leak -- never
+            # actually a correctness risk on its own since on_message is
+            # now generation-tagged (see _on_raw_message), but a real
+            # resource-exhaustion risk over many reconnects in a long-
+            # running session. Best-effort: closing an already-closed or
+            # never-opened transport must never block a reconnect attempt.
+            try:
+                old_transport.close()
+            except Exception:  # noqa: BLE001 -- see docstring above
+                pass
         url = build_feed_url(client_id=self.credentials.client_id, access_token=self.credentials.access_token)
         transport.connect(
             url,
             on_open=lambda: self._on_transport_open(generation),
-            on_message=self._on_raw_message,
+            on_message=lambda data: self._on_raw_message(generation, data),
             on_close=lambda status_code, reason: self._report_connection_lost(generation, f"transport closed (code={status_code}, reason={reason})"),
             on_error=lambda error: self._report_connection_lost(generation, f"transport error: {error}"),
         )
@@ -612,7 +640,24 @@ class DhanMarketDataSource:
 
     # -- wire-level handling, pure and unit-testable with synthetic bytes ---
 
-    def _on_raw_message(self, data: bytes) -> None:
+    def _on_raw_message(self, generation: int, data: bytes) -> None:
+        """Adversarial hardening pass (same-day audit finding): every OTHER
+        transport callback (on_open, on_close, on_error) is generation-
+        tagged and checked before doing anything -- this one, previously,
+        was not (`on_message=self._on_raw_message`, no generation bound at
+        all). A message physically in flight from an already-superseded
+        transport (e.g. arriving in the brief window between on_error
+        firing for the old generation and this new one reaching CONNECTED)
+        would previously have been processed identically to a genuinely
+        current message: fed into this symbol's CandleBuilder and enqueued
+        into the shared _bar_queue as if it were live data from the CURRENT
+        connection. Checked under the same lock every other callback here
+        uses, for the same reason -- see _report_connection_lost's own
+        docstring on why the generation check alone (without also being the
+        actual state-transition authority) matters under real concurrency."""
+        with self._lock:
+            if generation != self._connection_generation:
+                return  # a stale message from an already-superseded transport -- never processed as current data
         self._last_message_monotonic = time.monotonic()
         try:
             self._handle_packet(data)

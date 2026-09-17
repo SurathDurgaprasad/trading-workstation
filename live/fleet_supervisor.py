@@ -46,6 +46,20 @@ class WorkerHealth(str, Enum):
     gap/disconnect signal with no newer bar since -- see
     live/gap_monitor.py entry #-- this reuses that existing signal
     rather than re-detecting gaps a second, independent way."""
+    SUPERVISION_ERROR = "SUPERVISION_ERROR"
+    """Adversarial hardening pass finding: `poll_fleet_once`'s per-symbol
+    loop previously had no exception boundary at all around
+    `check_worker_health`/`relaunch` -- a single symbol raising (e.g. a
+    transient Windows file-lock on its own log during `_tail_lines`, or
+    `subprocess.Popen` failing during a relaunch: missing interpreter,
+    OS process-table exhaustion, a bad path) propagated out of the ENTIRE
+    poll cycle, out of run_fleet_supervise_command's while loop, straight
+    into its `finally: shutdown_fleet(handles)` -- which terminates EVERY
+    worker, including every other symbol that was perfectly healthy.
+    This status makes that failure visible (surfaced via the same
+    format_fleet_status_line every other status uses) INSTEAD of letting
+    it escape and take the whole fleet down -- see poll_fleet_once's own
+    per-symbol try/except for the fix."""
 
 
 @dataclass(frozen=True)
@@ -245,14 +259,37 @@ def poll_fleet_once(
     restarted: list[str] = []
     exhausted: list[str] = []
     for symbol, handle in list(handles.items()):
-        status = check_worker_health(handle)
-        statuses.append(status)
-        if status.health == WorkerHealth.EXITED_ERROR:
-            if should_restart(status, max_restarts=max_restarts):
-                handles[symbol] = relaunch(symbol, handle.restarts + 1)
-                restarted.append(symbol)
-            else:
-                exhausted.append(symbol)
+        # Adversarial hardening pass finding: this used to have NO
+        # exception boundary at all -- one symbol raising here (a
+        # transient log-file read error, subprocess.Popen failing on
+        # relaunch) propagated straight out of the ENTIRE poll cycle,
+        # into run_fleet_supervise_command's `finally: shutdown_fleet(
+        # handles)`, tearing down every other, perfectly healthy worker
+        # too. Violates this project's own "one symbol failure cannot
+        # stop another symbol" requirement. The failing symbol's
+        # PREVIOUS handle is kept (never silently dropped or replaced
+        # with something half-constructed) so the next poll cycle gets
+        # another chance at it.
+        try:
+            status = check_worker_health(handle)
+            statuses.append(status)
+            if status.health == WorkerHealth.EXITED_ERROR:
+                if should_restart(status, max_restarts=max_restarts):
+                    handles[symbol] = relaunch(symbol, handle.restarts + 1)
+                    restarted.append(symbol)
+                else:
+                    exhausted.append(symbol)
+        except Exception as exc:  # noqa: BLE001 -- one symbol's supervision failure must never abort the whole fleet's poll cycle
+            # `.pid` only, deliberately -- NOT another `.poll()` call: if
+            # `.poll()` itself is what raised (a real scenario this fix
+            # covers), calling it again here would raise a second time and
+            # defeat the very isolation this except block exists for.
+            # `.pid` is set at process-construction time and is safe to
+            # read regardless of whatever `.poll()` is currently doing.
+            statuses.append(WorkerStatus(
+                symbol=symbol, health=WorkerHealth.SUPERVISION_ERROR, pid=handle.process.pid,
+                exit_code=None, restarts=handle.restarts, detail=f"supervision itself failed for this symbol: {exc}",
+            ))
     return FleetSnapshot(statuses=statuses, restarted_symbols=restarted, exhausted_symbols=exhausted)
 
 
