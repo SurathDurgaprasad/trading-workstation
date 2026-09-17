@@ -168,6 +168,43 @@ class DhanMarketDataSource:
     # Dhan feed did) resets the attempt counter on every single open and
     # the bound never actually engages.
     min_stable_connection_seconds: float = 10.0
+    connected_idle_timeout_seconds: float | None = 300.0
+    """2026-09-17 live incident (fleet-wide feed gap): all 13 CandleBuilder-
+    defect-unaffected symbols in the real 15-symbol fleet stopped receiving
+    ANY new WebSocket message simultaneously, ~6 hours after connecting,
+    with NO on_close/on_error/server-Disconnect-packet ever firing -- the
+    state stayed CONNECTED throughout, so the existing reconnect machinery
+    (fully correct, and unchanged here) never had a failure to react to.
+    websocket-client's own ping-based keepalive was already found and
+    explicitly disabled (`ping_interval=0`, see _WebsocketClientTransport
+    -- kept, since library-level ping/pong is auto-handled inside
+    recv_data_frame() regardless of ping_interval, so this alone does not
+    explain a silent drop) by the cycle-8 hardening work, whose own test
+    docstring (test_connecting_state_timeout_watchdog_self_heals_from_a_
+    silent_hang) already named exactly this risk -- "FreshnessPolicy
+    prevents any UNSAFE trade from this gap but does nothing to help the
+    feed itself recover" -- and left it explicitly unaddressed for the
+    CONNECTED state (cycle 8's own connect_timeout_seconds watchdog only
+    covers a hang during the CONNECTING handshake, never a connection that
+    opens normally and goes silent much later). The exact upstream cause
+    of today's incident is UNKNOWN (Dhan-side session/connection-duration
+    policy, an intermediate network device silently dropping an idle
+    mapping, and a real, independently-observed Windows DNS-registration-
+    timeout/NETLOGON-secure-session error on this host in the same window
+    are all consistent with the evidence but none is proven) -- this field
+    closes the gap regardless of which of those is the true cause: if the
+    CONNECTED state persists this long with NO on_message callback firing
+    at all (real market data, not merely an underlying TCP/ping frame),
+    the connection is treated as lost and routed through the same
+    _report_connection_lost funnel every other failure already uses, so
+    it inherits the identical generation-based dedup and bounded-
+    reconnect-then-FAILED behavior -- no new state machine. 300s (5
+    minutes) is comfortably longer than live/freshness.py's own existing
+    [GAP DETECTED] threshold (180s) so it never preempts that downstream
+    signal's own purpose, yet short enough to have caught today's real
+    incident (bars stopped for 600s+ and climbing before this fix existed)
+    with substantial margin. `None` disables the watchdog entirely (kept
+    for a caller that wants the exact pre-fix behavior)."""
     transport_factory: type = _WebsocketClientTransport
     max_queued_bars: int = 2000
     """Autonomous hardening cycle 21 (closes the disclosed gap from
@@ -194,6 +231,7 @@ class DhanMarketDataSource:
         self._reconnect_attempts = 0
         self._last_disconnect_reason: str | None = None
         self._connected_at: float | None = None
+        self._last_message_monotonic: float | None = None
         # Phase 16 addition (VERIFIED necessary against a real account -- see
         # _report_connection_lost's docstring): guards the state machine and
         # tags every connection attempt with a generation number so that
@@ -264,10 +302,45 @@ class DhanMarketDataSource:
         reconnection attempts are exhausted (state == FAILED)."""
         if self.state == DhanConnectionState.FAILED:
             raise FeedDisconnectedError(f"Dhan feed permanently disconnected after {self._reconnect_attempts} reconnect attempts: {self._last_disconnect_reason}")
+        self._check_connected_idle_timeout()  # dispatches asynchronously (see its own docstring) -- never blocks this call
         try:
             return self._bar_queue.get(timeout=self.next_bar_timeout_seconds)
         except queue.Empty:
             return NO_NEW_BAR
+
+    def _check_connected_idle_timeout(self) -> None:
+        """See `connected_idle_timeout_seconds`'s own docstring for the
+        2026-09-17 incident this closes. Called from next_bar() -- the one
+        entry point every caller (worker loop, tests, everything) already
+        polls regularly, so no new background thread/timer is needed to
+        drive this check; it piggybacks on the existing polling cadence.
+        A no-op unless the connection has been CONNECTED, with genuinely
+        ZERO messages of any kind received (not just zero valid ticks --
+        see _on_raw_message), for longer than the configured threshold."""
+        if self.connected_idle_timeout_seconds is None or self.state != DhanConnectionState.CONNECTED:
+            return
+        last = self._last_message_monotonic
+        if last is None:
+            return
+        idle_seconds = time.monotonic() - last
+        if idle_seconds <= self.connected_idle_timeout_seconds:
+            return
+        generation = self._connection_generation
+        logger.warning(
+            "Dhan feed (generation=%d) received no message at all for %.0fs while nominally CONNECTED "
+            "(threshold=%.0fs) -- treating as a silently lost connection and reconnecting.",
+            generation, idle_seconds, self.connected_idle_timeout_seconds,
+        )
+        # Off the caller's thread, exactly like every other _report_connection_lost
+        # trigger (on_close/on_error/server-Disconnect-packet all fire on the
+        # WebSocket library's own background thread, never the next_bar() caller's) --
+        # _run_reconnect_attempt() sleeps for the backoff and then connects
+        # synchronously, which must never block next_bar()'s own caller.
+        threading.Thread(
+            target=self._report_connection_lost,
+            args=(generation, f"no message received for {idle_seconds:.0f}s while CONNECTED (threshold {self.connected_idle_timeout_seconds:.0f}s) -- silently lost connection"),
+            daemon=True,
+        ).start()
 
     def rejected_tick_counts_by_symbol(self) -> dict[str, dict[str, int]]:
         """Strategy science Phase 16 (observability) -- aggregates each
@@ -403,6 +476,10 @@ class DhanMarketDataSource:
             # _reconnect_attempts is NOT reset here -- see _claim_reconnect_locked's docstring for why
             # resetting on every open (rather than on sustained stability) enabled a real reconnect storm.
             self._connected_at = time.monotonic()
+            # Starts the connected_idle_timeout_seconds clock at connect time itself (not
+            # just at the first message) -- a connection that opens but then never receives
+            # even one message is exactly as stale as one that goes quiet after a while.
+            self._last_message_monotonic = time.monotonic()
             subscribed = list(self._subscribed_symbols)
         logger.info("Dhan feed CONNECTED (generation=%d, subscribed symbols=%d).", generation, len(subscribed))
         if subscribed:
@@ -536,6 +613,7 @@ class DhanMarketDataSource:
     # -- wire-level handling, pure and unit-testable with synthetic bytes ---
 
     def _on_raw_message(self, data: bytes) -> None:
+        self._last_message_monotonic = time.monotonic()
         try:
             self._handle_packet(data)
         except DhanWireFormatError:

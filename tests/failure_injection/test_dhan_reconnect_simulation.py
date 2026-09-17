@@ -165,3 +165,84 @@ def test_connecting_state_timeout_watchdog_self_heals_from_a_silent_hang(instrum
 
     assert source.state == DhanConnectionState.FAILED  # self-healed all the way to a clean terminal state, not stuck forever
     assert len(factory.instances) >= 2  # the watchdog triggered real reconnect attempts
+
+
+# --- 2026-09-17 live incident, closed same day: CONNECTED-state silent gap --
+#
+# Real: the 15-symbol live fleet's 13 CandleBuilder-defect-unaffected
+# symbols all stopped receiving ANY WebSocket message simultaneously, ~6
+# hours after connecting, with no on_close/on_error/Disconnect-packet ever
+# firing -- state stayed CONNECTED the whole time. cycle 8's
+# connect_timeout_seconds watchdog above only covers a hang during the
+# CONNECTING handshake; nothing previously covered an already-CONNECTED
+# session going silent much later, which is exactly what
+# test_connecting_state_timeout_watchdog_self_heals_from_a_silent_hang's
+# own docstring already named as a known, deliberately-deferred residual
+# gap ("FreshnessPolicy prevents any UNSAFE trade from this gap but does
+# nothing to help the feed itself recover"). connected_idle_timeout_seconds
+# closes it -- see live/dhan/market_data_source.py's own docstring on that
+# field for the full incident writeup and why the exact upstream cause is
+# still classified UNKNOWN.
+
+
+def test_connected_idle_timeout_triggers_a_reconnect_when_no_message_arrives_for_too_long(instrument_map, credentials):
+    source, factory = _source(
+        instrument_map, credentials, connected_idle_timeout_seconds=0.05,
+        backoff_base_seconds=0.01, backoff_max_seconds=0.01,
+    )
+    source.subscribe(["RELIANCE.NS"], "1m")
+    assert source.state == DhanConnectionState.CONNECTED
+    assert len(factory.instances) == 1
+
+    # No message ever arrives on this transport (exactly today's real
+    # incident: CONNECTED, but genuinely silent) -- backdating
+    # _last_message_monotonic simulates real elapsed idle time without a
+    # slow test. White-box, matching this file's existing style for
+    # connect_timeout_seconds above.
+    source._last_message_monotonic -= 1.0  # far past the 0.05s threshold
+
+    deadline = time.monotonic() + 2.0
+    while len(factory.instances) < 2 and time.monotonic() < deadline:
+        source.next_bar()  # the one entry point that drives the check -- see its own docstring
+        time.sleep(0.01)
+
+    assert len(factory.instances) == 2  # a fresh transport was created -- the silent connection was abandoned and replaced
+    assert factory.instances[1].sent_messages  # and re-subscribed on the new one
+    assert source.state == DhanConnectionState.CONNECTED  # self-healed back to CONNECTED, not stuck RECONNECTING/FAILED
+
+
+def test_connected_idle_timeout_does_not_trigger_while_messages_keep_arriving(instrument_map, credentials):
+    """Direct regression guard: a genuinely healthy, actively-ticking feed
+    must never be treated as idle just because next_bar() is polled
+    often -- only a real absence of messages should ever trigger this."""
+    import struct
+
+    def _ticker_packet(security_id: int, price: float, epoch: int) -> bytes:
+        header = struct.pack("<BhBi", 2, 16, 1, security_id)
+        body = struct.pack("<fi", price, epoch)
+        return header + body
+
+    source, factory = _source(instrument_map, credentials, connected_idle_timeout_seconds=0.05)
+    source.subscribe(["RELIANCE.NS"], "1m")
+
+    deadline = time.monotonic() + 0.3
+    tick = 0
+    while time.monotonic() < deadline:
+        factory.current.simulate_message(_ticker_packet(2885, 100.0 + tick, epoch=tick))
+        tick += 1
+        time.sleep(0.01)
+
+    assert len(factory.instances) == 1  # never reconnected -- messages kept the idle clock reset the whole time
+    assert source.state == DhanConnectionState.CONNECTED
+
+
+def test_connected_idle_timeout_none_disables_the_check(instrument_map, credentials):
+    source, factory = _source(instrument_map, credentials, connected_idle_timeout_seconds=None)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    source._last_message_monotonic -= 10_000.0  # absurdly stale -- would trip any finite threshold
+
+    for _ in range(5):
+        source.next_bar()
+
+    assert len(factory.instances) == 1  # disabled -- exact pre-fix behavior preserved for a caller that wants it
+    assert source.state == DhanConnectionState.CONNECTED
