@@ -442,10 +442,118 @@ def test_a_moderately_late_tick_within_tolerance_is_not_treated_as_implausible()
 
 def test_corrupted_very_first_tick_is_a_documented_residual_gap():
     # Stated, not hidden: with NO prior tick to compare against, the very
-    # first tick a fresh builder ever receives is not covered by the
-    # timestamp-plausibility check -- this test documents that boundary
-    # explicitly rather than leaving it an undocumented surprise.
+    # first tick a fresh builder ever receives is unconditionally trusted
+    # as the initial baseline -- not covered by the timestamp-plausibility
+    # check itself. NARROWED (2026-09-17 live incident + fix) by the
+    # cold-start self-recovery below: a bad first tick no longer poisons
+    # the builder PERMANENTLY -- it now self-heals the moment two
+    # subsequent real ticks agree with each other (see the tests below).
+    # This test documents only the remaining, narrower boundary: the
+    # single bad first tick itself is still silently accepted as seed,
+    # not flagged as implausible.
     builder = CandleBuilder(symbol="RELIANCE", interval="1m")
     result = builder.on_tick(price=100.0, volume=10, timestamp=_ts(30 * 86400), received_at=_ts(0))
     assert result is None  # no bar yet either way
     assert builder.rejected_tick_counts["implausible_timestamp"] == 0  # NOT caught -- documented limitation
+
+
+# --- cold-start self-recovery (2026-09-17 live incident: HINDUNILVR.NS / ---
+# --- SUNPHARMA.NS each received a stale first tick carrying the PREVIOUS --
+# --- trading day's timestamp, silently accepted as baseline, then --------
+# --- rejected every genuinely-current tick for the rest of the session) --
+
+
+def test_a_poisoned_first_tick_self_heals_once_a_second_consistent_tick_arrives():
+    builder = CandleBuilder(symbol="HINDUNILVR", interval="1m")
+    # Stale first tick -- exactly today's real incident shape: a leftover
+    # snapshot from the previous session, trusted unconditionally as seed.
+    poisoned = builder.on_tick(price=100.0, volume=0, timestamp=_ts(0), received_at=_ts(30 * 86400))
+    assert poisoned is None
+
+    # First genuinely current tick disagrees with the poisoned baseline --
+    # rejected (matches pre-existing behavior exactly), remembered as a
+    # pending candidate, NOT yet trusted off a single data point alone.
+    real_tick_1 = builder.on_tick(price=101.0, volume=0, timestamp=_ts(30 * 86400 + 5), received_at=_ts(30 * 86400 + 5))
+    assert real_tick_1 is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1
+
+    # A second genuinely current tick agrees with the first -- two
+    # independent ticks agreeing with each other is enough to conclude the
+    # ORIGINAL (poisoned) baseline was the anomalous one. Baseline
+    # switches, the poisoned bucket state is discarded, and THIS tick
+    # becomes the first tick of a fresh bucket built on the new baseline
+    # (real_tick_1 itself was rejected and never touched any bucket, so
+    # its own price is not recoverable -- one tick's worth of recovery
+    # latency is the accepted cost of not blindly trusting a single
+    # disagreement, see __init__ docstring).
+    real_tick_2 = builder.on_tick(price=102.0, volume=0, timestamp=_ts(30 * 86400 + 40), received_at=_ts(30 * 86400 + 40))
+    assert real_tick_2 is None  # starts the fresh bucket, no bar yet
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1  # not incremented -- confirmed, not rejected
+
+    # Recovery confirmed: subsequent real ticks are no longer rejected and
+    # candle production resumes normally.
+    bar = builder.on_tick(price=103.0, volume=0, timestamp=_ts(30 * 86400 + 65), received_at=_ts(30 * 86400 + 65))
+    assert bar is not None
+    assert bar.open == 102.0  # real_tick_2, the confirmed baseline's first tick
+    assert bar.close == 102.0  # only one tick was in that fresh bucket
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1  # never grew further
+
+
+def test_multiple_disagreeing_startup_ticks_keep_reseeding_the_candidate_until_two_finally_agree():
+    builder = CandleBuilder(symbol="SUNPHARMA", interval="1m")
+    builder.on_tick(price=100.0, volume=0, timestamp=_ts(0), received_at=_ts(0))  # poisoned seed
+
+    # A noisy startup: several disagreeing ticks, none of which agree with
+    # EACH OTHER yet (each pairwise gap here deliberately exceeds the
+    # default 3600s skew threshold) -- must keep rejecting and keep
+    # updating the pending candidate to the MOST RECENT disagreement,
+    # never falsely confirm off a single data point, and never leave the
+    # original baseline touched.
+    t1 = builder.on_tick(price=101.0, volume=0, timestamp=_ts(50_000), received_at=_ts(50_000))
+    assert t1 is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1
+    t2 = builder.on_tick(price=102.0, volume=0, timestamp=_ts(200_000), received_at=_ts(200_000))  # disagrees with t1 too
+    assert t2 is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 2
+
+    # Finally, a tick that agrees with the MOST RECENT candidate (t2) --
+    # confirms and switches baseline to this pair, discarding any bucket
+    # state (there is none yet -- every prior tick here was rejected) and
+    # becoming the fresh bucket's own first tick.
+    t3 = builder.on_tick(price=103.0, volume=0, timestamp=_ts(200_030), received_at=_ts(200_030))
+    assert t3 is None  # starts the fresh bucket, no bar yet
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 2  # not incremented -- this tick confirmed, not rejected
+
+    bar = builder.on_tick(price=104.0, volume=0, timestamp=_ts(200_065), received_at=_ts(200_065))
+    assert bar is not None
+    assert bar.open == 103.0  # t3, the confirmed baseline's first tick -- not t1, t2, or the poisoned seed
+    assert bar.close == 103.0  # only one tick was in that fresh bucket
+
+
+def test_cold_start_self_recovery_does_not_weaken_the_existing_mid_session_single_bad_tick_protection():
+    # Direct regression guard for the FIRST (rejected) fix design: a
+    # single stray bad tick arriving mid-session, with an already-good
+    # baseline, must NOT be allowed to displace that baseline just because
+    # it happens before two OTHER ticks have confirmed it. This exercises
+    # the exact same tick sequence as
+    # test_a_wildly_future_timestamp_does_not_permanently_kill_candle_production
+    # explicitly re-asserting it here as a named regression case for this
+    # specific fix.
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))  # good baseline
+
+    bad_tick = builder.on_tick(price=101.0, volume=1, timestamp=_ts(30 * 86400), received_at=_ts(1))
+    assert bad_tick is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1
+
+    # The next tick agrees with the ORIGINAL good baseline, not with the
+    # single bad tick -- must confirm the ORIGINAL baseline, not be
+    # rejected as "disagreeing with a switched-to bad baseline".
+    result_2 = builder.on_tick(price=102.0, volume=5, timestamp=_ts(30), received_at=_ts(30))
+    assert result_2 is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1  # not incremented again
+
+    bar = builder.on_tick(price=103.0, volume=5, timestamp=_ts(61), received_at=_ts(61))
+    assert bar is not None
+    assert bar.open == 100.0
+    assert bar.close == 102.0  # the single bad tick never merged in, original baseline preserved throughout

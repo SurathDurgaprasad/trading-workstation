@@ -115,18 +115,56 @@ class CandleBuilder:
         `paper/advance.py`'s Yahoo-driven fills, etc.) -- comparing
         consecutive REAL exchange timestamps against each other is
         self-consistent regardless of what wall-clock epoch is in use.
-        RESIDUAL LIMITATION, stated rather than hidden: because there is no
-        `_last_known_timestamp` yet for the very first tick a fresh
-        CandleBuilder instance ever receives, that one specific tick is NOT
-        covered by this check (nothing to compare it against) -- the
-        defense fully covers every tick after the first, which is the
-        realistic, hours-long-live-session shape of the actual production
-        risk found by this audit. 1 hour default: generous enough to
-        tolerate any real illiquid-symbol lull between successive trades,
-        tight enough to catch genuine corruption (which in practice is
-        either wildly wrong or off by a fixed encoding-bug offset, never
-        merely "a bit late" -- see the late-tick path below for that
-        ordinary case). None disables the check entirely."""
+        1 hour default: generous enough to tolerate any real illiquid-
+        symbol lull between successive trades, tight enough to catch
+        genuine corruption (which in practice is either wildly wrong or
+        off by a fixed encoding-bug offset, never merely "a bit late" --
+        see the late-tick path below for that ordinary case). None
+        disables the check entirely.
+
+        COLD-START SELF-RECOVERY (2026-09-17 live incident): the very
+        first tick a fresh CandleBuilder instance ever receives has no
+        `_last_known_timestamp` to compare against, so it was previously
+        trusted UNCONDITIONALLY and permanently poisoned every check after
+        it -- observed live in production on this exact date: HINDUNILVR.NS
+        and SUNPHARMA.NS each received a stale first tick carrying the
+        PREVIOUS trading day's timestamp (2026-09-16 10:26:09/10:22:06
+        UTC, almost certainly a Dhan overnight LTP-snapshot artifact sent
+        on subscribe), silently accepted it as the baseline, and then
+        rejected every genuinely-current tick for the rest of the session
+        (203/235 rejections observed by the time this was diagnosed,
+        growing unbounded) -- reproduced exactly in isolation with these
+        same real values.
+
+        `_baseline_confirmed`/`_pending_candidate_timestamp` close this,
+        WITHOUT weakening the existing mid-session protection above (a
+        first, simpler "re-seed on any disagreement" design was tried and
+        rejected -- it broke `test_a_wildly_future_timestamp_does_not_
+        permanently_kill_candle_production` by letting a single stray bad
+        tick permanently displace an already-good baseline; a genuine
+        single-bad-tick-in-a-good-stream and a genuine bad-FIRST-tick are
+        locally indistinguishable from one disagreement alone, so this
+        needs a SECOND, independent data point before ever abandoning the
+        current baseline):
+
+        While unconfirmed, a tick disagreeing with `_last_known_timestamp`
+        is rejected (exactly like today, `_last_known_timestamp` and
+        `_state` untouched) UNLESS it agrees with `_pending_candidate_
+        timestamp` (the immediately-preceding disagreement) -- two
+        DIFFERENT ticks agreeing with EACH OTHER, both independently
+        disagreeing with the current baseline, is what actually
+        distinguishes "the original baseline was the bad one" from "one
+        stray bad tick occurred mid-stream". Only then does the baseline
+        switch to this pair, `_state`/`_last_known_price` are discarded
+        (they were built from the now-abandoned, untrustworthy baseline),
+        and `_baseline_confirmed` becomes permanently True -- from that
+        point on, behavior is byte-identical to the pre-existing,
+        already-tested mid-session logic above. If a tick agrees with the
+        ORIGINAL baseline instead (the ordinary case: the first tick was
+        fine all along), confirmation happens the simple way -- two
+        agreeing ticks against the SAME baseline -- with no reset."""
+        self._baseline_confirmed: bool = False
+        self._pending_candidate_timestamp: datetime | None = None
         self.rejected_tick_counts: dict[str, int] = {
             "non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0, "late_out_of_order": 0,
             "implausible_timestamp": 0,
@@ -178,16 +216,71 @@ class CandleBuilder:
         if self._last_known_timestamp is not None and self._max_timestamp_skew_seconds is not None:
             skew_seconds = abs((timestamp - self._last_known_timestamp).total_seconds())
             if skew_seconds > self._max_timestamp_skew_seconds:
-                self.rejected_tick_counts["implausible_timestamp"] += 1
-                logger.warning(
-                    "CandleBuilder(%s, %s): rejecting a tick with an implausible timestamp (timestamp=%s, "
-                    "last known real timestamp=%s, skew=%.0fs > %.0fs threshold) -- likely a corrupted/garbage "
-                    "exchange timestamp, never trusted to seed, complete, or otherwise touch any bucket.",
-                    self.symbol, self.interval, timestamp, self._last_known_timestamp, skew_seconds,
-                    self._max_timestamp_skew_seconds,
-                )
-                return None  # fully inert -- unlike an invalid PRICE, an invalid TIMESTAMP can never be
-                # trusted to complete an elapsed bucket either, since bucket membership is computed FROM it.
+                if not self._baseline_confirmed:
+                    pending = self._pending_candidate_timestamp
+                    if pending is not None and abs((timestamp - pending).total_seconds()) <= self._max_timestamp_skew_seconds:
+                        # This tick agrees with the PREVIOUS disagreeing
+                        # tick, not with the current baseline -- two
+                        # independent ticks agreeing with each other is
+                        # strong evidence the ORIGINAL baseline (not this
+                        # pair) was the anomalous one. Switch to it and
+                        # discard any bucket state built from the
+                        # now-abandoned baseline; falls through below to
+                        # process this tick normally against the new
+                        # baseline.
+                        logger.warning(
+                            "CandleBuilder(%s, %s): two consecutive ticks agree with each other "
+                            "(timestamp=%s, previous candidate=%s) while disagreeing with the current "
+                            "baseline (%s) -- switching baseline and discarding bucket state built from "
+                            "the abandoned baseline; now confirmed.",
+                            self.symbol, self.interval, timestamp, pending, self._last_known_timestamp,
+                        )
+                        self._last_known_timestamp = timestamp
+                        self._baseline_confirmed = True
+                        self._pending_candidate_timestamp = None
+                        self._state = None
+                        self._last_known_price = None
+                    else:
+                        # Cold-start self-recovery: the baseline hasn't
+                        # been confirmed yet, and this lone disagreement
+                        # doesn't (yet) match a prior one -- remember it as
+                        # a tentative candidate but do NOT abandon the
+                        # current baseline on the strength of a single
+                        # disagreeing tick alone (that would misfire on an
+                        # ordinary single stray bad tick mid-session, see
+                        # __init__ docstring). Rejected exactly like the
+                        # confirmed-baseline path below.
+                        self._pending_candidate_timestamp = timestamp
+                        self.rejected_tick_counts["implausible_timestamp"] += 1
+                        logger.warning(
+                            "CandleBuilder(%s, %s): unconfirmed timestamp baseline disagreed with a new "
+                            "tick (timestamp=%s, previous baseline=%s, skew=%.0fs > %.0fs threshold) -- "
+                            "rejecting and remembering as a pending candidate baseline; not yet confirmed.",
+                            self.symbol, self.interval, timestamp, self._last_known_timestamp, skew_seconds,
+                            self._max_timestamp_skew_seconds,
+                        )
+                        return None
+                else:
+                    self.rejected_tick_counts["implausible_timestamp"] += 1
+                    logger.warning(
+                        "CandleBuilder(%s, %s): rejecting a tick with an implausible timestamp (timestamp=%s, "
+                        "last known real timestamp=%s, skew=%.0fs > %.0fs threshold) -- likely a corrupted/garbage "
+                        "exchange timestamp, never trusted to seed, complete, or otherwise touch any bucket.",
+                        self.symbol, self.interval, timestamp, self._last_known_timestamp, skew_seconds,
+                        self._max_timestamp_skew_seconds,
+                    )
+                    return None  # fully inert -- unlike an invalid PRICE, an invalid TIMESTAMP can never be
+                    # trusted to complete an elapsed bucket either, since bucket membership is computed FROM it.
+            else:
+                if not self._baseline_confirmed:
+                    # This tick agrees with the current (original)
+                    # baseline within the threshold -- two consecutive
+                    # agreeing ticks against the SAME baseline is enough
+                    # evidence to trust it permanently, no reset needed.
+                    # From here on, behavior is byte-identical to the
+                    # pre-existing, already-tested mid-session logic.
+                    self._baseline_confirmed = True
+                    self._pending_candidate_timestamp = None
 
         price_is_valid = True
         if price <= 0:
