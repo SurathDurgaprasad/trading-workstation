@@ -583,6 +583,180 @@ def test_critic_gate_runs_before_risk_and_never_reaches_it_when_blocked():
     assert ("RISK_APPROVED", "PENDING_HUMAN_APPROVAL") != tuple(s.value for s, _ in result.lifecycle.history[1:])
 
 
+# --- critic_evaluations / risk_rejections symmetry (adversarial hardening ---
+# --- pass, 2026-09-18) --------------------------------------------------------
+
+
+def test_critic_evaluation_is_persisted_for_an_approved_signal_when_a_state_store_is_configured():
+    """The real asymmetry this closes: critic_rejections only ever
+    recorded a BLOCKING verdict. An APPROVED signal's CriticAssessment
+    was computed and then discarded -- an operator could see WHY a
+    signal was blocked but never WHY one was allowed through."""
+    from critic.models import CriticAssessment, CriticVerdict
+    from live.critic_gate import CriticGateResult
+    from live.state_store import LiveStateStore
+
+    approving_assessment = CriticAssessment(
+        verdict=CriticVerdict.APPROVE, checks=(), failed_checks=(), warnings=(),
+        reasons=["All hard checks passed."], config_version="test",
+    )
+    gate = _FakeCriticGate(CriticGateResult(blocked=False, block_reason="", assessment=approving_assessment, decision=None))
+    state_store = LiveStateStore(":memory:")
+
+    bar = make_mock_bar(timestamp=datetime(2026, 1, 1, 9, 15), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000.0)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    pipeline, engine, store = _pipeline(script, interval="1m", strategy=_ScriptedStrategy(), critic_gate=gate, state_store=state_store, clock=lambda: bar.timestamp + timedelta(seconds=5))
+
+    result = pipeline.process_next()
+
+    assert result.kind == "BAR_PROCESSED"  # unaffected -- the order still went through exactly as before
+    assert result.journal_entry is not None
+    evaluations = state_store.list_critic_evaluations()
+    assert len(evaluations) == 1
+    assert evaluations[0].signal_id == result.signal.stable_id()
+    assert evaluations[0].verdict == "APPROVE"
+    assert evaluations[0].blocked is False
+    assert evaluations[0].reasons == ["All hard checks passed."]
+    # The existing, unmodified rejection table is correctly untouched -- this was never a rejection.
+    assert state_store.list_critic_rejections() == []
+
+
+def test_critic_evaluation_is_persisted_alongside_the_existing_rejection_record_when_blocked():
+    """Both tables get a row for a blocked signal -- the new one is
+    purely additive, never a replacement for the existing, unmodified
+    critic_rejections persistence."""
+    from critic.models import CriticAssessment, CriticVerdict
+    from live.critic_gate import CriticGateResult
+    from live.state_store import LiveStateStore
+
+    assessment = CriticAssessment(
+        verdict=CriticVerdict.REJECT, checks=(), failed_checks=("KILL_SWITCH",),
+        warnings=(), reasons=["Kill switch is active -- execution safety blocks any new order."], config_version="test",
+    )
+    gate = _FakeCriticGate(CriticGateResult(blocked=True, block_reason=assessment.reasons[0], assessment=assessment, decision=None))
+    state_store = LiveStateStore(":memory:")
+
+    bar = make_mock_bar(timestamp=datetime(2026, 1, 1, 9, 15), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000.0)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    pipeline, engine, store = _pipeline(script, interval="1m", strategy=_ScriptedStrategy(), critic_gate=gate, state_store=state_store, clock=lambda: bar.timestamp + timedelta(seconds=5))
+
+    result = pipeline.process_next()
+
+    assert result.kind == "CRITIC_REJECTED"
+    rejections = state_store.list_critic_rejections()
+    assert len(rejections) == 1  # existing behavior, byte-for-byte unchanged
+    evaluations = state_store.list_critic_evaluations()
+    assert len(evaluations) == 1  # new, additional record of the same event
+    assert evaluations[0].signal_id == rejections[0].signal_id == result.signal.stable_id()
+    assert evaluations[0].blocked is True
+    assert evaluations[0].verdict == "REJECT"
+
+
+def test_critic_evaluation_falls_back_to_evidence_unavailable_when_assessment_is_none():
+    """Mirrors the existing save_critic_rejection fallback exactly (see
+    _handle_signal's own None-assessment branch) -- a hard block that
+    never ran the full assessment (assessment=None) must still produce a
+    valid, non-crashing evaluation row, not raise an AttributeError."""
+    from live.critic_gate import CriticGateResult
+    from live.state_store import LiveStateStore
+
+    gate = _FakeCriticGate(CriticGateResult(blocked=True, block_reason="Kill switch is active.", assessment=None, decision=None))
+    state_store = LiveStateStore(":memory:")
+
+    bar = make_mock_bar(timestamp=datetime(2026, 1, 1, 9, 15), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000.0)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    pipeline, engine, store = _pipeline(script, interval="1m", strategy=_ScriptedStrategy(), critic_gate=gate, state_store=state_store, clock=lambda: bar.timestamp + timedelta(seconds=5))
+
+    result = pipeline.process_next()
+
+    assert result.kind == "CRITIC_REJECTED"
+    evaluations = state_store.list_critic_evaluations()
+    assert len(evaluations) == 1
+    assert evaluations[0].verdict == "EVIDENCE_UNAVAILABLE"
+    assert evaluations[0].reasons == ["Kill switch is active."]
+    assert evaluations[0].blocked is True
+
+
+def test_no_state_store_configured_with_a_critic_gate_still_works_unaffected():
+    """Safety boundary: a caller with a critic_gate but no state_store
+    (state_store=None, the default) must be completely unaffected by
+    this pass's new persistence call -- no AttributeError, no crash, and
+    the pipeline's own return value is identical to before this change."""
+    from critic.models import CriticAssessment, CriticVerdict
+    from live.critic_gate import CriticGateResult
+
+    approving_assessment = CriticAssessment(
+        verdict=CriticVerdict.APPROVE, checks=(), failed_checks=(), warnings=(),
+        reasons=["All hard checks passed."], config_version="test",
+    )
+    gate = _FakeCriticGate(CriticGateResult(blocked=False, block_reason="", assessment=approving_assessment, decision=None))
+
+    bar = make_mock_bar(timestamp=datetime(2026, 1, 1, 9, 15), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000.0)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    pipeline, engine, store = _pipeline(script, interval="1m", strategy=_ScriptedStrategy(), critic_gate=gate, clock=lambda: bar.timestamp + timedelta(seconds=5))
+
+    result = pipeline.process_next()
+
+    assert result.kind == "BAR_PROCESSED"
+    assert result.journal_entry is not None
+    assert result.critic_assessment is approving_assessment
+
+
+def test_a_risk_rejected_signal_in_human_approval_mode_now_persists_a_risk_rejection():
+    """The exact documented gap this closes: in --require-human-approval
+    mode, a signal that PASSES the critic but FAILS the pre-pending risk
+    check was previously recorded nowhere in this store."""
+    from live.state_store import LiveStateStore
+
+    state_store = LiveStateStore(":memory:")
+    bar = make_mock_bar(timestamp=datetime(2026, 1, 1, 9, 15), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000.0)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    # stop_price ABOVE reference_price is an invalid stop for a LONG --
+    # risk.engine.py's own INVALID_STOP veto, a real, deterministic
+    # rejection (not a fabricated/injected one).
+    pipeline, engine, store = _pipeline(
+        script, interval="1m", require_human_approval=True, strategy=_ScriptedStrategy(stop_price=105.0, target_price=110.0),
+        state_store=state_store, clock=lambda: bar.timestamp + timedelta(seconds=5),
+    )
+
+    result = pipeline.process_next()
+
+    assert result.kind == "BAR_PROCESSED"  # unaffected -- exact pre-existing return shape for this path
+    assert result.lifecycle.state.value == "RISK_REJECTED"
+    assert result.journal_entry is None  # never reached submit_signal -- no order was ever created
+    assert store.get_pending_order("TEST") is None  # no candidate accidentally bypassed approval
+    assert store.get_open_position("TEST") is None
+
+    rejections = state_store.list_risk_rejections()
+    assert len(rejections) == 1
+    assert rejections[0].signal_id == result.signal.stable_id()
+    assert rejections[0].symbol == "TEST"
+    assert "INVALID_STOP" in rejections[0].veto_reasons
+
+
+def test_auto_approve_mode_never_writes_a_risk_rejection_row():
+    """Safety boundary: auto-approve mode's OWN risk check happens
+    inside submit_signal(), never through the pre-pending branch this
+    fix touches -- risk_rejections must stay empty in that mode, proving
+    the fix is scoped exactly to --require-human-approval and changes
+    nothing about auto-approve's existing behavior."""
+    from live.state_store import LiveStateStore
+
+    state_store = LiveStateStore(":memory:")
+    bar = make_mock_bar(timestamp=datetime(2026, 1, 1, 9, 15), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000.0)
+    script = [MockScriptEvent.bar_event("TEST", bar)]
+    pipeline, engine, store = _pipeline(
+        script, interval="1m", require_human_approval=False, strategy=_ScriptedStrategy(stop_price=105.0, target_price=110.0),
+        state_store=state_store, clock=lambda: bar.timestamp + timedelta(seconds=5),
+    )
+
+    result = pipeline.process_next()
+
+    assert result.kind == "BAR_PROCESSED"
+    assert result.journal_entry is not None  # auto-approve mode always calls submit_signal, unaffected by this fix
+    assert state_store.list_risk_rejections() == []  # this fix's new table is never touched by this code path
+
+
 def test_feed_disconnect_is_reported_and_does_not_crash_the_pipeline():
     script = [MockScriptEvent.disconnect(), MockScriptEvent.bar_event("TEST", _qualifying_bar(1))]
     pipeline, engine, store = _pipeline(script, clock=lambda: datetime(2026, 1, 1, 9, 16))

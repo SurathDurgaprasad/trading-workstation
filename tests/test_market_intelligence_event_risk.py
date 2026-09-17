@@ -115,3 +115,106 @@ def test_every_check_is_always_present_regardless_of_verdict():
     assessment = assess_event_risk(symbol="RELIANCE.NS", as_of=_AS_OF, corporate_actions=snapshot)
     names = {c.name.value for c in assessment.checks}
     assert names == {"CORPORATE_ACTIONS_AVAILABILITY", "UPCOMING_EARNINGS"}
+
+
+# --- CORPORATE_ACTIONS_FRESHNESS (adversarial hardening pass, 2026-09-18) ----
+#
+# Closes this module's own documented KNOWN GAP: corporate_actions.as_of
+# was never checked against `now`. All tests below pass `now` explicitly to
+# opt into the check -- see test_omitting_now_never_appends_the_freshness_
+# check_at_all for proof that NOT passing it is still fully backward
+# compatible with every test above.
+
+
+def _dated_snapshot(*, as_of, status="AVAILABLE", actions=(), unavailable_reason=None) -> CorporateActionsSnapshot:
+    return CorporateActionsSnapshot(
+        symbol="RELIANCE.NS", as_of=as_of, actions=tuple(actions), status=status, unavailable_reason=unavailable_reason,
+    )
+
+
+def test_a_fresh_snapshot_is_allow():
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
+    snapshot = _dated_snapshot(as_of=now - timedelta(hours=1), actions=[])
+    assessment = assess_event_risk(symbol="RELIANCE.NS", as_of=_AS_OF, corporate_actions=snapshot, now=now)
+    assert assessment.verdict == EventRiskVerdict.ALLOW
+    freshness = next(c for c in assessment.checks if c.name.value == "CORPORATE_ACTIONS_FRESHNESS")
+    assert freshness.verdict == EventRiskVerdict.ALLOW
+    assert "3,600" in freshness.detail  # 1 hour = 3600s, the real computed age, not a fabricated one
+
+
+def test_a_stale_snapshot_is_treated_the_same_as_missing_evidence():
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
+    snapshot = _dated_snapshot(as_of=now - timedelta(hours=25), actions=[])  # past the 24h default
+    assessment = assess_event_risk(symbol="RELIANCE.NS", as_of=_AS_OF, corporate_actions=snapshot, now=now)
+    assert assessment.verdict == EventRiskVerdict.UNKNOWN  # config.treat_missing_corporate_actions_as's default
+    freshness = next(c for c in assessment.checks if c.name.value == "CORPORATE_ACTIONS_FRESHNESS")
+    assert freshness.verdict == EventRiskVerdict.UNKNOWN
+    assert "exceeding" in freshness.detail
+
+
+def test_stale_snapshot_missing_data_policy_is_overridable_same_as_missing_evidence():
+    """The staleness verdict reuses treat_missing_corporate_actions_as --
+    proving that override applies uniformly to both failure modes, not
+    just the missing-evidence one."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
+    snapshot = _dated_snapshot(as_of=now - timedelta(hours=25), actions=[])
+    config = EventRiskConfig(treat_missing_corporate_actions_as=EventRiskVerdict.BLOCK)
+    assessment = assess_event_risk(symbol="RELIANCE.NS", as_of=_AS_OF, corporate_actions=snapshot, now=now, config=config)
+    assert assessment.verdict == EventRiskVerdict.BLOCK
+
+
+def test_a_missing_snapshot_never_triggers_a_freshness_check_at_all():
+    """Freshness is meaningless without data -- already fully covered by
+    CORPORATE_ACTIONS_AVAILABILITY, so no separate FRESHNESS check
+    should even appear when there is nothing to date."""
+    from datetime import datetime, timezone
+
+    assessment = assess_event_risk(symbol="RELIANCE.NS", as_of=_AS_OF, corporate_actions=None, now=datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc))
+    names = {c.name.value for c in assessment.checks}
+    assert "CORPORATE_ACTIONS_FRESHNESS" not in names
+
+
+def test_omitting_now_never_appends_the_freshness_check_at_all():
+    """The design this fix landed on after an earlier draft regressed
+    every pre-existing call pattern's overall verdict (see the inline
+    comment above the check in event_risk.py for the full story) --
+    `now=None` (the default) must produce a check list and overall
+    verdict byte-identical to before this fix existed."""
+    snapshot = _snapshot(status="AVAILABLE", actions=[])
+    assessment = assess_event_risk(symbol="RELIANCE.NS", as_of=_AS_OF, corporate_actions=snapshot)
+    names = {c.name.value for c in assessment.checks}
+    assert "CORPORATE_ACTIONS_FRESHNESS" not in names
+    assert assessment.verdict == EventRiskVerdict.ALLOW  # NOT downgraded to UNKNOWN merely for lacking `now`
+
+
+def test_freshness_check_disabled_via_none_threshold_never_appends_either():
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
+    snapshot = _dated_snapshot(as_of=now - timedelta(days=999), actions=[])  # absurdly stale
+    config = EventRiskConfig(max_corporate_actions_staleness_seconds=None)
+    assessment = assess_event_risk(symbol="RELIANCE.NS", as_of=_AS_OF, corporate_actions=snapshot, now=now, config=config)
+    names = {c.name.value for c in assessment.checks}
+    assert "CORPORATE_ACTIONS_FRESHNESS" not in names
+    assert assessment.verdict == EventRiskVerdict.ALLOW  # the absurd staleness never even gets a chance to matter
+
+
+def test_a_future_timestamped_snapshot_is_not_treated_as_stale():
+    """A snapshot whose as_of is (implausibly) after `now` -- age_seconds
+    goes negative, which is never > a positive threshold, so this reads
+    as fresh rather than crashing or being misclassified as stale. Not a
+    claim this is a GOOD state (a future as_of is itself suspicious), only
+    that the freshness arithmetic doesn't break under it."""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc)
+    snapshot = _dated_snapshot(as_of=now + timedelta(hours=1), actions=[])
+    assessment = assess_event_risk(symbol="RELIANCE.NS", as_of=_AS_OF, corporate_actions=snapshot, now=now)
+    freshness = next(c for c in assessment.checks if c.name.value == "CORPORATE_ACTIONS_FRESHNESS")
+    assert freshness.verdict == EventRiskVerdict.ALLOW

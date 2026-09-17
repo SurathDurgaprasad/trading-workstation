@@ -687,16 +687,27 @@ def test_fleet_banner_does_not_appear_on_the_fleet_tab_itself(client, tmp_path):
         dashboard_app.configure(schedule_config_path=None)
 
 
-def test_fleet_page_counts_a_degraded_but_arriving_feed_as_healthy(client, monkeypatch, tmp_path):
-    """15-symbol live-fleet validation mission, real defect found live:
-    `_data_health_label` grades any feed whose last bar is >30s old as
-    DEGRADED -- deliberately conservative for a display badge, but for
-    the fleet's own `--interval 1m` cadence a 30-60s age is simply the
-    NORMAL gap between consecutive bars. Counting DEGRADED as unhealthy
-    made a continuously-healthy 15-symbol fleet report "0 / 15 HEALTHY"
-    for roughly half of every minute (observed live oscillating
-    0 -> 0 -> 13 -> 15 within 36 seconds). A feed that is still
-    delivering bars must count as healthy."""
+def test_fleet_page_counts_a_degraded_feed_separately_not_as_healthy(client, monkeypatch, tmp_path):
+    """15-symbol live-fleet validation mission originally found: counting
+    DEGRADED as unhealthy made a continuously-healthy 15-symbol fleet
+    report "0 / 15 HEALTHY" for roughly half of every minute (`--interval
+    1m`'s normal 30-60s last-bar-age sawtooth repeatedly crossing
+    _data_health_label's 30s DEGRADED floor) -- observed live oscillating
+    0 -> 0 -> 13 -> 15 within 36 seconds. The FIRST fix folded DEGRADED
+    into the HEALTHY count to stop the false alarm.
+
+    Adversarial hardening pass (2026-09-18) revisited this: folding
+    DEGRADED into HEALTHY made two genuinely different states (per this
+    project's OWN _data_health_label docstring: HEALTHY = fresh data,
+    DEGRADED = data arriving but not within the freshness floor)
+    indistinguishable in the rollup -- its own truthfulness problem. The
+    real fix is to count both, not collapse either into the other: a
+    DEGRADED feed is disclosed as its own number in the summary line
+    (never silently absorbed into "HEALTHY", never conflated with a
+    genuinely broken STALE/DISCONNECTED feed in `exceptions` either) --
+    an operator sees "0 / 1 HEALTHY, 1 DEGRADED" and can correctly read
+    that as "nothing is actually broken", without the dashboard claiming
+    a stale-by-its-own-definition feed is HEALTHY."""
     import dashboard.app as dashboard_app
     from datetime import datetime, timedelta, timezone
     from live.runtime_layout import ensure_symbol_runtime_dirs, symbol_runtime_paths
@@ -716,8 +727,11 @@ def test_fleet_page_counts_a_degraded_but_arriving_feed_as_healthy(client, monke
     state_store.close()
 
     response = client.get("/fleet")
-    assert "DEGRADED" in response.text  # still labelled honestly...
-    assert "1 / 1 HEALTHY" in response.text  # ...but counted as a working feed
+    assert "DEGRADED" in response.text  # still labelled honestly in the per-symbol row...
+    assert "0 / 1 HEALTHY" in response.text  # ...and NOT counted as HEALTHY...
+    assert "1 DEGRADED" in response.text  # ...but disclosed as its own real, distinct count
+    # Never listed as a fault/exception either -- DEGRADED-but-arriving is not the same as broken.
+    assert "EXCEPTION" not in response.text
 
     dashboard_app.configure(schedule_config_path=None)
 
@@ -746,6 +760,50 @@ def test_fleet_page_counts_a_genuinely_stale_feed_as_unhealthy(client, monkeypat
     response = client.get("/fleet")
     assert "STALE" in response.text
     assert "0 / 1 HEALTHY" in response.text
+
+    dashboard_app.configure(schedule_config_path=None)
+
+
+def test_fleet_page_shows_a_real_process_heartbeat_age_distinct_from_data_health(client, monkeypatch, tmp_path):
+    """Adversarial hardening pass (2026-09-18), Phase 1 item 3: the
+    Process column now shows a genuine, narrow PROCESS signal (the
+    worker's own heartbeat.json, read directly off disk) -- structurally
+    separate from the Data column's freshness grading. Never conflated:
+    a symbol can show a fresh heartbeat and a completely stale/absent
+    feed at the same time, and this test proves that distinction is
+    actually rendered, not collapsed into one signal."""
+    import dashboard.app as dashboard_app
+    from live.heartbeat import write_heartbeat
+    from live.runtime_layout import ensure_symbol_runtime_dirs, symbol_runtime_paths
+
+    dashboard_app.configure(schedule_config_path=None, fleet_runtime_dir=str(tmp_path), fleet_symbols=["RELIANCE.NS"])
+
+    paths = symbol_runtime_paths(tmp_path, "RELIANCE.NS")
+    ensure_symbol_runtime_dirs(paths)
+    write_heartbeat(paths.heartbeat_path)  # real heartbeat write, same function the actual worker loop calls
+    # Deliberately NO feed_status row and NO session.log -- the worker process
+    # is alive (heartbeat fresh) but has never actually produced a bar yet.
+
+    response = client.get("/fleet")
+    assert "pid=" in response.text  # only present if the real heartbeat.json was actually read, not just static prose
+    assert "NOT AVAILABLE" in response.text  # the Data column, honestly still absent -- never inferred from the heartbeat
+    assert "0 / 1 HEALTHY" in response.text  # a fresh heartbeat alone never counts as data-healthy
+
+    dashboard_app.configure(schedule_config_path=None)
+
+
+def test_fleet_page_shows_no_heartbeat_honestly_when_the_file_does_not_exist(client, monkeypatch, tmp_path):
+    import dashboard.app as dashboard_app
+    from live.runtime_layout import ensure_symbol_runtime_dirs, symbol_runtime_paths
+
+    dashboard_app.configure(schedule_config_path=None, fleet_runtime_dir=str(tmp_path), fleet_symbols=["RELIANCE.NS"])
+
+    paths = symbol_runtime_paths(tmp_path, "RELIANCE.NS")
+    ensure_symbol_runtime_dirs(paths)
+    # No heartbeat.json written at all.
+
+    response = client.get("/fleet")
+    assert "NO HEARTBEAT" in response.text  # never fabricated as alive
 
     dashboard_app.configure(schedule_config_path=None)
 

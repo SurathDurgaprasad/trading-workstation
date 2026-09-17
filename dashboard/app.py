@@ -934,11 +934,17 @@ async def fleet_page(request: Request) -> HTMLResponse:
     read against an operator-configured --fleet-runtime-dir. Per-symbol
     DATA health reuses each symbol's own isolated state.db feed_status
     row (live/runtime_layout.py's own isolation, same _feed_health()
-    grading the rest of this dashboard uses). PROCESS (is the OS
-    process itself alive) is honestly NOT AVAILABLE from this page --
-    the dashboard is a separate process from fleet-supervise and has no
-    way to inspect another process's PID; only fleet-supervise's own
-    console output can answer that today. Never fabricated as HEALTHY."""
+    grading the rest of this dashboard uses). PROCESS is a genuinely
+    separate signal (adversarial hardening pass, 2026-09-18): the
+    worker's own heartbeat.json age, read directly off disk -- real,
+    cross-process, never fabricated -- but deliberately NOT the same
+    claim as "the OS process itself is alive" (the dashboard still
+    cannot inspect another process's PID/liveness directly; only
+    fleet-supervise's own console output can answer THAT). Shown as a
+    raw age, not an invented ALIVE/STALE judgment (see the inline
+    comment where it's computed for why). Never conflated with DATA
+    health -- a fresh heartbeat proves the worker's loop is running, not
+    that its feed is connected or its data is current."""
     if _fleet_runtime_dir is None or not _fleet_symbols:
         body = (
             '<h2>FLEET</h2>'
@@ -956,9 +962,34 @@ async def fleet_page(request: Request) -> HTMLResponse:
 
     rows = []
     healthy = 0
+    degraded = 0
     exceptions = []
     for s in summary.per_symbol:
         paths = symbol_runtime_paths(_fleet_runtime_dir, s.symbol)
+        # Adversarial hardening pass (2026-09-18): a genuine, narrow
+        # PROCESS signal, structurally distinct from DATA health above --
+        # this is the worker's own heartbeat.json (live/heartbeat.py),
+        # readable cross-process since it's just a file on disk. Shown as
+        # a raw age, deliberately NOT classified into an ALIVE/STALE
+        # judgment: unlike bar-data freshness (which reuses live/
+        # freshness.py's real, established 30s/120s thresholds), no
+        # existing threshold for heartbeat staleness exists anywhere in
+        # this project to reuse, and inventing one here would be exactly
+        # the "new threshold merely to make the dashboard look better"
+        # this pass was told not to do. An operator sees the real number
+        # and judges for themselves -- never fabricated, never conflated
+        # with "the feed/data is healthy" (see the module docstring
+        # above: process alive != feed healthy != data fresh).
+        process_text = "NO HEARTBEAT"
+        if paths.heartbeat_path.exists():
+            try:
+                import json as _json
+                heartbeat_data = _json.loads(paths.heartbeat_path.read_text())
+                written_at = datetime.fromisoformat(heartbeat_data["written_at"])
+                heartbeat_age = (datetime.now(timezone.utc) - written_at).total_seconds()
+                process_text = f"heartbeat {heartbeat_age:,.0f}s ago (pid={heartbeat_data.get('pid', '?')})"
+            except (OSError, ValueError, KeyError):
+                process_text = "heartbeat file unreadable"
         data_label, data_class = "NOT AVAILABLE", "tag-sim"
         if paths.state_db.exists():
             store = LiveStateStore(paths.state_db)
@@ -969,28 +1000,35 @@ async def fleet_page(request: Request) -> HTMLResponse:
             own = next((r for r in rows_status if r.symbol == s.symbol), None)
             if own is not None:
                 data_label, data_class = _feed_health(own)
-        # 15-symbol live-fleet validation mission, real defect found live:
-        # this used to require data_label in ("CONNECTED", "LIVE"), which
-        # counted DEGRADED as unhealthy. `_data_health_label` assigns
-        # DEGRADED to any feed whose last bar is >30s old -- deliberately
-        # conservative for a DISPLAY badge, but for the fleet's actual
-        # `--interval 1m` cadence a 30-60s age is the NORMAL gap between
-        # consecutive bars. The result: a continuously-healthy 15-symbol
-        # fleet reported "0 / 15 HEALTHY" for roughly the second half of
-        # every minute, observed live oscillating 0 -> 0 -> 13 -> 15 within
-        # 36 seconds. DEGRADED means data IS arriving, just not in the last
-        # 30s; only a genuinely broken feed (STALE / DISCONNECTED /
-        # RECONNECTING / SOURCE_UNAVAILABLE / NOT AVAILABLE) is unhealthy.
-        is_healthy = s.log_found and data_label in ("CONNECTED", "LIVE", "DEGRADED")
+        # 15-symbol live-fleet validation mission found a real defect: an
+        # earlier version required data_label in ("CONNECTED", "LIVE")
+        # only, and a continuously-healthy fleet oscillated "0 / 15
+        # HEALTHY" -> "15 / 15" within 36 seconds, because `--interval 1m`
+        # legitimately swings a feed's own last-bar age between ~0s and
+        # ~60s every cycle, repeatedly crossing _data_health_label's 30s
+        # DEGRADED floor. A LATER fix folded DEGRADED into "healthy" to
+        # stop the false alarm -- but that made DEGRADED indistinguishable
+        # from genuinely fresh data in the rollup count, which is its own
+        # truthfulness problem (adversarial hardening pass, 2026-09-18):
+        # HEALTHY and DEGRADED are two different things by this project's
+        # OWN definition (_data_health_label's docstring) and must be
+        # counted separately, not collapsed either direction. Neither
+        # count changes the 30s/120s thresholds themselves (still the
+        # real, existing live/freshness.py-derived numbers, never
+        # fabricated) -- only how the two real buckets are ROLLED UP.
+        is_healthy = s.log_found and data_label in ("CONNECTED", "LIVE")
+        is_degraded = s.log_found and data_label == "DEGRADED"
         if is_healthy:
             healthy += 1
+        elif is_degraded:
+            degraded += 1
         else:
             exceptions.append((s.symbol, f"log_found={s.log_found}, db_found={s.db_found}, data={data_label}"))
         pnl_color = "#35C98A" if s.net_pnl >= 0 else "#F05D5E"
         rows.append(
             f"<tr><td class='label'>{html.escape(s.symbol)}</td>"
             f"<td><span class='tag {data_class}'>{html.escape(data_label)}</span></td>"
-            f"<td><span class='tag tag-sim'>NOT AVAILABLE</span></td>"
+            f"<td><span class='tag tag-sim'>{html.escape(process_text)}</span></td>"
             f"<td>{s.bars_processed}</td><td>{s.signals}</td><td>{s.trades}</td>"
             f"<td style='color:{pnl_color};'>{s.net_pnl:+,.2f}</td></tr>"
         )
@@ -1002,14 +1040,22 @@ async def fleet_page(request: Request) -> HTMLResponse:
         for sym, reason in exceptions
     )
 
+    total = len(summary.per_symbol)
+    rollup_color = "#35C98A" if healthy == total else ("#E7B84B" if healthy + degraded == total else "#F05D5E")
+    degraded_text = f", {degraded} DEGRADED" if degraded else ""
     body = f"""
 <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:14px;">
   <div style="font-size:15px;font-weight:600;">Fleet</div>
-  <div style="font-size:13px;font-weight:600;color:{'#35C98A' if healthy == len(summary.per_symbol) else '#E7B84B'};">{healthy} / {len(summary.per_symbol)} HEALTHY</div>
+  <div style="font-size:13px;font-weight:600;color:{rollup_color};">{healthy} / {total} HEALTHY{degraded_text}</div>
 </div>
-<p class="muted">Runtime dir: {html.escape(str(_fleet_runtime_dir))}. Process-alive status is NOT AVAILABLE from this page (a separate
-process from fleet-supervise) &mdash; "PROCESS" reflects only whether this symbol's log/store files exist, not whether its OS process is
-currently running. Bars/Signals/Trades/P&amp;L are read via live/fleet_summary.py, the same module <code>fleet-summary</code> uses.</p>
+<p class="muted">Runtime dir: {html.escape(str(_fleet_runtime_dir))}. "PROCESS" shows the worker's own heartbeat.json age (real, read directly
+off disk) &mdash; NOT a direct OS-process-liveness check (the dashboard is a separate process from fleet-supervise and cannot inspect
+another process's PID; only fleet-supervise's own console output can answer that). A fresh heartbeat proves the worker's own loop is
+running; it says nothing about whether its FEED is connected or its DATA is current &mdash; those are the separate "Data" column.
+Bars/Signals/Trades/P&amp;L are read via live/fleet_summary.py, the same module <code>fleet-summary</code> uses.
+HEALTHY means data age is under 30s (this project's own FreshnessPolicy floor); DEGRADED means the feed and worker are alive and
+data IS arriving, just not within the last 30s (normal, expected sawtooth for a 1-minute bar cadence) &mdash; shown as its own count,
+never silently folded into HEALTHY or treated as a fault.</p>
 {exception_html}
 <table><tr><th>Symbol</th><th>Data</th><th>Process</th><th>Bars</th><th>Signals</th><th>Trades</th><th>Net P&amp;L</th></tr>{"".join(rows)}</table>
 """
@@ -1442,9 +1488,17 @@ async def intelligence_page(request: Request) -> HTMLResponse:
             "<p class='muted'>AUTONOMOUS LIVE PAPER-TRADING HARDENING mission, dashboard truth audit: Equity/Realized PnL/Total "
             "trades below are a SINGLE CUMULATIVE ledger across every symbol this engine has ever been run against via "
             "<code>shadow-run --paper-execute</code> or <code>schedule ... --paper-execute</code> &mdash; historical replay/testing runs "
-            "and genuine live-market-hours runs are not distinguished. Check the Submitted/Entry Time columns below before reading "
-            "these totals as a live NSE/BSE track record; a symbol and date range far from today's live session (e.g. an older "
-            "test run) contributes to the same numbers.</p>"
+            "and genuine live-market-hours runs are not distinguished IF they share the same <code>--paper-db</code> file. Check the "
+            "Submitted/Entry Time columns below before reading these totals as a live NSE/BSE track record; a symbol and date range "
+            "far from today's live session (e.g. an older test run) contributes to the same numbers.</p>"
+            "<p class='muted'>Adversarial hardening pass (2026-09-18): <code>account</code> is a structurally single-row table "
+            "(schema CHECK id=1) shared by every run against the SAME db file &mdash; its Equity/Realized PnL cannot be un-mixed "
+            "after the fact without recomputation, so a schema tag alone cannot fix this retroactively. The REAL structural fix, "
+            "already fully supported and zero-risk, is to point historical/testing runs and genuine live runs at "
+            "<em>separate</em> <code>--paper-db</code>/<code>--state-db</code> files (exactly how the paper-live workstation "
+            "above already uses a different database than this page) and set <code>TRADING_PAPER_DB_PATH</code> to the live-only "
+            "one before starting this dashboard &mdash; not a code change, an operational convention this page cannot enforce for "
+            "you.</p>"
             f"{account_kv}"
             "<h3 style='font-size:14px;color:#9aa4b2;'>Pending orders</h3>"
             f"{pending_table}"

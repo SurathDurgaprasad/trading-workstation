@@ -465,6 +465,26 @@ class LiveSimPipeline:
                 existing_open_position=self.engine.store.get_open_position(symbol) is not None,
             )
             critic_assessment = gate_result.assessment
+            # Adversarial hardening pass (2026-09-18): purely additive --
+            # records EVERY critic evaluation (approve/downgrade/reject/
+            # insufficient-evidence alike), unconditionally, BEFORE the
+            # existing blocked-only branch below, which is completely
+            # untouched (same save_critic_rejection call, same return
+            # values, same control flow). Closes a real asymmetry: this
+            # CriticAssessment was previously computed and then simply
+            # discarded for every non-blocking verdict -- an operator
+            # could see WHY a signal was blocked but never WHY one was
+            # allowed through. See live/state_store.py's critic_evaluations
+            # table docstring for the full rationale.
+            if self.state_store is not None:
+                self.state_store.save_critic_evaluation(
+                    signal_id=signal_id, symbol=symbol,
+                    verdict=gate_result.assessment.verdict.value if gate_result.assessment else "EVIDENCE_UNAVAILABLE",
+                    blocked=gate_result.blocked,
+                    reasons=list(gate_result.assessment.reasons) if gate_result.assessment else [gate_result.block_reason],
+                    checks=[c.model_dump(mode="json") for c in gate_result.assessment.checks] if gate_result.assessment else [],
+                    evaluated_at=now,
+                )
             if gate_result.blocked:
                 lifecycle.transition_to(SignalLifecycleState.CRITIC_REJECTED)
                 if self.state_store is not None:
@@ -498,6 +518,23 @@ class LiveSimPipeline:
         decision = self.engine.risk_engine.evaluate(signal, self.engine.account)
         if not decision.approved:
             lifecycle.transition_to(SignalLifecycleState.RISK_REJECTED)
+            # Adversarial hardening pass (2026-09-18): documented gap, now
+            # closed -- purely additive, mirrors the existing
+            # save_critic_rejection call above exactly (same guard, same
+            # "only write when genuinely rejected" trigger). Previously,
+            # in --require-human-approval mode specifically, a signal that
+            # passed the critic but failed THIS pre-pending risk check was
+            # recorded nowhere in this store -- only in the OPTIONAL
+            # --record-predictions side-channel. The return value, control
+            # flow, and every other branch (auto-approve mode above,
+            # PENDING_HUMAN_APPROVAL below) are unchanged.
+            if self.state_store is not None:
+                self.state_store.save_risk_rejection(
+                    signal_id=signal_id, symbol=symbol,
+                    veto_reasons=[v.value for v in decision.veto_reasons],
+                    explanation=decision.explanation,
+                    rejected_at=self._clock(),
+                )
             return PipelineStepResult(
                 kind="BAR_PROCESSED", symbol=symbol, bar=bar, freshness=freshness, signal=signal,
                 lifecycle=lifecycle, critic_assessment=critic_assessment,

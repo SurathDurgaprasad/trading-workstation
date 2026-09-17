@@ -39,6 +39,32 @@ Three tables:
     requirement) depends on -- a critic-rejected signal never reaches
     pending_approvals or a JournalEntry at all, so without this table its
     rejection would leave no trace anywhere.
+  - risk_rejections (adversarial hardening pass, 2026-09-18): closes a
+    documented gap found in an earlier audit and confirmed still real by
+    re-reading live/pipeline.py's own source -- in
+    --require-human-approval mode specifically, a signal that PASSES the
+    critic but FAILS the first (pre-pending) risk check was previously
+    recorded nowhere in this store at all (only in the OPTIONAL
+    --record-predictions side-channel, skipped entirely if that flag
+    isn't set). This mirrors critic_rejections' own shape and existing
+    call-site pattern exactly -- same table style, same "only write when
+    genuinely rejected" trigger, added purely additively next to the
+    existing (unmodified) auto-approve path.
+  - critic_evaluations (adversarial hardening pass, 2026-09-18): closes a
+    real asymmetry critic_rejections above has always had -- it only ever
+    recorded a BLOCKING verdict (REJECT/INSUFFICIENT_EVIDENCE), never an
+    APPROVE/DOWNGRADE. The CriticAssessment for an approved signal was
+    computed (live/critic_gate.py's evaluate() always runs it) but simply
+    discarded once control passed to risk sizing -- an operator could see
+    WHY a signal was blocked but never WHY one was allowed through,
+    breaking the traceability chain's most common case. One row per
+    critic evaluation, every verdict, keyed by a fresh critic_review_id
+    (not signal_id, unlike critic_rejections -- deliberately allows more
+    than one row per signal_id, matching this table's append-only intent,
+    since nothing here is ever meant to overwrite a prior evaluation the
+    way critic_rejections' own upsert does). Purely additive: written
+    alongside, never instead of, the existing critic_rejections call --
+    that table's own readers/callers are completely unaffected.
 """
 
 import logging
@@ -145,6 +171,27 @@ CREATE TABLE IF NOT EXISTS critic_rejections (
     checks_json TEXT NOT NULL,
     rejected_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS critic_evaluations (
+    critic_review_id TEXT PRIMARY KEY,
+    signal_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    verdict TEXT NOT NULL,
+    blocked INTEGER NOT NULL,
+    reasons_json TEXT NOT NULL,
+    checks_json TEXT NOT NULL,
+    evaluated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_critic_evaluations_signal_id ON critic_evaluations(signal_id);
+
+CREATE TABLE IF NOT EXISTS risk_rejections (
+    signal_id TEXT PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    veto_reasons_json TEXT NOT NULL,
+    explanation TEXT NOT NULL,
+    rejected_at TEXT NOT NULL
+);
 """
 
 
@@ -188,6 +235,27 @@ class CriticRejectionRecord:
     reasons: list[str]
     checks: list[dict]  # each critic.models.CriticCheck, JSON-serialized (name/evaluated/passed/severity/detail)
     rejected_at: str  # UTC isoformat
+
+
+@dataclass
+class RiskRejectionRecord:
+    signal_id: str
+    symbol: str
+    veto_reasons: list[str]  # risk.veto.VetoReason values
+    explanation: str
+    rejected_at: str  # UTC isoformat
+
+
+@dataclass
+class CriticEvaluationRecord:
+    critic_review_id: str
+    signal_id: str
+    symbol: str
+    verdict: str  # critic.models.CriticVerdict value -- any of APPROVE/REJECT/DOWNGRADE/INSUFFICIENT_EVIDENCE
+    blocked: bool
+    reasons: list[str]
+    checks: list[dict]  # each critic.models.CriticCheck, JSON-serialized (name/evaluated/passed/severity/detail)
+    evaluated_at: str  # UTC isoformat
 
 
 @dataclass
@@ -491,6 +559,83 @@ class LiveStateStore:
         return [
             CriticRejectionRecord(
                 signal_id=r[0], symbol=r[1], verdict=r[2], reasons=json.loads(r[3]), checks=json.loads(r[4]), rejected_at=r[5],
+            )
+            for r in rows
+        ]
+
+    # --- risk rejections (adversarial hardening pass, 2026-09-18) ---------------
+
+    def save_risk_rejection(
+        self, *, signal_id: str, symbol: str, veto_reasons: list[str], explanation: str, rejected_at: datetime,
+    ) -> None:
+        import json
+
+        self._conn.execute(
+            "INSERT INTO risk_rejections (signal_id, symbol, veto_reasons_json, explanation, rejected_at) "
+            "VALUES (?,?,?,?,?) ON CONFLICT(signal_id) DO UPDATE SET "
+            "symbol=excluded.symbol, veto_reasons_json=excluded.veto_reasons_json, "
+            "explanation=excluded.explanation, rejected_at=excluded.rejected_at",
+            (signal_id, symbol, json.dumps(veto_reasons), explanation, rejected_at.isoformat()),
+        )
+
+    def list_risk_rejections(self, limit: int = 50) -> list["RiskRejectionRecord"]:
+        import json
+
+        rows = self._conn.execute(
+            "SELECT signal_id, symbol, veto_reasons_json, explanation, rejected_at FROM risk_rejections "
+            "ORDER BY rejected_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            RiskRejectionRecord(signal_id=r[0], symbol=r[1], veto_reasons=json.loads(r[2]), explanation=r[3], rejected_at=r[4])
+            for r in rows
+        ]
+
+    # --- critic evaluations (adversarial hardening pass, 2026-09-18) ------------
+
+    def save_critic_evaluation(
+        self, *, signal_id: str, symbol: str, verdict: str, blocked: bool, reasons: list[str], checks: list[dict], evaluated_at: datetime,
+    ) -> str:
+        """Records EVERY critic evaluation, not just blocking ones -- see
+        this module's own docstring for why. Always inserts a fresh row
+        (never an upsert): unlike critic_rejections, this table's whole
+        point is a complete evaluation history, so a signal evaluated
+        more than once (not expected in this pipeline's current call
+        pattern, but never assumed) gets one row per evaluation, not one
+        overwritten in place. Returns the generated critic_review_id."""
+        import json
+        import uuid
+
+        critic_review_id = uuid.uuid4().hex
+        self._conn.execute(
+            "INSERT INTO critic_evaluations (critic_review_id, signal_id, symbol, verdict, blocked, reasons_json, checks_json, evaluated_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (critic_review_id, signal_id, symbol, verdict, 1 if blocked else 0, json.dumps(reasons), json.dumps(checks), evaluated_at.isoformat()),
+        )
+        return critic_review_id
+
+    def list_critic_evaluations(self, *, signal_id: str | None = None, limit: int = 50) -> list["CriticEvaluationRecord"]:
+        """All evaluations by default (most recent first); pass signal_id
+        to reconstruct one signal's own full critic history specifically
+        -- the traceability hop this table exists to make possible."""
+        import json
+
+        if signal_id is not None:
+            rows = self._conn.execute(
+                "SELECT critic_review_id, signal_id, symbol, verdict, blocked, reasons_json, checks_json, evaluated_at "
+                "FROM critic_evaluations WHERE signal_id = ? ORDER BY evaluated_at DESC LIMIT ?",
+                (signal_id, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT critic_review_id, signal_id, symbol, verdict, blocked, reasons_json, checks_json, evaluated_at "
+                "FROM critic_evaluations ORDER BY evaluated_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [
+            CriticEvaluationRecord(
+                critic_review_id=r[0], signal_id=r[1], symbol=r[2], verdict=r[3], blocked=bool(r[4]),
+                reasons=json.loads(r[5]), checks=json.loads(r[6]), evaluated_at=r[7],
             )
             for r in rows
         ]

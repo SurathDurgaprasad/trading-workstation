@@ -36,23 +36,29 @@ forward-looking signal Part 4 found), is deferred rather than rushed --
 this module is complete, real, and tested, ready to wire in as a
 follow-up once it has been reviewed on its own.
 
-KNOWN GAP, found via adversarial self-review of this module (found here,
-not fixed here -- this module is not live-wired, so the urgency that
-justified fixing the analogous gap in live/critic_gate.py's own evidence
-cache does not apply yet): `assess_event_risk` never checks how old
-`corporate_actions.as_of` is relative to `as_of` -- a caller could hand
-it a `CorporateActionsSnapshot` fetched hours or days ago and this
-module would evaluate it as if current, with no staleness check of its
-own (mirroring critic.engine.evaluate()'s own DATA_FRESHNESS check for
-`market_context.as_of`, which THIS module has no equivalent of). Before
-this module is wired into anything live, it should either gain that
-check directly or the caller supplying `corporate_actions` must be
-relied upon to enforce freshness itself -- a real design decision, not
-yet made.
+KNOWN GAP, found via adversarial self-review of this module -- CLOSED
+(adversarial hardening pass, 2026-09-18): `assess_event_risk` previously
+never checked how old `corporate_actions.as_of` was relative to now, so
+a caller could hand it a `CorporateActionsSnapshot` fetched hours or days
+ago and this module would evaluate it as if current. Now mirrors
+critic.engine.evaluate()'s own DATA_FRESHNESS check for
+`market_context.as_of` almost exactly: an explicit `now` parameter,
+compared against `corporate_actions.as_of`, against a configurable
+threshold (`EventRiskConfig.max_corporate_actions_staleness_seconds`).
+Deliberately reuses `treat_missing_corporate_actions_as` for the STALE
+case rather than inventing a new severity knob -- stale evidence is
+exactly as untrustworthy as missing evidence for this module's purpose,
+and `EventRiskCheckName.CORPORATE_ACTIONS_FRESHNESS` keeps it a
+separately-named, independently-visible check so an operator can tell
+"we never had this evidence" apart from "we had it, but it's stale."
+Still NOT wired into live/critic_gate.py or the live decision chain --
+this closes the module's own internal gap (making it safe to integrate
+later), not the separate decision of whether/when to actually integrate
+it, which remains deliberately unmade.
 """
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
 
 from market_intelligence.corporate_actions import CorporateActionKind, CorporateActionsSnapshot
@@ -73,6 +79,11 @@ class EventRiskCheckName(str, Enum):
     """Was corporate-actions evidence even obtainable for this symbol?"""
     UPCOMING_EARNINGS = "UPCOMING_EARNINGS"
     """Is a forward earnings-date estimate within the caution window?"""
+    CORPORATE_ACTIONS_FRESHNESS = "CORPORATE_ACTIONS_FRESHNESS"
+    """How old is the corporate-actions snapshot, if one is available at
+    all? A separate question from CORPORATE_ACTIONS_AVAILABILITY --
+    available-but-stale and never-available are different failure modes,
+    kept independently visible rather than conflated."""
 
 
 @dataclass(frozen=True)
@@ -110,6 +121,16 @@ class EventRiskConfig:
     not BLOCK) -- a caller wiring this into a hard gate can override to
     EventRiskVerdict.CAUTION or ALLOW explicitly if that is the policy
     they actually want; this module never decides that policy for them."""
+    max_corporate_actions_staleness_seconds: float | None = 24 * 3600.0
+    """Adversarial hardening pass (2026-09-18) -- closes this module's own
+    documented KNOWN GAP. Mirrors critic/engine.py's DATA_FRESHNESS check
+    (same age = now - as_of comparison), but 24h default rather than
+    critic's much tighter one: corporate actions (splits, earnings-date
+    estimates) genuinely change at most daily, so a same-day-refreshed
+    snapshot is a reasonable floor -- deliberately much more generous
+    than market_context's own threshold (which refreshes far more often,
+    minutes not a day). `None` disables the check entirely, matching
+    this project's consistent "None disables" convention."""
 
 
 _VERDICT_SEVERITY = {
@@ -126,6 +147,7 @@ def assess_event_risk(
     as_of: date,
     corporate_actions: CorporateActionsSnapshot | None,
     config: EventRiskConfig | None = None,
+    now: datetime | None = None,
 ) -> EventRiskAssessment:
     """`corporate_actions` is the caller's own already-fetched snapshot
     (this module never fetches anything itself -- same posture as
@@ -133,7 +155,20 @@ def assess_event_risk(
     rather than fetching one). None means "the caller never attempted
     to fetch it" -- treated identically to a fetch that returned
     status=UNAVAILABLE; both mean "no real evidence", never "assume
-    fine"."""
+    fine".
+
+    `now` (adversarial hardening pass, 2026-09-18): optional, defaults to
+    None for exact backward compatibility with the one existing call
+    pattern this module had before today (no real caller existed at all
+    -- see this module's own top-of-file docstring). When supplied (and
+    corporate-actions evidence is available, and the staleness threshold
+    is enabled), drives the new CORPORATE_ACTIONS_FRESHNESS check against
+    `corporate_actions.as_of`. When omitted, that check is simply not
+    appended at all -- "the caller didn't ask for a freshness opinion" is
+    not the same thing as "evidence is missing," and only the latter
+    should ever be able to raise the overall verdict (see the inline
+    comment above the check itself for why an UNKNOWN-when-omitted
+    design was tried and rejected)."""
     config = config or EventRiskConfig()
     checks: list[EventRiskCheck] = []
 
@@ -149,6 +184,36 @@ def assess_event_risk(
         avail_verdict = EventRiskVerdict.ALLOW
         avail_detail = "Corporate-actions evidence is available."
     checks.append(EventRiskCheck(name=EventRiskCheckName.CORPORATE_ACTIONS_AVAILABILITY, verdict=avail_verdict, detail=avail_detail))
+
+    # The FRESHNESS check is only ever APPENDED when the caller actually
+    # opted into it (is_available, a threshold configured, AND `now`
+    # supplied) -- deliberately NOT appended-as-UNKNOWN otherwise. An
+    # earlier draft of this fix appended it as UNKNOWN whenever `now` was
+    # omitted, which silently downgraded the OVERALL verdict from ALLOW to
+    # UNKNOWN for every pre-existing call pattern (UNKNOWN outranks ALLOW
+    # in _VERDICT_SEVERITY) -- caught by this module's own pre-existing
+    # test suite. `now=None` means "the caller didn't ask for a freshness
+    # opinion," not "evidence is missing" -- those are different things,
+    # and only the latter should ever raise the overall verdict. Mirrors
+    # every other "None disables" check in this project: a disabled check
+    # is simply absent, not present-and-UNKNOWN.
+    if is_available and config.max_corporate_actions_staleness_seconds is not None and now is not None:
+        from paper.engine import _naive  # same tz-normalization critic/engine.py's own DATA_FRESHNESS check uses, for the identical reason
+
+        age_seconds = (_naive(now) - _naive(corporate_actions.as_of)).total_seconds()
+        if age_seconds > config.max_corporate_actions_staleness_seconds:
+            checks.append(EventRiskCheck(
+                name=EventRiskCheckName.CORPORATE_ACTIONS_FRESHNESS, verdict=config.treat_missing_corporate_actions_as,
+                detail=(
+                    f"Corporate-actions snapshot is {age_seconds:,.0f}s old, exceeding the "
+                    f"{config.max_corporate_actions_staleness_seconds:,.0f}s limit -- treated the same as missing evidence."
+                ),
+            ))
+        else:
+            checks.append(EventRiskCheck(
+                name=EventRiskCheckName.CORPORATE_ACTIONS_FRESHNESS, verdict=EventRiskVerdict.ALLOW,
+                detail=f"Corporate-actions snapshot is {age_seconds:,.0f}s old, within the {config.max_corporate_actions_staleness_seconds:,.0f}s limit.",
+            ))
 
     if is_available:
         earnings_dates = [a.event_date for a in corporate_actions.actions if a.kind == CorporateActionKind.EARNINGS_ESTIMATE]
