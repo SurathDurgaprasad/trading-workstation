@@ -1432,7 +1432,9 @@ def run_fleet_supervise_command(args: argparse.Namespace) -> None:
     write_heartbeat(supervisor_heartbeat_path)
 
     handles = {}
-    for symbol in symbols:
+    for i, symbol in enumerate(symbols):
+        if i > 0 and args.launch_stagger_seconds > 0:
+            time_module.sleep(args.launch_stagger_seconds)
         handles[symbol] = _relaunch(symbol, 0)
         print(f"  launched {symbol} (pid={handles[symbol].process.pid})")
 
@@ -4363,6 +4365,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     fleet_supervise_parser.add_argument("--max-bars", type=int, default=None, help="Passed through to every worker's own --max-bars, if given (default: run until fed exhaustion / stopped).")
     fleet_supervise_parser.add_argument("--max-restarts", type=int, default=2, help="Bounded restart budget PER SYMBOL for a worker that exits with a non-zero code (default: 2). A worker that reaches --max-bars and exits 0 is never restarted. A worker that is merely reporting a feed gap while still alive is never restarted either -- see live/fleet_supervisor.py's should_restart().")
     fleet_supervise_parser.add_argument("--poll-interval-seconds", type=float, default=30.0, help="How often the supervisor checks every worker's health and prints a status line (default: 30s).")
+    fleet_supervise_parser.add_argument(
+        "--launch-stagger-seconds", type=float, default=1.5,
+        help=(
+            "Adversarial hardening pass (2026-09-18): delay between each symbol's INITIAL worker launch "
+            "(default: 1.5s). Real, observed evidence from the 2026-09-17 fleet launch: 4 of 15 symbols hit a "
+            "genuine Dhan-side code=805 disconnect ('too many WebSocket connections for this client ID', "
+            "documented cap: 5 connections/client ID) when all 15 workers connected within the same ~1-3s "
+            "window -- every one of them self-healed on its own first reconnect attempt via the existing "
+            "backoff machinery, so this was never a currently-broken failure, only a real, observed source of "
+            "avoidable startup churn under one shared client ID. Spreads the 15 process launches (NOT a claim "
+            "that this eliminates every 805 -- the actual WebSocket connect happens some variable time after "
+            "process spawn, and this has not yet been live-validated against a real Dhan account). 0 disables "
+            "staggering entirely (exact pre-fix behavior)."
+        ),
+    )
     fleet_supervise_parser.add_argument("--max-polls", type=int, default=None, help="Stop supervising after this many poll cycles (default: run until every worker has exited, or until Ctrl+C). Mainly useful for tests / bounded rehearsals.")
 
     fleet_summary_parser = subparsers.add_parser(

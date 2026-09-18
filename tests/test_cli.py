@@ -1623,6 +1623,7 @@ def test_fleet_supervise_subcommand_defaults():
     assert args.max_restarts == 2
     assert args.poll_interval_seconds == 30.0
     assert args.max_polls is None
+    assert args.launch_stagger_seconds == 1.5, "real, observed evidence: simultaneous launch hit Dhan's documented 5-connection cap"
 
 
 def test_run_fleet_supervise_command_runs_two_mock_workers_to_clean_completion(tmp_path, capsys):
@@ -1636,7 +1637,7 @@ def test_run_fleet_supervise_command_runs_two_mock_workers_to_clean_completion(t
     tests/test_fleet_supervisor.py)."""
     args = parse_args([
         "fleet-supervise", "--symbols", "AAPL,MSFT", "--runtime-dir", str(tmp_path),
-        "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1", "--max-polls", "10",
+        "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1", "--max-polls", "10", "--launch-stagger-seconds", "0",
     ])
     run_fleet_supervise_command(args)
     output = capsys.readouterr().out
@@ -1656,6 +1657,46 @@ def test_run_fleet_supervise_command_runs_two_mock_workers_to_clean_completion(t
         assert "bar#" in log_text
 
 
+def test_launch_stagger_seconds_actually_delays_between_initial_launches(tmp_path, capsys):
+    """Adversarial hardening pass (2026-09-18): real, observed evidence
+    (docs/LIVE_SYSTEM_HARDENING_FINAL_REPORT.md Part VI) showed 4 of 15
+    symbols hit a genuine Dhan code=805 'too many connections' disconnect
+    when all 15 workers connected within the same ~1-3s window under one
+    shared client ID -- every one self-healed via the existing reconnect
+    machinery, so this was never a currently-broken failure, but real,
+    avoidable startup churn. This test proves the mechanism (launches are
+    actually spaced in real wall-clock time) -- NOT a claim that this
+    eliminates every 805 against a real Dhan account, which has not been
+    live-validated. Real subprocess launches throughout; a COMPARATIVE
+    measurement against a stagger=0 baseline (rather than an absolute
+    floor) so real subprocess spawn/run overhead -- which alone can
+    exceed a small absolute threshold and mask a completely disabled
+    stagger, a real gap this test's own first draft had until the
+    mutation pass caught it -- can never produce a false pass."""
+    import time as time_module_for_test
+
+    def _run(stagger: str) -> float:
+        start = time_module_for_test.monotonic()
+        args = parse_args([
+            "fleet-supervise", "--symbols", "AAPL,MSFT,GOOG", "--runtime-dir", str(tmp_path / stagger),
+            "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1", "--max-polls", "10",
+            "--launch-stagger-seconds", stagger,
+        ])
+        run_fleet_supervise_command(args)
+        elapsed = time_module_for_test.monotonic() - start
+        assert "every worker has exited" in capsys.readouterr().out
+        return elapsed
+
+    baseline = _run("0")
+    staggered = _run("3.0")
+    # 3 symbols -> 2 stagger gaps of 3.0s each = 6.0s expected extra;
+    # a conservative 3.0s minimum absorbs real subprocess timing variance
+    # while remaining impossible to satisfy if staggering silently did
+    # nothing (which is exactly what the mutation pass proved: without
+    # this comparison, a completely disabled stagger still passed).
+    assert staggered - baseline >= 3.0
+
+
 def test_run_fleet_supervise_command_writes_a_supervisor_heartbeat_and_graceful_marker(tmp_path, capsys):
     """Operational-reliability mission: the SAME heartbeat/graceful-
     shutdown pattern proven for individual paper-live workers, extended
@@ -1667,7 +1708,7 @@ def test_run_fleet_supervise_command_writes_a_supervisor_heartbeat_and_graceful_
     the second run reports the first as GRACEFUL_SHUTDOWN."""
     base_args = [
         "fleet-supervise", "--symbols", "AAPL,MSFT", "--runtime-dir", str(tmp_path),
-        "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1", "--max-polls", "10",
+        "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1", "--max-polls", "10", "--launch-stagger-seconds", "0",
     ]
 
     run_fleet_supervise_command(parse_args(base_args))
@@ -1691,7 +1732,7 @@ def test_run_fleet_supervise_command_reports_abnormal_termination_when_the_super
     # a real heartbeat exists from the prior run but no graceful marker.
     base_args = [
         "fleet-supervise", "--symbols", "AAPL,MSFT", "--runtime-dir", str(tmp_path),
-        "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1", "--max-polls", "10",
+        "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1", "--max-polls", "10", "--launch-stagger-seconds", "0",
     ]
     run_fleet_supervise_command(parse_args(base_args))
     capsys.readouterr()
@@ -1726,7 +1767,7 @@ def test_run_fleet_summary_command_reports_a_real_fleet_supervise_session(tmp_pa
     not be silently dropped or raise)."""
     supervise_args = parse_args([
         "fleet-supervise", "--symbols", "AAPL,MSFT", "--runtime-dir", str(tmp_path),
-        "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1", "--max-polls", "10",
+        "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1", "--max-polls", "10", "--launch-stagger-seconds", "0",
     ])
     run_fleet_supervise_command(supervise_args)
     capsys.readouterr()  # discard fleet-supervise's own output

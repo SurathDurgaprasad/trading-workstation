@@ -4,7 +4,7 @@
     {
       "name": "dashboard",
       "runtimeExecutable": "venv/Scripts/python.exe",
-      "runtimeArgs": ["main.py", "dashboard", "--host", "127.0.0.1", "--port", "8765"],
+      "runtimeArgs": ["main.py", "dashboard", "--host", "127.0.0.1", "--port", "8765", "--fleet-runtime-dir", "runtime", "--fleet-watchlist-file", "market_data/watchlists/starter_nse.yaml"],
       "port": 8765
     }
   ]

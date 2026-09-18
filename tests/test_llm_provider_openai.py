@@ -146,3 +146,35 @@ def test_openai_api_key_is_never_logged_by_the_availability_check(monkeypatch, c
 
     for record in caplog.records:
         assert fake_key not in record.getMessage()
+
+
+def test_openai_unavailable_error_redacts_the_api_key_from_the_underlying_cause(monkeypatch):
+    """Adversarial hardening pass (2026-09-18): the OTHER real leak path
+    the above test doesn't cover -- OpenAIUnavailableError previously
+    embedded str(cause) verbatim, and that message reaches a real
+    console print (main.py's `ai-health` command), untested until now.
+    Uses a recognizable fake key so a leak would be unambiguous."""
+    from llm.errors import OpenAIUnavailableError
+
+    fake_key = "sk-THIS-VALUE-MUST-NEVER-APPEAR-IN-ANY-ERROR-MESSAGE-abcdef123456"
+    monkeypatch.setenv("OPENAI_API_KEY", fake_key)
+
+    # A real SDK exception's __str__ can embed request/header details --
+    # simulated here since the real key value should never actually
+    # reach a live OpenAI call in a test.
+    cause = RuntimeError(f"401 Unauthorized: Authorization: Bearer {fake_key}")
+    error = OpenAIUnavailableError(cause=cause)
+
+    assert fake_key not in str(error)
+    assert "***" in str(error)
+    assert error.cause is cause  # the real exception object itself is still preserved for programmatic inspection
+
+
+def test_openai_unavailable_error_with_no_matching_key_in_env_still_reports_the_cause():
+    """When the cause genuinely doesn't contain a live key (the common
+    case -- a plain network timeout, say), the message must still be
+    informative, not silently blanked."""
+    from llm.errors import OpenAIUnavailableError
+
+    error = OpenAIUnavailableError(cause=RuntimeError("Connection timed out"))
+    assert "Connection timed out" in str(error)

@@ -50,11 +50,33 @@ class OpenAIDisabledError(RuntimeError):
 
 
 class OpenAIUnavailableError(RuntimeError):
-    """A real call to the OpenAI API failed (network, auth, quota, etc.)."""
+    """A real call to the OpenAI API failed (network, auth, quota, etc.).
+
+    Adversarial hardening pass (2026-09-18): an audit found this message
+    previously embedded `str(cause)` verbatim -- the underlying SDK/
+    transport exception's own text, which reaches a real console print
+    path (`main.py`'s `ai-health` command). `llm/budget.py`'s own ledger
+    deliberately records only `error_class`, never `str(exc)`, exactly
+    because "a raised HTTP error can otherwise leak an Authorization
+    header value into str(exc)" -- this class previously did not follow
+    its own project's stated precaution. Defense-in-depth, same posture
+    as live/dhan/market_data_source.py's `_redact_secret` (no evidence of
+    an actual leak in the pinned SDK version -- still a hard invariant
+    enforced at the code level, not assumed of third-party exception
+    text): the configured OPENAI_API_KEY value, if it appears anywhere in
+    `str(cause)`, is masked before ever reaching this exception's own
+    message."""
 
     def __init__(self, cause: Exception | None = None):
+        import os
+
         self.cause = cause
-        super().__init__(f"OpenAI API call failed: {cause}" if cause is not None else "OpenAI API call failed.")
+        detail = str(cause) if cause is not None else None
+        if detail:
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if api_key and api_key in detail:
+                detail = detail.replace(api_key, "***")
+        super().__init__(f"OpenAI API call failed: {detail}" if detail is not None else "OpenAI API call failed.")
 
 
 class AIBudgetExceededError(RuntimeError):
