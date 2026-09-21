@@ -1,0 +1,29 @@
+{
+  "current_phase": "evaluation_audit",
+  "completed_tasks": [
+    "P0.1-P0.9: inventory complete -- INVENTORY.md written. Corrected the audit's own starting premise: 56 hypotheses exist (not 44); 33 REJECTED/22 INCONCLUSIVE/1 SUPPORTED (32/22/1 pre-existing + H_BASELINE_001 added this session).",
+    "P0-flag: identified H_MEANREV_006->012 as a materially different, deeper research thread requiring dedicated attention -- a real, mechanism-diagnosed cost/sizing-driven false negative was found and partially corrected (H_MEANREV_009->010), with two CI-decisive POSITIVE_PERFORMANCE splits (H_MEANREV_010 Candidate 2: validation +1.51% CI[+0.94,+2.08], OOS +0.98% CI[+0.52,+1.44]), unresolved at the portfolio-construction stage (H_MEANREV_011/012).",
+    "P2 (partial): verified CostModel.india_nse_intraday_2026() against backtesting/costs.py source -- brokerage_per_fill=20.0 flat/fill confirmed; GST/stamp duty omission is a disclosed (not hidden) gap.",
+    "P2 (partial): verified MIN_SAMPLE_SIZE_FOR_A_VERDICT=30 against strategy/promotion_gate.py source.",
+    "P2 (partial): verified strategy/multiple_testing.py is real, stdlib-based Bonferroni correction, not ad hoc -- but flagged a real scope gap: family_size is locally defined per-experiment, never applied registry-wide across all 55-56 hypotheses sharing overlapping datasets.",
+    "EVALUATION_AUDIT.md written (partial pass -- infrastructure-level verification done; per-hypothesis leakage/split-integrity pass still open)."
+  ],
+  "open_tasks": [
+    "P2: per-hypothesis leakage/split-integrity pass across all 56 entries (currently only infrastructure-level, not per-entry)",
+    "P2: user-requested global multiple-testing audit -- NOT a blind family_size=56 Bonferroni application. First establish dependency structure: which experiments share the same underlying observations, which are genuinely independent, which are sequential follow-ups on the same signal (the H_MEANREV_006->012 chain is clearly ONE family of ~7 dependent tests, not 7 independent ones), which are variations selected for further study after seeing earlier results (this itself is a form of non-independence distinct from shared data). Then define statistically defensible families before computing anything.",
+    "P2: independently verify no-look-ahead claim for quant_research/mean_reversion_portfolio.py by reading tests/test_mean_reversion_portfolio.py directly, rather than citing the registry's own self-report",
+    "P1 (NEW, user priority-1, highest value identified): day-level signal-clustering analysis for the MEANREV chain -- bucket all H_MEANREV_006 candidate events (accepted AND rejected) by same-day cluster size, compare mean forward h10 return between low- and high-clustering days. Tests the preregistration's own stated [INFERENCE] (clustering/correlation, not tie-break arbitrariness or signal strength -- H_MEANREV_012 already ruled the latter out) directly. No new backtest engine needed; no capital-constraint loosening; no curve-fitting risk per user's explicit instruction.",
+    "P3: build HYPOTHESIS_LEDGER.csv with the full required columns for all 56 entries",
+    "P3: classify the 22 INCONCLUSIVE entries into the taxonomy (low sample / low power / methodology issue / unstable / positive-but-costly / missing data / truly ambiguous)",
+    "P4: SYNTHESIS.md -- answer A-E, with H_MEANREV_006-012 as the central case study",
+    "P5: EDGE_FEASIBILITY_AUDIT.md answering all 11 questions"
+  ],
+  "blockers": [],
+  "last_updated": "2026-09-21T09:36:00Z",
+  "note": "This audit is running interleaved with standing live-fleet-monitoring duty (NSE close 15:30 IST, currently ~09:36Z/15:06 IST, ~24 min remaining). Fleet health checks take priority near close; audit resumes after end-of-day capture.",
+  "resolved_this_session": [
+    "206/208 universe discrepancy: RESOLVED -- GVT&D.NS and M&M.NS excluded for a mechanical filesystem-path-safety reason (ticker contains '&'), not delisting/data-gap. Documented in docs/research/H_XSECT_006_UNIVERSE_WIDENING_PREREGISTRATION.md S8.",
+    "Survivorship bias: RESOLVED as an ALREADY-DISCLOSED (not hidden) limitation in the same document S7 item 5 -- COMBINED universe reflects CURRENT (2026-09-09) F&O eligibility, not point-in-time historical membership; correctly identified by the project's own prior research as inflating (not deflating) any positive finding. This discounts confidence in H_MEANREV_010's positive point estimates specifically -- the one result the project's promotion decision would hinge on -- without weakening any REJECTED verdict elsewhere.",
+    "MEANREV_CHAIN_AUDIT.md written: the central accepted-vs-rejected question is answered INDIRECTLY via H_MEANREV_012's own pre-registered ranking ablation -- replacing the arbitrary tie-break with zscore-strength ranking made validation performance MATERIALLY WORSE (net -0.51%->-1.13%, gross ~3x more negative), ruling out 'we're just keeping the weaker signals' as the dominant mechanism. The clustering/correlation hypothesis remains the live, untested explanation -- see new P1 task above."
+  ]
+}

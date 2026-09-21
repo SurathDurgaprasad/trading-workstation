@@ -1,0 +1,56 @@
+H_ENTRY_001	SUPPORTED	Trend confirmation entry timing carries no meaningful directional edge, and may 
+H_ENTRY_002	REJECTED	Volume confirmation improves continuation probability beyond trend+momentum alon
+H_ENTRY_003	INCONCLUSIVE	Pullback entries (buying a temporary dip within an established uptrend) outperfo
+H_ENTRY_004	REJECTED	Momentum ACCELERATION (is momentum increasing, not merely positive) matters more
+H_ENTRY_005	INCONCLUSIVE	Regime filtering (only trading TrendMomentumBaseline's signals during a favorabl
+H_EXIT_001	REJECTED	Moving the stop to breakeven once a position reaches +1R unrealized profit reduc
+H_EXIT_002	INCONCLUSIVE	Taking partial profit at +1R (closing part of the position) while letting the re
+H_EXIT_003	REJECTED	An ATR-based trailing stop (the stop moves up as price advances, based on a mult
+H_EXIT_004	REJECTED	A time-based exit (force-close after N bars if neither stop nor target has been 
+H_MEANREV_001	REJECTED	Short-term mean reversion: a symbol trading unusually far BELOW its own recent 2
+H_RELSTRENGTH_001	REJECTED	A stock's own relative strength versus its market (trailing 20-bar return minus 
+H_BREAKOUT_001	REJECTED	A Donchian-style breakout (close exceeds the prior 20-bar high) shows better for
+H_MEANREV_002	INCONCLUSIVE	US-only extreme 5-day price weakness (trailing_return_5 below its own developmen
+H_TRANSMISSION_001	INCONCLUSIVE	Nasdaq's prior-session return predicts NIFTY IT-sector stocks' own forward retur
+H_CONTEXT_MARKET_001	REJECTED	The frozen baseline stock-level BUY condition (uptrend structure + bullish RSI m
+H_CONTEXT_MARKET_002	INCONCLUSIVE	The frozen baseline stock-level BUY condition performs better -- not worse -- wh
+H_CONTEXT_MARKET_003	REJECTED	The frozen baseline stock-level BUY condition's forward returns vary meaningfull
+H_CONTEXT_SECTOR_001	REJECTED	The frozen baseline stock-level BUY condition performs better when the stock's o
+H_CONTEXT_SECTOR_002	INCONCLUSIVE	The frozen baseline stock-level BUY condition performs better -- not worse -- wh
+H_CONTEXT_VIX_001	REJECTED	The frozen baseline stock-level BUY condition's forward returns are meaningfully
+H_CONTEXT_VIX_002	REJECTED	Companion to H_CONTEXT_VIX_001: the DEPRESSED-VIX side of the same India VIX reg
+H_CONTEXT_ALIGN_001	INCONCLUSIVE	Does the market-divergence effect (H_CONTEXT_MARKET_002) and the sector-divergen
+H_TRANSMISSION_002	REJECTED	USD/INR's prior-day return predicts NSE IT + Pharma exporter stocks' own forward
+H_TRANSMISSION_003	REJECTED	USD/INR's prior-day return predicts NSE IT stocks' own forward returns, tested S
+H_TRANSMISSION_004	REJECTED	USD/INR's prior-day return predicts NSE Pharma stocks' own forward returns, test
+H_GAP_001	INCONCLUSIVE	NSE stocks that open with a large overnight gap UP tend to give back part of tha
+H_GAP_002	INCONCLUSIVE	NSE stocks that open with a large overnight gap DOWN tend to recover part of tha
+H_GAP_003	REJECTED	Deep validation of H_GAP_001/002 (overnight gap fade) -- a disciplined attempt t
+H_CONTEXT_MARKET_004	INCONCLUSIVE	Deep validation of the market/sector-divergence family (H_CONTEXT_MARKET_002/SEC
+H_CONTEXT_MARKET_005	INCONCLUSIVE	Re-run H_CONTEXT_MARKET_002/SECTOR_002/ALIGN_001 against genuine 10-year NSE his
+H_SECTOR_ROTATION_001	REJECTED	Does a stock's own sector's CROSS-SECTIONAL momentum RANK among all 9 real NIFTY
+H_OPENRANGE_001	INCONCLUSIVE	Does an NSE stock's first-30-minute (opening range) return predict its own REST-
+H_CALENDAR_001	INCONCLUSIVE	Day-of-week effects on NSE 1-day forward (close-to-close) returns, tested across
+H_CALENDAR_002	REJECTED	Does H_CALENDAR_001's Tuesday effect hold on NIFTY 50 (^NSEI) itself, not just p
+H_XSECT_001	INCONCLUSIVE	CROSS-SECTIONAL momentum ranking: on each trading day, rank all 32 NSE universe 
+H_XSECT_002	REJECTED	Does H_XSECT_001's raw price-behavior measurement (cross-sectional bottom-quinti
+H_XSECT_003	INCONCLUSIVE	docs/research/CROSS_SECTIONAL_RELATIVE_STRENGTH_REPORT.md S10 step 3: does H_XSE
+H_XSECT_004	REJECTED	Does a mean-reversion-appropriate exit design -- a wider stop, or an effectively
+H_XSECT_005	INCONCLUSIVE	EXECUTION-MECHANICS INVESTIGATION (EDGE DISCOVERY mission continuation, 2026-09-
+H_XSECT_006	REJECTED	Does H_XSECT_005's cross-sectional laggard portfolio effect survive on a materia
+H_VOL_001	REJECTED	Volatility contraction (the classic 'quiet before the storm' pattern): does a st
+H_MEANREV_003	INCONCLUSIVE	Does H_MEANREV_001's oversold mean-reversion entry (zscore_close_20 below a froz
+H_MEANREV_004	REJECTED	Does H_MEANREV_003's raw finding (oversold mean-reversion entries gated on NIFTY
+H_EXIT_005	REJECTED	Is there a structurally different exit architecture -- not a stop-width retune -
+H_EXTREME_001	REJECTED	Does NSE show a real, forward-return asymmetry following an EXTREME 5-day cumula
+H_MOMENTUM_001	INCONCLUSIVE	Does a single stock's own SHORT-TERM weakness (trailing_return_5 in the lower ta
+H_BREADTH_001	REJECTED	Does NSE market BREADTH -- the fraction of the 32-symbol universe individually c
+H_MEANREV_005	REJECTED	Universe-generalization check for H_MEANREV_003: does the raw finding (zscore_cl
+H_MEANREV_006	INCONCLUSIVE	Mechanism decomposition of the generalized NSE oversold effect (H_MEANREV_005's 
+H_MEANREV_007	REJECTED	Confounding/mechanism test: does the strongest part of the generalized oversold 
+H_MEANREV_008	INCONCLUSIVE	Risk characterization: is the larger mean forward return of the high-volatility 
+H_MEANREV_009	REJECTED	Initial executable design, per explicit user mandate: derive an executable versi
+H_MEANREV_010	INCONCLUSIVE	Does H_MEANREV_009's own demonstrated gross edge survive a DIFFERENT execution/s
+H_MEANREV_011	REJECTED	Does the frozen H_MEANREV_006 signal, exited the same frozen h10 way, survive co
+H_MEANREV_012	REJECTED	A test of PORTFOLIO SIGNAL SELECTION, not a new alpha hypothesis: can simultaneo
+H_BASELINE_001	REJECTED	TrendMomentumBaseline v1.0, as a whole frozen production strategy (not a modific
