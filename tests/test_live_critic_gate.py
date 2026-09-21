@@ -121,6 +121,41 @@ def test_a_real_buy_signal_with_real_supporting_evidence_is_approved():
     assert result.decision.label.value == "BUY"
 
 
+def test_an_unexpected_exception_during_evaluation_fails_closed_not_a_crash(monkeypatch):
+    """Adversarial hardening pass (2026-09-21 live-session CriticGate
+    audit): this module's own docstring always claimed 'any exception
+    while refreshing evidence OR EVALUATING is treated as BLOCKED... never
+    silently treated as a pass' -- a dedicated audit found the
+    'evaluating' half was not actually true: the real critic_evaluate()
+    call (and everything around it -- market-context conversion, Decision
+    construction, confidence computation) ran completely unguarded, so a
+    genuine bug there would propagate out of evaluate() entirely, crash
+    the calling worker process (live/pipeline.py and main.py's worker
+    loop have no broader exception handling either), rather than
+    degrading to a BLOCKED verdict as documented. This proves the fix:
+    a genuinely unexpected exception from the real critic engine (not a
+    documented 'insufficient evidence' case) is caught and returns a
+    BLOCKED result instead of propagating."""
+    import live.critic_gate as critic_gate_module
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("simulated unexpected bug inside critic.engine.evaluate()")
+
+    monkeypatch.setattr(critic_gate_module, "critic_evaluate", _raise)
+
+    gate, _ = _gate()
+    result = gate.evaluate(
+        _buy_signal(), indicators=_real_indicators(), now=_START + timedelta(days=249, hours=1),
+        kill_switch_active=False, existing_pending_order=False, existing_open_position=False,
+    )
+
+    assert result.blocked is True  # fail-closed, never a silent pass
+    assert result.assessment is None
+    assert result.decision is None
+    assert "simulated unexpected bug" in result.block_reason
+    assert "RuntimeError" in result.block_reason
+
+
 def test_missing_indicators_alone_is_insufficient_evidence_not_a_crash():
     """A live pipeline's very first bar for a symbol has no indicator
     history yet -- latest_indicators() can genuinely return None. With no

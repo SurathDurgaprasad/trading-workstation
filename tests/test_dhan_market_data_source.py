@@ -117,6 +117,33 @@ def _source(instrument_map, credentials, **overrides) -> tuple[DhanMarketDataSou
     return source, factory
 
 
+def _source_with_synthetic_clock(instrument_map, credentials, **overrides) -> tuple[DhanMarketDataSource, _FakeTransportFactory]:
+    """2026-09-21 fix: CandleBuilder's new cold-start wall-clock
+    plausibility gate (see its own docstring on
+    max_cold_start_wall_clock_skew_seconds for the real incident this
+    closes) compares each tick's own `timestamp` against the REAL
+    wall-clock moment it was received (`received_at`). Every test in
+    this file that sends synthetic ticks with small epoch offsets (the
+    overwhelming majority -- e.g. epoch=10, 60, 121) needs `received_at`
+    pinned to a matching synthetic "now" (epoch 0) rather than the
+    default real `datetime.now()` DhanMarketDataSource uses in
+    production -- otherwise every one of those ticks would be correctly,
+    but unhelpfully for THESE tests' own unrelated purposes, judged
+    wall-clock-implausible and never confirmed. The one test in this
+    file that genuinely needs real `datetime.now()` semantics
+    (test_a_tick_with_a_real_time_equivalent_epoch_produces_a_bar_close_
+    to_true_now) deliberately does NOT use this helper -- it calls
+    `_source()` directly, unchanged, exactly as before this fix. Anchored
+    via `_decode_last_trade_time(0)` rather than a bare epoch-0
+    `datetime` -- `_decode_last_trade_time` corrects Dhan's own
+    documented IST-mislabeled-as-UTC wire bug by subtracting 5:30, so a
+    raw epoch near 0 actually DECODES to ~1969-12-31 18:30 UTC, not
+    1970-01-01 00:00 UTC; anchoring to the same correction keeps this
+    helper correct even if that offset ever changes."""
+    synthetic_now = DhanMarketDataSource._decode_last_trade_time(0)
+    return _source(instrument_map, credentials, received_at_clock=lambda: synthetic_now, **overrides)
+
+
 def test_subscribe_connects_and_sends_a_subscribe_message(instrument_map, credentials):
     source, factory = _source(instrument_map, credentials)
     source.subscribe(["RELIANCE.NS"], "1m")
@@ -180,7 +207,7 @@ def test_a_tick_with_a_real_time_equivalent_epoch_produces_a_bar_close_to_true_n
 
 
 def test_a_tick_that_completes_a_bar_is_delivered_via_next_bar(instrument_map, credentials):
-    source, factory = _source(instrument_map, credentials)
+    source, factory = _source_with_synthetic_clock(instrument_map, credentials)
     source.subscribe(["RELIANCE.NS"], "1m")
     factory.current.simulate_message(_ticker_packet(2885, 1428.5, epoch=60))
     factory.current.simulate_message(_ticker_packet(2885, 1430.0, epoch=121))  # crosses into the next 1m bucket
@@ -251,7 +278,7 @@ def test_last_known_price_reflects_the_most_recent_tick_even_mid_bucket(instrume
     # CandleBuilder's own private _last_known_price, never reachable from
     # outside -- the exact gap the architecture investigation found.
     # Real wire-encoded ticks, same as the rejected-tick-counts test above.
-    source, factory = _source(instrument_map, credentials)
+    source, factory = _source_with_synthetic_clock(instrument_map, credentials)
     source.subscribe(["RELIANCE.NS"], "1m")
     factory.current.simulate_message(_ticker_packet(2885, 1428.5, epoch=10))
 
@@ -278,7 +305,7 @@ def test_partial_candle_is_none_before_any_tick_or_subscription(instrument_map, 
 
 
 def test_partial_candle_carries_real_ohlc_so_far_and_is_marked_partial(instrument_map, credentials):
-    source, factory = _source(instrument_map, credentials)
+    source, factory = _source_with_synthetic_clock(instrument_map, credentials)
     source.subscribe(["RELIANCE.NS"], "1m")
     factory.current.simulate_message(_ticker_packet(2885, 1428.5, epoch=10))
     factory.current.simulate_message(_ticker_packet(2885, 1431.0, epoch=15))  # new high, still same bucket
@@ -299,7 +326,7 @@ def test_partial_candle_peek_does_not_disturb_the_bar_that_later_completes_via_n
     # not change what next_bar() eventually delivers once the bucket
     # genuinely closes -- a monitoring/display read must never perturb
     # the real candle-building pipeline signal generation depends on.
-    source, factory = _source(instrument_map, credentials)
+    source, factory = _source_with_synthetic_clock(instrument_map, credentials)
     source.subscribe(["RELIANCE.NS"], "1m")
     factory.current.simulate_message(_ticker_packet(2885, 1428.5, epoch=10))
 
@@ -330,7 +357,7 @@ def test_out_of_order_tick_within_the_same_bucket_is_absorbed_not_rejected(instr
     ticks are trusted at this layer; true out-of-order/duplicate BAR
     protection happens downstream in the existing PaperTradingEngine,
     unchanged."""
-    source, factory = _source(instrument_map, credentials)
+    source, factory = _source_with_synthetic_clock(instrument_map, credentials)
     source.subscribe(["RELIANCE.NS"], "1m")
     factory.current.simulate_message(_ticker_packet(2885, 100.0, epoch=30))
     factory.current.simulate_message(_ticker_packet(2885, 99.0, epoch=10))  # earlier timestamp, same bucket
@@ -743,7 +770,7 @@ def _feed_n_completed_bars(source, factory, n: int, *, start_price: float = 1400
 
 
 def test_the_bar_queue_never_exceeds_max_queued_bars_even_when_the_consumer_never_drains_it(instrument_map, credentials):
-    source, factory = _source(instrument_map, credentials, max_queued_bars=3)
+    source, factory = _source_with_synthetic_clock(instrument_map, credentials, max_queued_bars=3)
     source.subscribe(["RELIANCE.NS"], "1m")
 
     _feed_n_completed_bars(source, factory, n=10)  # far more completed bars than the cap
@@ -759,7 +786,7 @@ def test_put_nowait_never_blocks_or_raises_once_the_queue_is_already_full(instru
     fix regressed back to an unbounded/blocking design; pytest's own default
     per-test behavior (no hang for a bounded loop of plain calls) is itself
     the proof here, alongside the explicit non-exception assertion."""
-    source, factory = _source(instrument_map, credentials, max_queued_bars=2)
+    source, factory = _source_with_synthetic_clock(instrument_map, credentials, max_queued_bars=2)
     source.subscribe(["RELIANCE.NS"], "1m")
 
     _feed_n_completed_bars(source, factory, n=2)  # fills the queue exactly to capacity, no overflow yet
@@ -776,7 +803,7 @@ def test_overflow_drops_the_oldest_queued_bar_not_the_newest(instrument_map, cre
     stale history. Feeds exactly one bar past capacity and asserts the
     survivors are the newest `max_queued_bars` bars, oldest-first order
     preserved (FIFO queue, only the head was evicted)."""
-    source, factory = _source(instrument_map, credentials, max_queued_bars=3)
+    source, factory = _source_with_synthetic_clock(instrument_map, credentials, max_queued_bars=3)
     source.subscribe(["RELIANCE.NS"], "1m")
 
     _feed_n_completed_bars(source, factory, n=5)  # 5 completed bars, 2 over the cap of 3
@@ -791,7 +818,7 @@ def test_overflow_drops_the_oldest_queued_bar_not_the_newest(instrument_map, cre
 
 
 def test_overflow_logs_a_warning_naming_the_dropped_bars_symbol(instrument_map, credentials, caplog):
-    source, factory = _source(instrument_map, credentials, max_queued_bars=1)
+    source, factory = _source_with_synthetic_clock(instrument_map, credentials, max_queued_bars=1)
     source.subscribe(["RELIANCE.NS"], "1m")
 
     with caplog.at_level("WARNING", logger="live.dhan.market_data_source"):
@@ -807,7 +834,7 @@ def test_a_consumer_that_keeps_up_never_triggers_any_drop(instrument_map, creden
     """Control case: normal operation (consumer draining via next_bar() as
     bars complete) must never come near the cap or emit a single warning,
     even though the cap itself is tiny here."""
-    source, factory = _source(instrument_map, credentials, max_queued_bars=2)
+    source, factory = _source_with_synthetic_clock(instrument_map, credentials, max_queued_bars=2)
     source.subscribe(["RELIANCE.NS"], "1m")
 
     with caplog.at_level("WARNING", logger="live.dhan.market_data_source"):

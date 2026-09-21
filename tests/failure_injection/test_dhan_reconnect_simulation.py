@@ -35,7 +35,9 @@ import pytest
 from live.contracts import NO_NEW_BAR, FeedDisconnectedError
 from live.dhan.market_data_source import DhanConnectionState
 
-from tests.test_dhan_market_data_source import _source, credentials, instrument_map  # noqa: F401 -- reused fixtures/helpers, not redefined
+from tests.test_dhan_market_data_source import (  # noqa: F401 -- reused fixtures/helpers, not redefined
+    _source, _source_with_synthetic_clock, credentials, instrument_map,
+)
 
 # --- SIMULATED / VERIFIED: scenarios section 11 explicitly names ------------
 #
@@ -278,7 +280,7 @@ def _ticker_packet(security_id: int, price: float, epoch: int) -> bytes:
 
 
 def test_a_stale_generation_message_is_never_processed_as_current_data(instrument_map, credentials):
-    source, factory = _source(instrument_map, credentials, backoff_base_seconds=0.01, backoff_max_seconds=0.01)
+    source, factory = _source_with_synthetic_clock(instrument_map, credentials, backoff_base_seconds=0.01, backoff_max_seconds=0.01)
     source.subscribe(["RELIANCE.NS"], "1m")
     old_transport = factory.current
     assert len(factory.instances) == 1

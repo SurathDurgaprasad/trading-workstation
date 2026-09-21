@@ -28,6 +28,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Protocol
 
@@ -206,6 +207,16 @@ class DhanMarketDataSource:
     with substantial margin. `None` disables the watchdog entirely (kept
     for a caller that wants the exact pre-fix behavior)."""
     transport_factory: type = _WebsocketClientTransport
+    received_at_clock: Callable[[], datetime] | None = None
+    """2026-09-21 fix (real fleet-wide cold-start incident, see
+    live/dhan/candle_builder.py's own `_max_cold_start_wall_clock_skew_
+    seconds` docstring for the full incident): the ONLY reason
+    `_handle_packet` needs an injectable clock at all -- previously called
+    `datetime.now(timezone.utc)` directly, unconditionally, with no
+    testable seam. `None` (the default) preserves exactly that real
+    production behavior; only tests that need a specific `received_at`
+    to exercise CandleBuilder's own wall-clock plausibility gate ever
+    pass a real callable here."""
     max_queued_bars: int = 2000
     """Autonomous hardening cycle 21 (closes the disclosed gap from
     cycle 16's resource-exhaustion audit, FINAL_FAILURE_MODE_ANALYSIS.md
@@ -222,6 +233,7 @@ class DhanMarketDataSource:
     drop-oldest via `put_nowait()`, never a blocking `put()`."""
 
     def __post_init__(self):
+        self._resolved_received_at_clock = self.received_at_clock or (lambda: datetime.now(timezone.utc))
         self.state: str = DhanConnectionState.DISCONNECTED
         self._transport: _Transport | None = None
         self._bar_queue: "queue.Queue[MarketBarEvent]" = queue.Queue(maxsize=self.max_queued_bars)
@@ -690,7 +702,7 @@ class DhanMarketDataSource:
             return None
 
         timestamp = self._decode_last_trade_time(epoch_seconds)
-        received_at = datetime.now(timezone.utc)
+        received_at = self._resolved_received_at_clock()
         builder = self._candle_builders[symbol]
         bar = builder.on_tick(price=price, volume=volume, timestamp=timestamp, received_at=received_at)
         if bar is None:

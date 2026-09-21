@@ -62,6 +62,7 @@ class CandleBuilder:
     def __init__(
         self, *, symbol: str, interval: str, max_tick_deviation_pct: float = 20.0,
         max_timestamp_skew_seconds: float | None = 3600.0,
+        max_cold_start_wall_clock_skew_seconds: float | None = 3600.0,
     ):
         self.symbol = symbol
         self.interval = interval
@@ -165,6 +166,49 @@ class CandleBuilder:
         agreeing ticks against the SAME baseline -- with no reset."""
         self._baseline_confirmed: bool = False
         self._pending_candidate_timestamp: datetime | None = None
+        self._max_cold_start_wall_clock_skew_seconds = max_cold_start_wall_clock_skew_seconds
+        """2026-09-21 live incident (fleet-wide, all 15 symbols, real):
+        the two-tick-agreement heuristic above closes the SINGLE-bad-
+        first-tick case, but cannot by itself tell "two REAL current
+        ticks agreeing" apart from "two STALE ticks that happen to agree
+        with each other (or with the original stale baseline)" -- which
+        is exactly what happened live on a Monday cold start after a
+        weekend gap: EVERY one of the 15 real fleet workers received a
+        stale Friday-afternoon LTP-snapshot first tick, and for every one
+        of them the SECOND tick received was ALSO within
+        max_timestamp_skew_seconds of that same stale Friday value
+        (fell into the "agrees with the current baseline" branch below,
+        not even needing the pending-candidate path) -- confirming the
+        wrong baseline PERMANENTLY on the very first real chance, with
+        zero self-heal available afterward (see
+        test_an_overnight_gap_after_baseline_confirmed_is_a_documented_
+        residual_gap_not_a_bug_in_practice's own docstring, which had
+        judged this "not exercised by this project's actual deployment"
+        based on the evidence available BEFORE this incident -- that
+        judgment is now known to be wrong).
+
+        Closes it directly: a baseline is only ever allowed to become
+        CONFIRMED (in either the "switch to a new pending candidate" or
+        the "agrees with the original baseline" branch below) if the
+        CONFIRMING tick's own `timestamp` is itself plausible relative to
+        its own `received_at` (the local wall-clock moment this specific
+        tick actually arrived) -- deliberately NOT an injected/global
+        clock dependency: `received_at` is already a real parameter on
+        every call, already self-consistent for any synthetic/test tick
+        stream (which sets both to the same or nearby synthetic value, by
+        construction, exactly like every existing test in this file
+        already does), and does not reintroduce the wall-clock-vs-
+        synthetic-stream tension `_max_timestamp_skew_seconds`'s own
+        docstring above explicitly reasoned about for the CORE mid-
+        session check (which compares two ticks' OWN timestamps against
+        each other, not against receipt time, and is completely
+        unaffected by this addition). If a tick fails this check at a
+        confirmation point, it is treated exactly like an ordinary
+        disagreement -- remembered as the new pending candidate, rejected,
+        never confirmed -- so the self-heal loop keeps running until a
+        tick that is ACTUALLY current arrives. `None` disables the check
+        entirely, restoring the exact pre-fix behavior for a caller that
+        wants it."""
         self.rejected_tick_counts: dict[str, int] = {
             "non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0, "late_out_of_order": 0,
             "implausible_timestamp": 0,
@@ -183,6 +227,15 @@ class CandleBuilder:
         epoch = timestamp.timestamp()
         floored = (epoch // self._bucket_seconds) * self._bucket_seconds
         return datetime.fromtimestamp(floored, tz=timezone.utc)
+
+    def _plausible_relative_to_receipt(self, *, timestamp: datetime, received_at: datetime) -> bool:
+        """See `_max_cold_start_wall_clock_skew_seconds`'s own docstring
+        for the 2026-09-21 incident this closes. Only ever consulted at a
+        baseline-CONFIRMATION point, never for the core mid-session
+        tick-vs-tick check."""
+        if self._max_cold_start_wall_clock_skew_seconds is None:
+            return True
+        return abs((timestamp - received_at).total_seconds()) <= self._max_cold_start_wall_clock_skew_seconds
 
     def on_tick(self, *, price: float, volume: float, timestamp: datetime, received_at: datetime) -> OHLCVBar | None:
         """`volume` is whatever incremental quantity this specific tick
@@ -218,7 +271,8 @@ class CandleBuilder:
             if skew_seconds > self._max_timestamp_skew_seconds:
                 if not self._baseline_confirmed:
                     pending = self._pending_candidate_timestamp
-                    if pending is not None and abs((timestamp - pending).total_seconds()) <= self._max_timestamp_skew_seconds:
+                    agrees_with_pending = pending is not None and abs((timestamp - pending).total_seconds()) <= self._max_timestamp_skew_seconds
+                    if agrees_with_pending and self._plausible_relative_to_receipt(timestamp=timestamp, received_at=received_at):
                         # This tick agrees with the PREVIOUS disagreeing
                         # tick, not with the current baseline -- two
                         # independent ticks agreeing with each other is
@@ -227,7 +281,9 @@ class CandleBuilder:
                         # discard any bucket state built from the
                         # now-abandoned baseline; falls through below to
                         # process this tick normally against the new
-                        # baseline.
+                        # baseline. Also wall-clock-plausible (2026-09-21
+                        # fix) -- not just internally consistent with the
+                        # pending candidate, but actually current.
                         logger.warning(
                             "CandleBuilder(%s, %s): two consecutive ticks agree with each other "
                             "(timestamp=%s, previous candidate=%s) while disagreeing with the current "
@@ -241,6 +297,21 @@ class CandleBuilder:
                         self._state = None
                         self._last_known_price = None
                     else:
+                        if agrees_with_pending:
+                            # 2026-09-21 fix: two ticks agree with each
+                            # other but BOTH fail the wall-clock
+                            # plausibility check (e.g. two fragments of the
+                            # same stale snapshot burst) -- do not confirm.
+                            # Roll the pending candidate forward to this
+                            # tick anyway so a genuinely current tick can
+                            # still break the tie on a later call.
+                            logger.warning(
+                                "CandleBuilder(%s, %s): two consecutive ticks agree with each other "
+                                "(timestamp=%s, previous candidate=%s) but neither is plausible relative to "
+                                "its own receipt time -- refusing to confirm a baseline from stale-but-"
+                                "internally-consistent data; still not confirmed.",
+                                self.symbol, self.interval, timestamp, pending,
+                            )
                         # Cold-start self-recovery: the baseline hasn't
                         # been confirmed yet, and this lone disagreement
                         # doesn't (yet) match a prior one -- remember it as
@@ -273,14 +344,38 @@ class CandleBuilder:
                     # trusted to complete an elapsed bucket either, since bucket membership is computed FROM it.
             else:
                 if not self._baseline_confirmed:
-                    # This tick agrees with the current (original)
-                    # baseline within the threshold -- two consecutive
-                    # agreeing ticks against the SAME baseline is enough
-                    # evidence to trust it permanently, no reset needed.
-                    # From here on, behavior is byte-identical to the
-                    # pre-existing, already-tested mid-session logic.
-                    self._baseline_confirmed = True
-                    self._pending_candidate_timestamp = None
+                    if self._plausible_relative_to_receipt(timestamp=timestamp, received_at=received_at):
+                        # This tick agrees with the current (original)
+                        # baseline within the threshold -- two consecutive
+                        # agreeing ticks against the SAME baseline is enough
+                        # evidence to trust it permanently, no reset needed.
+                        # Also wall-clock-plausible (2026-09-21 fix): the
+                        # ordinary, correct case -- the first tick really
+                        # was fine all along. From here on, behavior is
+                        # byte-identical to the pre-existing, already-
+                        # tested mid-session logic.
+                        self._baseline_confirmed = True
+                        self._pending_candidate_timestamp = None
+                    else:
+                        # 2026-09-21 fix: this tick numerically agrees with
+                        # the CURRENT (still-unconfirmed) baseline, but
+                        # fails the wall-clock plausibility check -- the
+                        # real 2026-09-21 incident's exact shape (a second
+                        # stale-but-consistent tick confirming a stale
+                        # first tick, without ever needing the pending-
+                        # candidate path at all). Refuse to confirm; treat
+                        # as a fresh, independent candidate instead of
+                        # trusting agreement with an unproven baseline.
+                        self._pending_candidate_timestamp = timestamp
+                        self.rejected_tick_counts["implausible_timestamp"] += 1
+                        logger.warning(
+                            "CandleBuilder(%s, %s): tick agrees with the still-unconfirmed baseline "
+                            "(timestamp=%s, baseline=%s) but neither is plausible relative to its own "
+                            "receipt time -- refusing to confirm; remembering as a fresh pending candidate "
+                            "instead of trusting agreement with an unproven baseline.",
+                            self.symbol, self.interval, timestamp, self._last_known_timestamp,
+                        )
+                        return None
 
         price_is_valid = True
         if price <= 0:

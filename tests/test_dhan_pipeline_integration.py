@@ -85,6 +85,18 @@ def _ticker_packet(security_id: int, price: float, epoch: int) -> bytes:
     return header + body
 
 
+def _receipt_clock_near(epoch: int):
+    """2026-09-21 CandleBuilder cold-start-plausibility fix: `_handle_packet`'s
+    `received_at` defaults to the REAL `datetime.now()`, which is far from
+    every synthetic tick epoch these tests use -- anchoring the injected
+    clock to the SAME epoch a test's own ticks use (via `_decode_last_trade_time`,
+    which applies Dhan's real IST-mislabeled-as-UTC wire correction) keeps
+    each test's original intent (freshness/staleness is decided by the
+    PIPELINE's own separate `clock=`, not by this plausibility gate)."""
+    anchor = DhanMarketDataSource._decode_last_trade_time(epoch)
+    return lambda: anchor
+
+
 @pytest.fixture
 def instrument_map():
     import io
@@ -99,6 +111,7 @@ def dhan_pipeline(instrument_map):
     source = DhanMarketDataSource(
         credentials=credentials, instrument_map=instrument_map, interval="1m",
         transport_factory=factory, next_bar_timeout_seconds=0.2,
+        received_at_clock=_receipt_clock_near(_BASE_EPOCH),
     )
     store = PaperStore(":memory:")
     engine = PaperTradingEngine(store, initial_capital=100_000.0)
@@ -144,7 +157,10 @@ def test_stale_dhan_bar_suppresses_new_signals(dhan_pipeline, instrument_map):
     STALE_SIGNAL_SUPPRESSED, exactly like a stale mock bar."""
     credentials = DhanCredentials(client_id="1000000001", access_token="fake-token")
     factory = _FakeTransportFactory()
-    source = DhanMarketDataSource(credentials=credentials, instrument_map=instrument_map, interval="1m", transport_factory=factory, next_bar_timeout_seconds=0.2)
+    source = DhanMarketDataSource(
+        credentials=credentials, instrument_map=instrument_map, interval="1m", transport_factory=factory, next_bar_timeout_seconds=0.2,
+        received_at_clock=_receipt_clock_near(60),  # matches this test's own tick epochs, not _BASE_EPOCH -- see _receipt_clock_near
+    )
     store = PaperStore(":memory:")
     engine = PaperTradingEngine(store, initial_capital=100_000.0)
     # TIGHT freshness this time, and a clock far ahead of the ticks' epoch timestamps.
@@ -179,7 +195,10 @@ def test_duplicate_dhan_bar_is_skipped_by_the_existing_engine(dhan_pipeline, ins
     # replaying the identical first bucket.
     credentials = DhanCredentials(client_id="1000000001", access_token="fake-token")
     new_factory = _FakeTransportFactory()
-    new_source = DhanMarketDataSource(credentials=credentials, instrument_map=instrument_map, interval="1m", transport_factory=new_factory, next_bar_timeout_seconds=0.2)
+    new_source = DhanMarketDataSource(
+        credentials=credentials, instrument_map=instrument_map, interval="1m", transport_factory=new_factory, next_bar_timeout_seconds=0.2,
+        received_at_clock=_receipt_clock_near(_BASE_EPOCH),
+    )
     pipeline.source = new_source
     new_source.subscribe(["RELIANCE.NS"], "1m")
     new_factory.current.simulate_message(_ticker_packet(2885, 1400.0, epoch=_BASE_EPOCH + 0))
@@ -196,7 +215,10 @@ def test_processing_a_dhan_bar_writes_feed_status_for_the_dashboard(instrument_m
 
     credentials = DhanCredentials(client_id="1000000001", access_token="fake-token")
     factory = _FakeTransportFactory()
-    source = DhanMarketDataSource(credentials=credentials, instrument_map=instrument_map, interval="1m", transport_factory=factory, next_bar_timeout_seconds=0.2)
+    source = DhanMarketDataSource(
+        credentials=credentials, instrument_map=instrument_map, interval="1m", transport_factory=factory, next_bar_timeout_seconds=0.2,
+        received_at_clock=_receipt_clock_near(_BASE_EPOCH),
+    )
     store = PaperStore(":memory:")
     engine = PaperTradingEngine(store, initial_capital=100_000.0)
     state_store = LiveStateStore(":memory:")

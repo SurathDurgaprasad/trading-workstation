@@ -1,7 +1,7 @@
 """Phase 15 §23 unit tests: CandleBuilder tick-to-OHLCVBar aggregation.
 Pure, synthetic ticks -- no network, no Dhan connection.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -572,47 +572,117 @@ def test_cold_start_self_recovery_does_not_weaken_the_existing_mid_session_singl
 # the CandleBuilder-level half of that guarantee).
 
 
-def test_previous_day_first_two_consecutive_stale_ticks_falsely_confirm_a_bad_baseline():
-    """Documented, NOT fixed today -- a genuine, narrower residual gap found
-    during this adversarial pass, in the same honest spirit as
-    test_corrupted_very_first_tick_is_a_documented_residual_gap. The
-    two-tick-confirmation mechanism (see __init__'s own docstring) assumes
-    the SECOND disagreeing tick that agrees with the first is independent
-    evidence the ORIGINAL baseline was bad -- but if BOTH of the first two
-    ticks a fresh builder ever receives are themselves stale (e.g. two
-    fragments of the same corrupted overnight snapshot delivered moments
-    apart), they trivially agree with each other and PERMANENTLY confirm
-    the wrong baseline, exactly reproducing the pre-fix "rejects forever"
-    failure mode for every genuinely current tick afterward. Not fixed
-    because: (a) the real 2026-09-17 incident that motivated the fix
-    always showed exactly ONE stale seed tick, never two, so there is no
-    real-world evidence this specific pattern occurs; (b) the only fixes
-    available (a wall-clock comparison, or allowing an already-confirmed
-    baseline to be re-challenged) each reintroduce a version of a problem
-    this design deliberately avoided elsewhere -- see __init__'s own
-    docstring on why wall-clock comparison was rejected, and
-    test_cold_start_self_recovery_does_not_weaken_the_existing_mid_session_
-    single_bad_tick_protection for why re-challenging a confirmed baseline
-    is dangerous."""
+def test_previous_day_first_two_consecutive_stale_ticks_now_self_heals_instead_of_confirming():
+    """FIXED (2026-09-21 real live incident): this test previously
+    documented a genuine, then-undismissed residual gap -- the two-tick-
+    confirmation mechanism assumed a SECOND disagreeing tick that agrees
+    with the first is independent evidence the ORIGINAL baseline was bad,
+    but if BOTH of the first two ticks a fresh builder ever received were
+    themselves stale (e.g. two fragments of the same corrupted overnight
+    snapshot), they trivially agreed with each other and PERMANENTLY
+    confirmed the wrong baseline. This was judged "not fixed" on
+    2026-09-18 on the reasoning that the real 2026-09-17 incident always
+    showed exactly ONE stale seed tick, never two, so there was no real-
+    world evidence this specific pattern occurred -- that reasoning was
+    proven wrong on 2026-09-21: a real Monday cold start (after a weekend
+    gap) produced EXACTLY this pattern across all 15 live fleet symbols
+    simultaneously (a stale Friday-afternoon LTP-snapshot first tick,
+    immediately followed by a second fragment of the same stale snapshot
+    agreeing with it), permanently confirming Friday's timestamp and
+    producing ZERO real candles fleet-wide until diagnosed and fixed.
+
+    Fix: a baseline can only be CONFIRMED (not merely internally
+    consistent) if the confirming tick's own `timestamp` is plausible
+    relative to its own `received_at` (see
+    CandleBuilder._plausible_relative_to_receipt and
+    `max_cold_start_wall_clock_skew_seconds`'s own docstring). Two stale-
+    but-mutually-consistent ticks now correctly fail to confirm; a
+    genuinely current tick still self-heals normally."""
     builder = CandleBuilder(symbol="HINDUNILVR", interval="1m")
-    stale_seed = builder.on_tick(price=100.0, volume=0, timestamp=_ts(0), received_at=_ts(0))
+    # received_at is the REAL wall-clock moment each tick actually arrived
+    # -- distinct from the stale `timestamp` each one claims, exactly
+    # matching the real incident's own shape (arrived today, claims to be
+    # from a stale snapshot).
+    now = _ts(30 * 86400)
+    stale_seed = builder.on_tick(price=100.0, volume=0, timestamp=_ts(0), received_at=now)
     assert stale_seed is None
+    assert builder._baseline_confirmed is False
 
-    # A second fragment of the SAME stale snapshot, moments later -- agrees
-    # with the first stale tick, not with reality. Falsely confirms.
-    stale_confirm = builder.on_tick(price=100.5, volume=0, timestamp=_ts(5), received_at=_ts(5))
-    assert stale_confirm is None
-    assert builder.rejected_tick_counts["implausible_timestamp"] == 0  # this tick AGREED with the (bad) baseline -- not rejected, confirmed
+    # A second fragment of the SAME stale snapshot, moments later --
+    # agrees with the first stale tick numerically, but is EQUALLY
+    # implausible relative to when it was actually received. Must NOT
+    # confirm (the fixed behavior -- previously this falsely confirmed).
+    stale_confirm_attempt = builder.on_tick(price=100.5, volume=0, timestamp=_ts(5), received_at=now)
+    assert stale_confirm_attempt is None
+    assert builder._baseline_confirmed is False  # the fix: no longer falsely confirmed
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 1  # now correctly counted as a rejection, not a silent confirm
 
-    # Every genuinely current tick from here on is rejected FOREVER --
-    # the exact pre-fix failure mode, for this specific two-bad-ticks
-    # pattern only.
-    real_tick_1 = builder.on_tick(price=2500.0, volume=0, timestamp=_ts(30 * 86400), received_at=_ts(30 * 86400))
+    # Genuinely current ticks (received_at matches timestamp -- real,
+    # current data) still self-heal normally, exactly as designed.
+    real_tick_1 = builder.on_tick(price=2500.0, volume=0, timestamp=now, received_at=now)
     assert real_tick_1 is None
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 2
+    real_tick_2 = builder.on_tick(price=2501.0, volume=0, timestamp=now + timedelta(seconds=60), received_at=now + timedelta(seconds=60))
+    assert real_tick_2 is None  # confirms and switches baseline, starts a fresh bucket -- no bar yet
+    assert builder._baseline_confirmed is True
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 2  # not incremented -- this tick confirmed, not rejected
+
+    bar = builder.on_tick(price=2502.0, volume=0, timestamp=now + timedelta(seconds=125), received_at=now + timedelta(seconds=125))
+    assert bar is not None
+    assert bar.open == 2501.0  # real_tick_2, the confirmed baseline's first tick -- the stale ticks never merged into any bucket
+
+
+def test_two_mutually_agreeing_pending_candidates_that_are_both_stale_do_not_confirm_either():
+    """The OTHER confirmation point this fix closes (the "switch to a new
+    pending candidate" branch, distinct from the "agrees with the
+    original baseline" branch covered above): if a tick disagrees with
+    the current baseline, gets remembered as pending, and a LATER tick
+    agrees with THAT pending candidate -- but both are equally implausible
+    relative to their own real receipt time -- confirmation must still be
+    refused, and the loop must keep running until a genuinely current
+    tick arrives."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    now = _ts(30 * 86400)
+
+    # First tick: a real, current baseline (received_at matches timestamp).
+    builder.on_tick(price=100.0, volume=0, timestamp=now, received_at=now)
+
+    # Second and third ticks: two DIFFERENT stale fragments that happen to
+    # agree with EACH OTHER (not with the current baseline), both received
+    # "now" in real wall-clock terms despite claiming an ancient timestamp.
+    stale_a = builder.on_tick(price=50.0, volume=0, timestamp=_ts(0), received_at=now)
+    assert stale_a is None
     assert builder.rejected_tick_counts["implausible_timestamp"] == 1
-    real_tick_2 = builder.on_tick(price=2501.0, volume=0, timestamp=_ts(30 * 86400 + 60), received_at=_ts(30 * 86400 + 60))
-    assert real_tick_2 is None
-    assert builder.rejected_tick_counts["implausible_timestamp"] == 2  # still growing -- no self-heal available once confirmed
+
+    stale_b = builder.on_tick(price=50.5, volume=0, timestamp=_ts(3), received_at=now)  # agrees with stale_a (3s apart), but still implausible
+    assert stale_b is None
+    assert builder._baseline_confirmed is False  # must NOT have switched to the stale pair
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 2
+
+    # The baseline is still the original, real one -- a subsequent real
+    # tick close to it confirms normally, unaffected.
+    real_confirm = builder.on_tick(price=100.5, volume=0, timestamp=now + timedelta(seconds=10), received_at=now + timedelta(seconds=10))
+    assert real_confirm is None
+    assert builder._baseline_confirmed is True
+
+    bar = builder.on_tick(price=101.0, volume=0, timestamp=now + timedelta(seconds=65), received_at=now + timedelta(seconds=65))
+    assert bar is not None
+    assert bar.open == 100.0  # the ORIGINAL real baseline, never displaced by the stale-but-mutually-agreeing pair
+
+
+def test_max_cold_start_wall_clock_skew_seconds_none_restores_the_exact_pre_fix_behavior():
+    """Matches this project's consistent 'None disables' convention --
+    a caller that explicitly wants the pre-2026-09-21 behavior (trust
+    internal tick-to-tick agreement alone, no wall-clock cross-check) can
+    still get it."""
+    builder = CandleBuilder(symbol="HINDUNILVR", interval="1m", max_cold_start_wall_clock_skew_seconds=None)
+    now = _ts(30 * 86400)
+    builder.on_tick(price=100.0, volume=0, timestamp=_ts(0), received_at=now)
+    # A second stale fragment, agreeing with the first -- with the check
+    # disabled, this DOES falsely confirm, exactly like before this fix.
+    builder.on_tick(price=100.5, volume=0, timestamp=_ts(5), received_at=now)
+    assert builder._baseline_confirmed is True
+    assert builder.rejected_tick_counts["implausible_timestamp"] == 0
 
 
 def test_previous_day_stale_tick_then_current_day_ticks_self_heals_with_real_calendar_dates():

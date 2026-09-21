@@ -192,36 +192,64 @@ class CriticGate:
                 reason = f"No real scanner evidence available for {self._symbol} (excluded from screening or no history)."
             return CriticGateResult(blocked=True, block_reason=reason, assessment=None, decision=None)
 
-        market_context = MarketContext.from_indicators(indicators) if indicators is not None else None
         resolved_now = now or datetime.now(timezone.utc)
 
-        decision = Decision(
-            decision_id=Decision.new_id(),
-            symbol=self._symbol,
-            as_of=resolved_now,
-            label=DecisionLabel.BUY,
-            rationale=[
-                f"{self._symbol}: live strategy ({signal.strategy_name}) generated a BUY signal "
-                f"({', '.join(rc.value for rc in signal.reason_codes)}) -- this label reflects that live "
-                "decision directly, not decision_engine.rules.classify() (deliberately not called here; "
-                "see live/critic_gate.py's own module docstring for why)."
-            ],
-            config_version="live-critic-gate-direct",
-            scanner_evidence=self._candidate,
-            research_evidence=None,
-            market_context=market_context,
-            risk_context=RiskContext(has_open_position=existing_open_position),
-            confidence=compute_confidence(self._candidate).score,
-            confidence_explanation=compute_confidence(self._candidate).explanation(),
-            narrative=None,
-            narrative_unavailable_reason="Critic gate evaluation is deterministic-only by design -- no LLM narration is attempted here.",
-        )
+        # Adversarial hardening pass (2026-09-21 live session, CriticGate
+        # audit): this module's own docstring has always claimed "any
+        # exception while refreshing evidence OR EVALUATING is treated as
+        # BLOCKED... never silently treated as a pass" -- the "refreshing
+        # evidence" half is real (_refresh_if_needed's own try/except
+        # above), but the "evaluating" half was NOT: everything from here
+        # through the real critic_evaluate() call (market-context
+        # conversion, Decision construction, confidence computation) ran
+        # completely unguarded. A genuine bug anywhere in this block
+        # (e.g. a malformed indicator, a confidence-computation edge
+        # case, or an actual critic_evaluate() defect) would propagate
+        # all the way out of this method, out of live/pipeline.py's
+        # _handle_signal (also unguarded there), out of main.py's worker
+        # loop (only a bare except KeyboardInterrupt above it) -- crashing
+        # that symbol's entire live worker process rather than degrading
+        # to a BLOCKED verdict as documented. fleet_supervisor.py's
+        # bounded auto-restart absorbs the crash, but that is not the
+        # same thing as failing closed: it burns restart budget and
+        # discards that symbol's in-memory lifecycle/pending-approval
+        # state, which the documented behavior exists specifically to
+        # avoid. Mirrors _refresh_if_needed's own try/except exactly.
+        try:
+            market_context = MarketContext.from_indicators(indicators) if indicators is not None else None
 
-        assessment = critic_evaluate(
-            decision, signal, config=self._config, now=resolved_now, kill_switch_active=kill_switch_active,
-            existing_pending_order=existing_pending_order, existing_open_position=existing_open_position,
-            benchmark_context=self._benchmark_context,
-        )
+            decision = Decision(
+                decision_id=Decision.new_id(),
+                symbol=self._symbol,
+                as_of=resolved_now,
+                label=DecisionLabel.BUY,
+                rationale=[
+                    f"{self._symbol}: live strategy ({signal.strategy_name}) generated a BUY signal "
+                    f"({', '.join(rc.value for rc in signal.reason_codes)}) -- this label reflects that live "
+                    "decision directly, not decision_engine.rules.classify() (deliberately not called here; "
+                    "see live/critic_gate.py's own module docstring for why)."
+                ],
+                config_version="live-critic-gate-direct",
+                scanner_evidence=self._candidate,
+                research_evidence=None,
+                market_context=market_context,
+                risk_context=RiskContext(has_open_position=existing_open_position),
+                confidence=compute_confidence(self._candidate).score,
+                confidence_explanation=compute_confidence(self._candidate).explanation(),
+                narrative=None,
+                narrative_unavailable_reason="Critic gate evaluation is deterministic-only by design -- no LLM narration is attempted here.",
+            )
+
+            assessment = critic_evaluate(
+                decision, signal, config=self._config, now=resolved_now, kill_switch_active=kill_switch_active,
+                existing_pending_order=existing_pending_order, existing_open_position=existing_open_position,
+                benchmark_context=self._benchmark_context,
+            )
+        except Exception as exc:  # noqa: BLE001 -- fail closed, exactly as this module's own docstring already claimed
+            return CriticGateResult(
+                blocked=True, block_reason=f"Critic evaluation raised an unexpected exception -- fail-closed: {type(exc).__name__}: {exc}",
+                assessment=None, decision=None,
+            )
         blocked = assessment.verdict in BLOCKING_VERDICTS
         block_reason = assessment.reasons[0] if blocked and assessment.reasons else ("Critic verdict: " + assessment.verdict.value if blocked else "")
         return CriticGateResult(blocked=blocked, block_reason=block_reason, assessment=assessment, decision=decision)
