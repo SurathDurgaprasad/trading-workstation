@@ -3509,4 +3509,82 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "docs/research/H_MEANREV_012_SIGNAL_STRENGTH_SELECTION_PREREGISTRATION.md."
             ),
         ),
+        # 2026-09-21: the first entry of a NEW kind in this file. Every H_ENTRY_*/
+        # H_EXIT_*/H_MEANREV_*/etc. entry above tests a MODIFICATION or an
+        # independent mechanism -- this one is the formal, top-level economic
+        # verdict on TrendMomentumBaseline v1.0 ITSELF, as the whole active
+        # production strategy, consolidating evidence that previously existed
+        # in three separate places (the 5-year backtest report, the
+        # promotion-gate's own NEGATIVE verdict on file since 2026-09-05, and
+        # today's real live 1-minute production evidence) into one citable
+        # record. HypothesisStatus has no separate ARCHIVED value -- REJECTED
+        # already means exactly this ("a real experiment was run and its
+        # result contradicts the hypothesis"), so that status is reused
+        # rather than adding a new enum member for a distinction that already
+        # exists in substance.
+        HypothesisRecord(
+            hypothesis_id="H_BASELINE_001",
+            description="TrendMomentumBaseline v1.0, as a whole frozen production strategy (not a modification or variant of it), has a demonstrable, repeatable, risk-adjusted economic edge after realistic costs.",
+            rationale=(
+                "Every other entry in this registry tests a MODIFICATION or an independent mechanism against "
+                "the same dataset -- none of them formally records the baseline's OWN top-level promotion "
+                "status in one place. This entry closes that gap: it is the project's hard, dated determination "
+                "of whether the currently-deployed production strategy itself has earned its way to further "
+                "capital allocation, per this project's own promotion rule (research -> paper -> shadow -> "
+                "tiny capital -> larger capital, each stage earned by evidence, not confidence)."
+            ),
+            expected_effect="If true, TrendMomentumBaseline should show statistically credible positive expectancy out-of-sample after realistic costs, both in historical backtest and in real live production data.",
+            dataset_restrictions=(
+                "Two independent datasets, cited together: (1) the original 41-symbol (32 NSE, 9 US), 5-year "
+                "daily-bar backtest (368+ trades) underlying every H_ENTRY_*/H_EXIT_* entry above; (2) real "
+                "live 1-minute NSE production data from the actual Dhan-fed paper-trading fleet, 2026-09-21."
+            ),
+            experiment_design=(
+                "(1) strategy.promotion_gate.evaluate_promotion run against the historical backtest result -- "
+                "already on file in data/promotion_gate.db (candidate_name='trend_momentum_baseline', evaluated "
+                "2026-09-05T04:56:47Z). (2) A real production incident and fix: the live Dhan feed was found to "
+                "subscribe in Ticker mode, which carries no volume field, making the strategy's own "
+                "volume_trend==\"increasing\" condition structurally impossible to satisfy in production -- "
+                "fixed (commit b99e7d7) by switching to Quote mode, which carries real per-trade volume "
+                "(last_traded_quantity). This is a DATA-PIPELINE fix, not a strategy change -- "
+                "strategy/baseline.py has zero diff across the entire investigation. Once real volume reached "
+                "the unmodified strategy, real 1-minute production data was collected: 73 natural signals, "
+                "evaluated by the unmodified CriticGate/RiskEngine, with each signal's actual subsequent price "
+                "action tracked via the existing prediction-outcome pipeline (predictions.db, 20-bar horizon, "
+                "evaluate_pending_predictions) -- no synthetic data, no forced signals, no strategy changes."
+            ),
+            success_criteria="Positive, statistically credible expectancy in the original backtest's own promotion-gate evaluation, corroborated by a non-negative win rate / mean return in the live 1-minute production sample.",
+            failure_criteria="A NEGATIVE promotion-gate verdict on the historical backtest, and/or a live production sample showing win rate and mean return substantially below breakeven for the strategy's own stated 2:1 reward:risk target (~33% breakeven win rate).",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "(1) HISTORICAL: 5-year/41-symbol backtest -- negative mean return, underperformed buy-and-hold, "
+                "underperformed 96% of random-entry Monte Carlo iterations (H_ENTRY_001's own evidence above); "
+                "a follow-up program testing exit and entry variants (all other entries in this file) found the "
+                "same result. strategy.promotion_gate.evaluate_promotion's own formal verdict on this backtest, "
+                "on file since 2026-09-05T04:56:47Z: NEGATIVE. "
+                "(2) LIVE, 2026-09-21, checkpoint at 73 natural signals / 43 resolved (30 still pending their "
+                "20-bar horizon, to be appended to this record after they resolve -- their resolution does not "
+                "change this verdict, only completes the sample): win rate 2/43 = 4.7% (this strategy's own "
+                "2:1 reward:risk target needs ~33% to break even); mean return per trade -0.076%; every one of "
+                "the 15 fleet symbols tested. OBSERVED (not yet a proven causal claim): 41 of 41 resolved "
+                "stop-outs occurred at bar 1 (the very first bar after entry). STRONG HYPOTHESIS, not yet "
+                "validated: the 1-minute-bar ATR-derived stop distance (observed 0.03%-0.13% of price across "
+                "symbols) may be too tight relative to ordinary intraday noise for this timeframe -- consistent "
+                "with, but not proven by, the independent same-day finding that this same tight stop distance "
+                "makes RiskEngine's own position sizing exceed max_exposure_pct on effectively every candidate "
+                "(73/73 MAX_EXPOSURE rejections, fully explained by risk_per_trade_pct/stop-distance/"
+                "max_exposure_pct arithmetic, itself not a software defect). REQUIRED VALIDATION, not done as "
+                "part of this entry: reconstruct entry/ATR/stop distance against subsequent bar range and MAE "
+                "distribution before treating stop-tightness as a confirmed causal mechanism. All 73 signals "
+                "occurred with the ^NSEI benchmark in a Critic-flagged DOWNTREND regime -- this is a single-day, "
+                "single-regime live sample and does not by itself establish a general live win rate; it is "
+                "additional negative evidence on top of an already-negative historical verdict, not an "
+                "independent refutation on its own. "
+                "CONCLUSION: no demonstrated economic edge, in either dataset. Do not optimize, tune, or "
+                "redeploy TrendMomentumBaseline v1.0 as a production trading hypothesis. Preserve all evidence "
+                "(this entry, data/promotion_gate.db, today's predictions.db records) for audit and research "
+                "reference. Any changed threshold, stop multiplier, volume rule, or timeframe is a NEW "
+                "hypothesis (its own registry entry, its own id), never a revision of this one."
+            ),
+        ),
     )
