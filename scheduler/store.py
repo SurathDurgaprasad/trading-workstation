@@ -210,6 +210,21 @@ class SchedulerRunStore:
         ).fetchone()
         return sqlite_util.parse_model_json(RunRecord, row[0], row_identifier=f"last_success:{slot_name}") if row else None
 
+    def most_recent_finished_run_for_slot(self, slot_name: str) -> RunRecord | None:
+        """2026-09-21: distinct from `last_failed_run_for_slot` (which
+        skips straight to the newest FAILED row, even if a newer
+        RECLAIMED row exists) -- this answers "when did anything last
+        happen for this slot at all," which `core.health._check_scheduler`
+        needs to tell an ACTIVE failure streak (a `schedule loop` process
+        currently running and currently failing) apart from a STALE one
+        (no scheduler process has attempted this slot in days -- the
+        streak is real history, not a live, ongoing problem)."""
+        row = self._conn.execute(
+            "SELECT data_json FROM scheduler_runs WHERE slot_name = ? AND status != ? ORDER BY started_at DESC LIMIT 1",
+            (slot_name, RunStatus.RUNNING.value),
+        ).fetchone()
+        return sqlite_util.parse_model_json(RunRecord, row[0], row_identifier=f"most_recent_finished:{slot_name}") if row else None
+
     def last_failed_run_for_slot(self, slot_name: str) -> RunRecord | None:
         """Symmetric with last_successful_run_for_slot -- surfaces the
         most recent failure (with its own `detail`/`error` fields) for an

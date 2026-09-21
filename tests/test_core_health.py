@@ -265,6 +265,67 @@ def test_scheduler_check_active_lock_takes_priority_over_failure_streak(tmp_path
     assert "in progress or possibly orphaned" in scheduler.detail
 
 
+def test_scheduler_check_labels_a_stale_failure_streak_as_not_necessarily_active(tmp_path):
+    """2026-09-21 real finding: an 11-day-old `market_open` failure streak
+    (missing Dhan credentials in the invoking shell, 2026-09-10) was still
+    reported with the exact same wording/urgency as an active, right-now
+    failure on 2026-09-21, even though no `schedule loop`/`tick` process
+    had attempted anything since. The streak/DEGRADED status itself must
+    stay -- this only proves the message now HONESTLY distinguishes stale
+    history from a live incident, without hiding or weakening the streak."""
+    from datetime import datetime, timedelta, timezone
+
+    from scheduler.models import RunStatus
+    from scheduler.store import SchedulerRunStore
+
+    db_path = tmp_path / "runs.db"
+    store = SchedulerRunStore(db_path)
+    old = datetime(2026, 9, 10, 3, 49, tzinfo=timezone.utc)
+    for i in range(9):
+        started = old + timedelta(minutes=i)
+        store.start_run(run_id=f"r{i}", slot_name="market_open", run_date="2026-09-10", started_at=started)
+        store.finish_run(run_id=f"r{i}", status=RunStatus.FAILED, error="Missing required environment variable(s): DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN.", finished_at=started)
+    store.close()
+
+    checked_at = datetime(2026, 9, 21, 4, 0, tzinfo=timezone.utc)  # 11 days later, matching the real incident's own gap
+    health = collect_system_health(db_paths={"scheduler": db_path}, probe_dir=tmp_path, check_ollama=False, now=checked_at)
+
+    scheduler = health.get("scheduler")
+    assert scheduler.status == ComponentStatus.DEGRADED  # streak is real, unchanged, never hidden
+    assert "market_open" in scheduler.detail
+    assert "9 consecutive" in scheduler.detail
+    assert "DHAN_CLIENT_ID" in scheduler.detail
+    assert "STALE HISTORY" in scheduler.detail
+    assert "not currently running" in scheduler.detail
+
+
+def test_scheduler_check_labels_a_recent_failure_streak_as_active(tmp_path):
+    """The symmetric case: a streak that finished minutes ago must be
+    labeled as an active, ongoing pattern, not stale history -- an
+    operator must not be falsely reassured that a live incident is old
+    news."""
+    from datetime import datetime, timedelta, timezone
+
+    from scheduler.models import RunStatus
+    from scheduler.store import SchedulerRunStore
+
+    db_path = tmp_path / "runs.db"
+    store = SchedulerRunStore(db_path)
+    now = datetime(2026, 9, 21, 4, 0, tzinfo=timezone.utc)
+    for i in range(3):
+        started = now - timedelta(minutes=10 - i)
+        store.start_run(run_id=f"r{i}", slot_name="intraday", run_date="2026-09-21", started_at=started)
+        store.finish_run(run_id=f"r{i}", status=RunStatus.FAILED, error="simulated ongoing outage", finished_at=started)
+    store.close()
+
+    health = collect_system_health(db_paths={"scheduler": db_path}, probe_dir=tmp_path, check_ollama=False, now=now)
+
+    scheduler = health.get("scheduler")
+    assert scheduler.status == ComponentStatus.DEGRADED
+    assert "active, ongoing pattern" in scheduler.detail
+    assert "STALE HISTORY" not in scheduler.detail
+
+
 def test_risk_config_check_is_healthy_by_default(tmp_path):
     health = collect_system_health(db_paths={}, probe_dir=tmp_path, check_ollama=False)
     assert health.get("risk").status == ComponentStatus.HEALTHY

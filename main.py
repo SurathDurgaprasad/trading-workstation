@@ -969,9 +969,30 @@ def _build_critic_gate_for_paper_live(args: argparse.Namespace):
 
     from backtesting.cache import CachedMarketDataProvider
     from live.critic_gate import DEFAULT_REFRESH_SECONDS, CriticGate
-    from market.data_provider import get_market_data_provider
+    from market_data.resilience import build_resilient_provider
 
-    provider = CachedMarketDataProvider(get_market_data_provider())
+    # 2026-09-21 CriticGate adversarial audit, real finding: unlike
+    # shadow-run/schedule (both have an explicit --resilient opt-in via
+    # market_data.resilience.build_resilient_provider), this live,
+    # continuously-running critic path previously used a bare
+    # CachedMarketDataProvider(get_market_data_provider()) with NO
+    # timeout at all -- a real, unbounded Yahoo network hang on a cache
+    # MISS (a new symbol never scanned before, or a deleted/corrupted
+    # data/market/<SYMBOL>/1d.csv) would freeze _refresh_if_needed()
+    # indefinitely, silently stalling that symbol's critic (and every
+    # signal behind it) with no exception, no BLOCKED verdict, nothing
+    # in the logs to explain why. Every one of today's 15 real fleet
+    # symbols already has a warm cache (verified directly), so this
+    # was NOT an active problem today, but it is a real, reachable gap
+    # for the next new symbol or a corrupted cache file. Unlike
+    # shadow-run/schedule (one-shot CLI invocations where an operator
+    # is present to see a hang), this is the always-on unattended path
+    # -- there is no good reason for it to default to unbounded, so
+    # this wraps it unconditionally rather than adding an opt-in flag.
+    # A timeout here raises MarketDataError, which _refresh_if_needed's
+    # own existing except Exception already catches -- fails closed
+    # exactly like any other refresh failure, never a silent pass.
+    provider = CachedMarketDataProvider(build_resilient_provider())
     benchmark_symbol = args.benchmark or None
     refresh_seconds = args.critic_refresh_seconds if args.critic_refresh_seconds is not None else DEFAULT_REFRESH_SECONDS
     return CriticGate(

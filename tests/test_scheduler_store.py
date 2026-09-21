@@ -432,6 +432,41 @@ def test_last_failed_run_for_slot_carries_the_error_detail():
     store.close()
 
 
+def test_most_recent_finished_run_for_slot_is_none_when_nothing_has_run(store):
+    assert store.most_recent_finished_run_for_slot("pre_market") is None
+
+
+def test_most_recent_finished_run_for_slot_prefers_the_newest_regardless_of_status():
+    """Distinct from `last_failed_run_for_slot`, which skips straight to
+    the newest FAILED row even if a newer RECLAIMED row exists -- this
+    answers "what happened most recently for this slot, of any finished
+    status," used by core.health to tell an active failure streak apart
+    from stale history."""
+    store = SchedulerRunStore(":memory:")
+    store.start_run(run_id="r1", slot_name="pre_market", run_date="2026-09-01", started_at=datetime(2026, 9, 1, tzinfo=timezone.utc))
+    store.finish_run(run_id="r1", status=RunStatus.FAILED, error="older failure", finished_at=datetime(2026, 9, 1, 1, tzinfo=timezone.utc))
+    store.start_run(run_id="r2", slot_name="pre_market", run_date="2026-09-02", started_at=datetime(2026, 9, 2, tzinfo=timezone.utc))
+    store.finish_run(run_id="r2", status=RunStatus.RECLAIMED, detail="newer, reclaimed", finished_at=datetime(2026, 9, 2, 1, tzinfo=timezone.utc))
+
+    most_recent = store.most_recent_finished_run_for_slot("pre_market")
+
+    assert most_recent.run_id == "r2"
+    assert most_recent.status == RunStatus.RECLAIMED
+    store.close()
+
+
+def test_most_recent_finished_run_for_slot_excludes_a_currently_running_row():
+    store = SchedulerRunStore(":memory:")
+    store.start_run(run_id="r1", slot_name="pre_market", run_date="2026-09-01", started_at=datetime(2026, 9, 1, tzinfo=timezone.utc))
+    store.finish_run(run_id="r1", status=RunStatus.FAILED, error="boom", finished_at=datetime(2026, 9, 1, 1, tzinfo=timezone.utc))
+    store.start_run(run_id="r2", slot_name="pre_market", run_date="2026-09-02", started_at=datetime(2026, 9, 2, tzinfo=timezone.utc))  # still RUNNING, no finish_run
+
+    most_recent = store.most_recent_finished_run_for_slot("pre_market")
+
+    assert most_recent.run_id == "r1"
+    store.close()
+
+
 def test_distinct_slot_names_lists_every_slot_that_has_ever_run(store):
     store.start_run(run_id="r1", slot_name="pre_market", run_date="2026-09-01", started_at=datetime.now(timezone.utc))
     store.start_run(run_id="r2", slot_name="post_market", run_date="2026-09-01", started_at=datetime.now(timezone.utc))

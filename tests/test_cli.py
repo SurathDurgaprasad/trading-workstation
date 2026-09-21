@@ -570,6 +570,68 @@ def test_critic_gate_respects_a_disabled_benchmark_and_custom_refresh():
     assert gate._refresh_seconds == 60.0  # noqa: SLF001
 
 
+def test_critic_gate_provider_is_timeout_protected_not_a_bare_unbounded_fetch():
+    """2026-09-21 CriticGate adversarial audit, real finding: this used to
+    be CachedMarketDataProvider(get_market_data_provider()) with NO
+    timeout -- an unbounded Yahoo hang on a cache miss (a new symbol, or
+    a deleted/corrupted data/market/<SYMBOL>/1d.csv) would freeze this
+    always-on live critic path indefinitely. Proves the provider
+    CriticGate actually receives is timeout-protected (a
+    ResilientMarketDataProvider under the cache), matching
+    shadow-run/schedule's own --resilient pattern, but unconditional
+    here since there is no operator present to notice a live hang."""
+    from market_data.resilience import ResilientMarketDataProvider
+    from main import _build_critic_gate_for_paper_live
+
+    args = parse_args(["paper-live", "--symbol", "RELIANCE.NS", "--source", "dhan"])
+    gate = _build_critic_gate_for_paper_live(args)
+
+    assert isinstance(gate._provider._inner, ResilientMarketDataProvider)  # noqa: SLF001 -- read-only introspection for this test only
+
+
+def test_critic_gate_refresh_fails_closed_on_a_provider_timeout_not_an_unbounded_hang():
+    """End-to-end proof (not just a type check): a provider fetch that
+    never returns must not hang CriticGate's own refresh. run_scan()'s
+    own per-symbol exclusion handling (it already catches MarketDataError
+    per symbol -- see ResilientMarketDataProvider's own docstring) absorbs
+    the timeout as an excluded-symbol reason rather than raising out of
+    _refresh_if_needed itself; either way the observable, load-bearing
+    contract is the same fail-closed one evaluate() already promises: no
+    real candidate -> blocked, and -- the actual point of this test --
+    bounded by the timeout, never by the simulated 5s hang."""
+    import time as time_module
+
+    from backtesting.cache import CachedMarketDataProvider
+    from live.critic_gate import CriticGate
+    from datetime import datetime, timezone
+
+    from market_data.resilience import ResilientMarketDataProvider, RetryPolicy
+    from strategy.signal import ReasonCode, Side, Signal
+
+    class _HangingProvider:
+        def fetch_ohlcv(self, symbol, *, period="1y", interval="1d"):
+            time_module.sleep(5)  # far longer than the tiny timeout below -- must never actually be awaited
+            raise AssertionError("should have been abandoned by the timeout, never reached")
+
+    resilient = ResilientMarketDataProvider(_HangingProvider(), timeout_seconds=0.1, retry_policy=RetryPolicy(max_attempts=1))
+    provider = CachedMarketDataProvider(resilient, cache_root=__import__("pathlib").Path("/nonexistent-cache-dir-for-this-test"))
+    gate = CriticGate(symbol="RELIANCE.NS", provider=provider, benchmark_symbol=None)
+    signal = Signal(
+        symbol="RELIANCE.NS", generated_at=datetime.now(timezone.utc), side=Side.LONG,
+        reference_price=100.0, stop_price=95.0, target_price=110.0, risk_reward=2.0,
+        strategy_name="trend_momentum_baseline", reason_codes=[ReasonCode.TREND_CONFIRMED],
+    )
+
+    started = time_module.monotonic()
+    result = gate.evaluate(
+        signal, indicators=None, kill_switch_active=False, existing_pending_order=False, existing_open_position=False,
+    )
+    elapsed = time_module.monotonic() - started
+
+    assert elapsed < 2.0  # bounded by the timeout, not the simulated 5s hang
+    assert result.blocked is True  # no real evidence could be fetched -- fails closed, never a silent pass
+
+
 def test_paper_live_source_rejects_unknown_values():
     with pytest.raises(SystemExit):
         parse_args(["paper-live", "--symbol", "RELIANCE.NS", "--source", "zerodha"])

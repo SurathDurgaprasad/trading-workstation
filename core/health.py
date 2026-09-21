@@ -25,6 +25,7 @@ caller passes its own already-resolved paths.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
@@ -241,13 +242,29 @@ operation (provider hiccups happen and `schedule loop` already retries
 the next tick on its own), but three in a row with zero intervening
 success is a real, actionable pattern worth an operator's attention."""
 
+_STALE_SCHEDULER_STREAK_SECONDS = 24 * 3600
+"""2026-09-21 real finding: a genuine, real `market_open` failure streak
+(missing Dhan credentials in the shell that invoked `schedule tick`/`loop`)
+from 2026-09-10 was still being reported by this check on 2026-09-21 --
+11 days later, with no `schedule loop`/`tick` process having attempted
+ANYTHING since -- with the exact same DEGRADED wording and urgency as an
+ACTIVE, right-now failure. Every slot's own frequency tops out at "once
+per trading day" (see scheduler/config.py's `_default_slots`), so no
+attempt in over 24h is a reliable signal that no scheduler process is
+currently running at all, not that one is running and failing. This does
+NOT suppress, weaken, or hide the streak -- the DEGRADED status and the
+full failure detail are unchanged; it only adds an honest recency note so
+an operator (or an automated caller of `main.py health`) does not mistake
+old history for a live, ongoing incident."""
 
-def _check_scheduler(db_paths: dict[str, Path]) -> ComponentHealth:
+
+def _check_scheduler(db_paths: dict[str, Path], *, now: datetime | None = None) -> ComponentHealth:
     path = db_paths.get("scheduler")
     if path is None or not Path(path).exists():
         return ComponentHealth("scheduler", ComponentStatus.UNKNOWN, "No scheduler_runs.db yet -- never run.")
     from scheduler.store import SchedulerRunStore
 
+    resolved_now = now or datetime.now(timezone.utc)
     store = SchedulerRunStore(path)
     try:
         active = store.active_lock()
@@ -261,9 +278,22 @@ def _check_scheduler(db_paths: dict[str, Path]) -> ComponentHealth:
             if streak >= _SUSTAINED_FAILURE_THRESHOLD:
                 last_failure = store.last_failed_run_for_slot(slot_name)
                 reason = f" -- {last_failure.error or last_failure.detail}" if last_failure else ""
+                most_recent = store.most_recent_finished_run_for_slot(slot_name)
+                age_note = ""
+                if most_recent is not None:
+                    reference = most_recent.finished_at or most_recent.started_at
+                    age_seconds = (resolved_now - reference).total_seconds()
+                    if age_seconds >= _STALE_SCHEDULER_STREAK_SECONDS:
+                        age_note = (
+                            f" Last attempted {age_seconds / 3600:.1f}h ago -- no scheduler activity for this slot "
+                            "since then, so this streak is likely STALE HISTORY from a `schedule loop`/`tick` "
+                            "process that is not currently running, not necessarily an active problem right now."
+                        )
+                    else:
+                        age_note = f" Last attempted {age_seconds / 60:.0f}min ago -- an active, ongoing pattern."
                 return ComponentHealth(
                     "scheduler", ComponentStatus.DEGRADED,
-                    f"Slot {slot_name!r} has failed its last {streak} consecutive run(s) with no success since{reason}.",
+                    f"Slot {slot_name!r} has failed its last {streak} consecutive run(s) with no success since{reason}.{age_note}",
                 )
     finally:
         store.close()
@@ -285,6 +315,7 @@ def collect_system_health(
     db_paths: dict[str, Path] | None = None,
     probe_dir: Path | None = None,
     check_ollama: bool = True,
+    now: datetime | None = None,
 ) -> SystemHealth:
     """The one function both `main.py health` and the dashboard's
     `/health` route call. `db_paths` keys are the names in
@@ -307,7 +338,12 @@ def collect_system_health(
     equivalent dependency exists in this project; disk-space and
     database-integrity are the two resource-safety checks judged
     worth a real dependency addition, memory was not -- this is an
-    an honest, disclosed omission, not a silent gap)."""
+    an honest, disclosed omission, not a silent gap).
+
+    `now`: only affects the scheduler component's stale-vs-active failure
+    -streak wording (see `_STALE_SCHEDULER_STREAK_SECONDS`) -- defaults
+    to real `datetime.now(timezone.utc)`; a caller passes a fixed value
+    only for deterministic testing."""
     db_paths = db_paths or {}
     probe_dir = probe_dir or Path.cwd()
 
@@ -317,7 +353,7 @@ def collect_system_health(
         _check_disk(probe_dir),
         _check_dhan_credentials(),
         _check_kill_switch(db_paths),
-        _check_scheduler(db_paths),
+        _check_scheduler(db_paths, now=now),
         _check_risk_config(),
     ]
     if check_ollama:
