@@ -1471,6 +1471,68 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
             ),
         ),
         HypothesisRecord(
+            hypothesis_id="H_CONTEXT_MARKET_006",
+            description=(
+                "Does a pre-specified, economically-motivated market-regime variable -- NIFTY's own realized-"
+                "volatility regime (HIGH/NORMAL/LOW) -- explain H_CONTEXT_MARKET_005's own newly-found era sign "
+                "reversal (decisively negative 2016-2022, decisively positive 2022-2026), or is the market-"
+                "divergence effect simply nonstationary regardless of volatility conditioning?"
+            ),
+            rationale=(
+                "Edge-feasibility audit mission (2026-09-21), Phase B: H_CONTEXT_MARKET_005 already established "
+                "F_CONTEXT's era instability as a real, disqualifying finding (audit/edge_feasibility/"
+                "PHASE10_FAMILY_RANKING.md). Per the user's own explicit instruction, the next question is "
+                "whether a SMALL, PRE-DECLARED regime variable (chosen before looking at any result) explains "
+                "the instability, rather than simply re-running the same unconditioned test on more data."
+            ),
+            expected_effect="If genuine, the effect should be consistently positive (or consistently negative) within one volatility bucket across all three splits, and materially different in another bucket -- not merely reproduce the same unexplained instability inside every bucket.",
+            dataset_restrictions="Same ORIGINAL_32_NSE_UNIVERSE, same 10-year window/splits as H_CONTEXT_MARKET_005 -- no universe or horizon change.",
+            experiment_design=(
+                "docs/research/H_CONTEXT_MARKET_006_VOLATILITY_REGIME_PREREGISTRATION.md, frozen before any "
+                "result was computed. Reuses quant_research/context_experiments.py's own already-committed, "
+                "already-tested build_benchmark_volatility_series('^NSEI') (backtesting.regime."
+                "classify_volatility_at applied causally to NIFTY's own series, unmodified default thresholds) "
+                "to bucket H_CONTEXT_MARKET_002's own frozen condition (unchanged) into HIGH_VOLATILITY/"
+                "NORMAL_VOLATILITY/LOW_VOLATILITY at each observation's own bar. Only ONE regime variable tested "
+                "(India VIX regime was named and explicitly deferred, not tested, per the preregistration's own "
+                "small-set constraint). CIs reported both uncorrected and at a family_size=3 Bonferroni "
+                "correction."
+            ),
+            success_criteria="A consistent-direction h10 effect within one bucket across all three splits (at least validation and out-of-sample CI-decisive in that direction), with a materially different pattern in another bucket.",
+            failure_criteria="The dominant, best-powered bucket reproduces the same unexplained cross-split sign instability as the unconditioned control.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REAL MEASUREMENT (32/32 symbols, 10y, ORIGINAL_32_NSE_UNIVERSE, frozen H_CONTEXT_MARKET_002 "
+                "condition unchanged; h10 primary). CROSS-CHECK: the unconditioned control reproduces "
+                "H_CONTEXT_MARKET_005's own cited numbers EXACTLY (development n=1068 -0.475%/-0.904%; "
+                "validation n=537 +0.794%/+1.496%; out-of-sample n=760 +0.531%/+0.946%) -- confirms zero silent "
+                "deviation from the frozen condition/universe/splits. "
+                "PRIMARY (h10, by NIFTY volatility bucket): LOW_VOLATILITY is n=0 in ALL THREE splits -- NIFTY "
+                "TRENDING_DOWN and NIFTY LOW_VOLATILITY are close to structurally mutually exclusive (falling "
+                "markets are rarely calm), so this joint condition cannot be tested with this regime variable at "
+                "all -- a disclosed structural limitation, not a data gap. NORMAL_VOLATILITY -- the dominant, "
+                "best-powered bucket in every split (966/537/645 of the 1068/537/760 total, i.e. it IS "
+                "essentially the control population) -- reproduces the control's own exact era-instability "
+                "pattern UNCHANGED: development -0.743% (CI-decisive negative), validation +1.496% (CI-decisive "
+                "positive, identical to control), out-of-sample +1.134% (CI-decisive positive, same "
+                "sign/magnitude as control). HIGH_VOLATILITY -- where powered (development n=63, out-of-sample "
+                "n=115; validation n=0) -- points AWAY from a stabilizing explanation: development is CI-"
+                "decisively MORE NEGATIVE than control (-3.895% vs. -0.743%), and out-of-sample is flat/NOT "
+                "decisive (-0.107%, CI includes zero) rather than reproducing the control's own decisive "
+                "positive out-of-sample result. Every CI-decisive cell remains CI-decisive under an additional "
+                "family_size=3 Bonferroni correction -- the finding does not depend on correction stringency. "
+                "VERDICT: NIFTY's own realized-volatility regime does NOT explain F_CONTEXT's era sign reversal "
+                "-- the dominant bucket simply reproduces the same unexplained instability H_CONTEXT_MARKET_005 "
+                "already found in the unconditioned data, and the one bucket with a clean signal points the "
+                "wrong direction. This explanatory hypothesis is REJECTED; H_CONTEXT_MARKET_002/004/005's own "
+                "historical verdicts are unchanged -- this entry answers a narrower, new question. India VIX "
+                "regime (already-existing, already-tested infrastructure) remains a disclosed, NOT-tested, "
+                "separately-preregisterable alternative for a future, human-resourced follow-up -- not pursued "
+                "in this entry per its own explicit no-pivot-after-seeing-results constraint. Full writeup: "
+                "audit/edge_feasibility/H_CONTEXT_MARKET_006_RESULTS.md."
+            ),
+        ),
+        HypothesisRecord(
             hypothesis_id="H_SECTOR_ROTATION_001",
             description=(
                 "Does a stock's own sector's CROSS-SECTIONAL momentum RANK among all 9 real NIFTY sector "

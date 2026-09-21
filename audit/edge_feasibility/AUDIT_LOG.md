@@ -165,3 +165,104 @@ change). Full regression run before committing (see commit message for pass/fail
 Deliverables this session: `PHASE1_PHASE2_REPORT.md`, `PHASE3_INFRASTRUCTURE_AUDIT.md`,
 `PHASE4_EVIDENCE_RECONCILIATION.md`, `PHASE8_MULTIPLE_TESTING_AUDIT.md`,
 `PHASE10_FAMILY_RANKING.md`, `PHASE11_STOP_CONDITIONS.md`, `STATE.json` (updated).
+
+---
+
+## 2026-09-21 (continuing from 58dd8b8) — Phase A (point-in-time universe) and Phase B (F_CONTEXT regime) executed sequentially; Phase C terminal conclusion reached
+
+User instruction: resolve the two deferred research dependencies sequentially without intermediate
+approval, then produce a defensible terminal conclusion if neither survives. No new hypothesis (no
+"H57") to be manufactured merely to continue.
+
+Phase A1 (read directly, not assumed): confirmed H_MEANREV_010's own eligibility definition is
+single-stock-FUTURES availability specifically (Dhan's FUTSTK instrument type), a static
+current-snapshot applied uniformly across the whole 10-year backtest. Ban-list/zero-volume-contract
+treatment judged out of scope (the research trades the underlying equity, not the derivative
+contract itself).
+
+Phase A2: investigated NSE's own archive structure live. Found and directly verified (real HTTP
+status codes, not assumed) two distinct bhavcopy generations spanning the required window: a
+classic archive (archives.nseindia.com, confirmed 200 for 2016-01, 2019-01, 2022-06, 2024-01,
+2024-06; confirmed 404 for 2024-07 and later) and a UDiFF archive (nsearchives.nseindia.com,
+confirmed 200 for 2026-09; confirmed 404 for 2022-06). Downloaded one real file from each format
+(766KB and 1.1MB) via a plain scripted HTTPS GET and inspected the actual schema: classic uses an
+INSTRUMENT=="FUTSTK" column (198 underlyings in the 2022-06 sample); UDiFF uses FinInstrmTp==
+"STF" (210 underlyings in the 2026-09 sample) -- both directly analogous to Dhan's own FUTSTK
+definition, confirming the archive is usable for this exact research question. A real rate-limiting/
+bot-protection signal was encountered from NSE's own infrastructure after roughly a dozen rapid
+requests (subsequent same-session requests failed before even reaching the network) -- investigation
+stopped there rather than retried aggressively, consistent with "do not download years of files
+blindly."
+
+Phase A3: built quant_research/point_in_time_fno_universe.py (dated bhavcopy retrieval with
+format-aware fallback, FUTSTK/STF parsing, full provenance, never-fabricate guarantee) and
+tests/test_point_in_time_fno_universe.py (14 tests, all passing, using small real-row fixtures
+excerpted from the two downloaded files -- matching this project's own established fixture
+convention, not the full proprietary archive files, which were not committed).
+
+Phase A4: sampled-date completeness table produced (representative, not exhaustive, per the
+mission's own instruction). The materially more important finding: diffing the verified 2022-06
+FUTSTK set against today's Dhan-derived set found 68 lost-eligibility candidates and 78 gained
+candidates across just one 4-year gap. Directly tested (via this project's own market data provider)
+whether all 68 lost symbols are fetchable under their historical ticker: 54/68 (79.4%) fetch
+cleanly; 14/68 (20.6%) do NOT -- Yahoo Finance itself reports "possibly delisted" for the exact
+historical ticker, including large, currently very actively-traded names undergoing a corporate
+action (HDFC/HDFCBANK merger, MINDTREE+LTI/LTIMINDTREE merger, SRTRANSFIN/SHRIRAMFIN rename,
+MCDOWELL-N/UNITDSPR rename, IDFC demerger, PVR/PVRINOX merger, and TATAMOTORS itself following its
+2024 demerger).
+
+Phase A5 decision: Classification B (reconstructable with explicit gaps), and the gaps are
+MATERIAL, not immaterial -- reasoning: the whole point of a point-in-time correction is to determine
+how much of H_MEANREV_010's result depends on the survivorship-exposed EXPANDED_ONLY population
+(already quantified at 140.8% of net return from only 14.7% of trade count in Phase 4), and that is
+EXACTLY where corporate-action/rename noise concentrates. A naive "exclude unfetchable symbols"
+implementation would introduce a NEW, different, undisclosed selection bias (favoring corporately
+quiet stocks), not a genuine fix. Per the mission's own explicit branching for this outcome,
+Phase A7 (the point-in-time H_MEANREV replay) was NOT executed this session. Phases A8-A10
+consequently do not apply.
+
+Phase B1-B3: preregistered docs/research/H_CONTEXT_MARKET_006_VOLATILITY_REGIME_
+PREREGISTRATION.md BEFORE running anything. Selected ONE small, pre-justified regime variable --
+NIFTY's own realized-volatility regime, via already-existing, already-tested infrastructure
+(quant_research/context_experiments.py::build_benchmark_volatility_series, wrapping
+backtesting/regime.py::classify_volatility_at, unmodified defaults) -- economically motivated
+(mean-reversion/divergence effects are conventionally understood to behave differently across
+volatility regimes) and explicitly distinct from the base condition (trend direction) under test.
+India VIX regime was named as an available alternative and explicitly deferred, not tested, to keep
+the set small.
+
+Phase B4: executed audit/edge_feasibility/scripts/h_context_market_006_volatility_regime.py.
+The unconditioned control cross-checked EXACTLY against H_CONTEXT_MARKET_005's own already-recorded
+numbers (validity confirmed). Bucketed result: LOW_VOLATILITY structurally empty (n=0) in all three
+splits (NIFTY trending-down and NIFTY low-volatility are close to mutually exclusive); the dominant,
+best-powered NORMAL_VOLATILITY bucket (~90% of observations in every split) reproduces the control's
+own exact era-instability pattern unchanged (negative development, positive validation/out-of
+-sample); HIGH_VOLATILITY, where powered, points AWAY from a stabilizing explanation (more negative
+in development, flat/non-decisive out-of-sample).
+
+Phase B5: per the user's own "if OOS fails, close the hypothesis" instruction, this explanatory
+hypothesis is closed. Added to the registry as H_CONTEXT_MARKET_006, status REJECTED (the
+explanatory mechanism specifically -- H_CONTEXT_MARKET_002/004/005's own historical verdicts left
+unmodified, per the no-retroactive-rewrite rule). Registry now 57 entries: 34 REJECTED / 22
+INCONCLUSIVE / 1 SUPPORTED.
+
+Phase C: final classification produced in PHASE_C_FINAL_RESEARCH_DECISION.md: 3 -- NO
+DEMONSTRATED EDGE WITH CURRENT DATA. Both leading candidates fail for independent, non-overlapping
+reasons (F_MEANREV: portfolio-construction collapse plus a now-confirmed-material universe
+-correction blocker; F_CONTEXT: era instability unexplained by the one regime variable tested). Not
+classified as data-insufficient -- substantial real data and rigorous infrastructure were used
+throughout. No new hypothesis manufactured to continue, per the mission's own explicit instruction.
+Two deferred follow-on tasks (a corporate-action-resolution layer; a VIX-regime follow-up) are named
+precisely and left for a human resource-allocation decision, not started automatically.
+
+Live fleet checked non-disruptively multiple times: unchanged, healthy, no action taken. Full
+regression run before committing (see commit message for pass/fail counts). Zero production
+strategy/RiskEngine/order-execution code modified.
+
+Deliverables this session: quant_research/point_in_time_fno_universe.py,
+tests/test_point_in_time_fno_universe.py,
+docs/research/H_CONTEXT_MARKET_006_VOLATILITY_REGIME_PREREGISTRATION.md,
+audit/edge_feasibility/scripts/h_context_market_006_volatility_regime.py,
+PHASE_A_POINT_IN_TIME_UNIVERSE.md, H_CONTEXT_MARKET_006_RESULTS.md,
+PHASE_B_CONTEXT_REGIME_INVESTIGATION.md, PHASE_C_FINAL_RESEARCH_DECISION.md,
+strategy/hypothesis_registry.py (H_CONTEXT_MARKET_006 added), STATE.json (updated).
