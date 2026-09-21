@@ -16,9 +16,13 @@ per spec §6 rather than left implicit):
   - close = price of the most recent tick in the bucket (updated on every
     tick, finalized when the bucket closes).
   - volume = sum of each tick's own volume field. Dhan's Ticker/PrevClose
-    packets carry no per-tick volume; only Quote/Full packets carry a
-    cumulative day Volume, not a per-trade quantity -- see the docstring
-    on `on_tick`'s `volume` parameter for how this is handled.
+    packets carry no per-tick volume at all; Quote/Full packets carry
+    `last_traded_quantity` (LTQ), the genuine per-trade incremental size
+    (2026-09-21: this is what DhanMarketDataSource now passes -- NOT the
+    same packets' own cumulative day Volume field, which would need a
+    per-symbol cumulative-to-incremental conversion this project does not
+    implement) -- see the docstring on `on_tick`'s `volume` parameter for
+    how this, and a redelivered-duplicate tick's volume, are handled.
   - Bucketing uses the tick's OWN exchange timestamp (Last Trade Time from
     the packet), never local receipt time -- avoiding skew from network
     jitter, per spec §7's received_at/source_timestamp distinction.
@@ -248,24 +252,36 @@ class CandleBuilder:
         cumulative-to-incremental conversion before calling here (see its
         own docstring) -- this class only ever sums whatever it's given.
 
-        KNOWN, DOCUMENTED LIMITATION (not fixed -- explicitly acknowledged,
-        per this project's own "do not fake dedup without a reliable
-        message identifier" rule): Dhan's Ticker/Quote/Full packets carry
-        no per-message sequence number or unique tick ID (verified against
-        the documented packet formats -- only security_id/LTP/LTT), so an
-        exact-duplicate tick redelivered after a reconnect (same price,
-        volume, and timestamp as one already processed) cannot be reliably
-        told apart from a second, genuinely distinct trade that happens to
-        share those same values -- it is NOT deduplicated, and would be
-        merged into the current bucket again. In this project's actual,
-        currently-used configuration this is harmless: Ticker-mode
-        subscription is what `DhanMarketDataSource` sends (see
-        `_send_subscribe`), and Ticker packets always pass `volume=0.0`
-        here, so a redelivered duplicate changes nothing (max/min/close are
-        idempotent for a repeated identical price, and 0.0 volume adds
-        0.0). It would only matter for a real per-tick-volume feed, which
-        this project does not have (the Quote/Full cumulative-to-incremental
-        conversion above is explicitly not implemented either)."""
+        2026-09-21 signal-funnel forensic audit fix: `DhanMarketDataSource`
+        now subscribes in Quote mode and passes a real per-tick volume
+        (last_traded_quantity) instead of the previous always-0.0 Ticker
+        mode -- see its own `_send_subscribe`/`_extract_tick` docstrings
+        for why (short version: Ticker-mode's permanent volume=0.0 made
+        strategy.baseline.TrendMomentumBaseline's volume_confirmed gate
+        structurally impossible to ever pass, the actual root cause of
+        zero live signals across every session to date). This made the
+        limitation below newly consequential -- KNOWN, DOCUMENTED
+        LIMITATION (still not perfectly solvable, per this project's own
+        "do not fake dedup without a reliable message identifier" rule):
+        Dhan's Ticker/Quote/Full packets carry no per-message sequence
+        number or unique tick ID (verified against the documented packet
+        formats -- only security_id/LTP/LTT/LTQ), so an exact-duplicate
+        tick redelivered after a reconnect cannot be reliably told apart
+        from a second, genuinely distinct trade that happens to share the
+        same timestamp and price. This method now applies a narrow,
+        documented heuristic rather than no protection at all: a tick
+        whose (timestamp, price) EXACTLY matches the most recently merged
+        tick in the CURRENT bucket has its volume skipped (not re-added) --
+        max/min/close are already idempotent for a repeated identical
+        price regardless, so this changes nothing about them. This
+        correctly protects against the realistic redelivery case (the
+        same trade retransmitted verbatim) while accepting a narrow,
+        rare false-negative: two genuinely DIFFERENT trades in the same
+        epoch-second at the exact same price would have the second one's
+        volume silently dropped too -- an explicit, conservative tradeoff
+        (erring toward under-counting over double-counting) consistent
+        with this project's existing "never risk manufacturing volume
+        that wasn't real" posture, not a guarantee of perfect accounting."""
         if self._last_known_timestamp is not None and self._max_timestamp_skew_seconds is not None:
             skew_seconds = abs((timestamp - self._last_known_timestamp).total_seconds())
             if skew_seconds > self._max_timestamp_skew_seconds:
@@ -447,16 +463,33 @@ class CandleBuilder:
             # only starts once a genuinely valid tick actually arrives.
             return completed
 
+        # Computed BEFORE _state is possibly (re)seeded below -- comparing
+        # against the PREVIOUS tick already merged into this same, still-
+        # open bucket. See on_tick's own docstring for why this exists and
+        # its documented, deliberate limitation.
+        is_likely_redelivered_duplicate = (
+            self._state is not None
+            and timestamp == self._state.last_source_timestamp
+            and price == self._state.close
+        )
+
         if self._state is None:
             self._state = _BucketState(
                 bucket_start=bucket_start, open=price, high=price, low=price, close=price,
                 volume=0.0, last_received_at=received_at, last_source_timestamp=timestamp,
             )
 
+        if is_likely_redelivered_duplicate and volume > 0:
+            logger.info(
+                "CandleBuilder(%s, %s): tick (timestamp=%s, price=%s) exactly repeats the most recently "
+                "merged tick in this bucket -- treating as a likely redelivery and not re-adding its "
+                "volume=%s a second time.", self.symbol, self.interval, timestamp, price, volume,
+            )
+
         self._state.high = max(self._state.high, price)
         self._state.low = min(self._state.low, price)
         self._state.close = price
-        self._state.volume += volume
+        self._state.volume += (0.0 if is_likely_redelivered_duplicate else volume)
         self._last_known_price = price
         self._last_known_timestamp = timestamp
         self._state.last_received_at = received_at

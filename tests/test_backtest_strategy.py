@@ -46,6 +46,25 @@ def test_conflicting_indicators_trend_up_momentum_down():
     assert strategy.generate_signal(series, len(series) - 1, "TEST") is None
 
 
+def test_momentum_requires_both_rsi_and_macd_not_either_one_alone():
+    """2026-09-21 signal-funnel forensic audit, Section 10 test-quality
+    finding: `momentum_confirmed = rsi_14 > 50 and macd > macd_signal` --
+    mutating that `and` to `or` survived every OTHER existing test in this
+    file (test_conflicting_indicators_trend_up_momentum_down happens to
+    fail BOTH sub-conditions at once, so it can't tell `and` from `or`
+    apart). These two fixtures each isolate exactly one sub-condition
+    passing while the other fails -- proving the real implementation
+    (AND) correctly still blocks the signal either way, which an `or`
+    mutation would not."""
+    strategy = TrendMomentumBaseline()
+
+    rsi_only = _series_with_last(rsi_14=55.0, macd=0.5, macd_signal=1.0)  # RSI>50 true, MACD>signal false
+    assert strategy.generate_signal(rsi_only, len(rsi_only) - 1, "TEST") is None
+
+    macd_only = _series_with_last(rsi_14=40.0, macd=1.0, macd_signal=0.5)  # RSI>50 false, MACD>signal true
+    assert strategy.generate_signal(macd_only, len(macd_only) - 1, "TEST") is None
+
+
 def test_volume_not_supportive_blocks_signal_even_if_trend_and_momentum_agree():
     series = _series_with_last(volume_trend="neutral")
     strategy = TrendMomentumBaseline()

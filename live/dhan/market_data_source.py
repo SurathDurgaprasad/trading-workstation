@@ -530,10 +530,29 @@ class DhanMarketDataSource:
             self._send_subscribe(instruments, generation=generation)
 
     def _send_subscribe(self, instruments: list[tuple[str, str]], *, generation: int | None = None) -> None:
-        # Ticker mode only -- LTP+LTT is all this project's candle building
-        # needs (see CandleBuilder/_extract_tick's own docstrings on why
-        # Quote/Full's cumulative volume isn't used).
-        request_code = DhanFeedRequestCode.SUBSCRIBE_TICKER
+        # 2026-09-21 signal-funnel forensic audit, real finding: Ticker mode
+        # (LTP+LTT only, no volume field at all) was this project's ENTIRE
+        # live subscription for its whole history -- meaning every live bar's
+        # volume was unconditionally 0.0 (see CandleBuilder.on_tick's own
+        # docstring, previously "Ticker-mode subscription is what this
+        # project actually uses"). strategy.baseline.TrendMomentumBaseline's
+        # volume_confirmed = (volume_trend == "increasing") is a HARD,
+        # unconditional AND-gated requirement -- with volume permanently
+        # 0.0, market.indicators._volume_trend's own average_volume==0 guard
+        # makes volume_trend permanently and structurally "neutral", NEVER
+        # "increasing", for the entire life of every live session. Proven
+        # quantitatively: an offline replay of this EXACT unmodified
+        # strategy against real 7-day 1-minute Yahoo data for these same 15
+        # symbols (where real volume IS present) produced 2,032 real
+        # candidates (~7.4% of bars) -- the strategy itself was never the
+        # bottleneck; the live volume feed was. Quote mode adds
+        # last_traded_quantity (LTQ) -- the genuine per-trade incremental
+        # size, not a cumulative figure needing conversion (see
+        # _extract_tick below) -- while keeping the exact same LTP/LTT this
+        # project already relies on. See CandleBuilder.on_tick's own updated
+        # docstring for the accompanying duplicate-redelivery volume guard
+        # this change required.
+        request_code = DhanFeedRequestCode.SUBSCRIBE_QUOTE
         for start in range(0, len(instruments), MAX_INSTRUMENTS_PER_SUBSCRIBE_MESSAGE):
             chunk = instruments[start : start + MAX_INSTRUMENTS_PER_SUBSCRIBE_MESSAGE]
             try:
@@ -753,16 +772,22 @@ class DhanMarketDataSource:
         """Ticker packets carry no volume at all (VERIFIED -- LTP/LTT
         only); this project passes volume=0.0 for those rather than
         inventing a number (see CandleBuilder.on_tick's own docstring).
-        Quote/Full packets carry a cumulative day Volume; this method does
-        NOT attempt a cumulative-to-incremental conversion (a real
-        implementation would need to track the previous cumulative value
-        per symbol) -- Ticker-mode subscription is what this project
-        actually uses (see _send_subscribe), so this path is exercised
-        for completeness but not relied upon."""
+
+        2026-09-21 signal-funnel forensic audit fix: Quote/Full packets
+        carry BOTH a cumulative day Volume (`packet.volume`, deliberately
+        NOT used here -- would need a per-symbol previous-cumulative-value
+        conversion this project does not implement) AND `last_traded_quantity`
+        (LTQ) -- Dhan's own per-TRADE incremental size, exactly the
+        "whatever incremental quantity this specific tick represents"
+        CandleBuilder.on_tick's own `volume` parameter already documents
+        needing. Using LTQ needs no cumulative-tracking state at all.
+        Real subscription is Quote mode now (see _send_subscribe); this
+        function itself is unchanged for Ticker/Full so a future
+        Full-mode subscription would behave identically."""
         if isinstance(packet, DhanTickerPacket):
             return packet.last_traded_price, 0.0, packet.last_trade_time_epoch
         if isinstance(packet, (DhanQuotePacket, DhanFullPacket)):
-            return packet.last_traded_price, 0.0, packet.last_trade_time_epoch
+            return packet.last_traded_price, float(packet.last_traded_quantity), packet.last_trade_time_epoch
         return None, 0.0, 0
 
     @staticmethod

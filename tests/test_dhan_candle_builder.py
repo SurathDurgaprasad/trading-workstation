@@ -786,24 +786,73 @@ def test_missing_minute_buckets_are_skipped_not_fabricated():
     assert partial.open == partial.high == partial.low == partial.close == 105.0
 
 
-def test_duplicate_timestamp_and_price_tick_is_merged_not_deduplicated_as_documented():
-    """Enforces, as a real assertion, the exact-duplicate-tick limitation
-    already documented in on_tick's own docstring: Dhan's packets carry no
-    per-message sequence number, so an exact duplicate (same price, volume,
-    timestamp) cannot be told apart from a second genuinely distinct trade
-    that happens to share those values -- it is NOT deduplicated, and
-    merges into the bucket again. This project's actual configuration
-    (Ticker-mode, always volume=0.0) makes this harmless in practice; this
-    test uses a nonzero volume specifically to make the non-dedup visible
-    and keep it an enforced property, not just a comment."""
+def test_an_exact_duplicate_timestamp_and_price_tick_does_not_double_count_volume():
+    """2026-09-21 signal-funnel forensic audit fix: superseded the OLD
+    "documented, not a bug" non-dedup behavior -- now that
+    DhanMarketDataSource passes a real per-tick volume (Quote mode LTQ,
+    not Ticker mode's always-0.0), an exact-duplicate redelivery (e.g.
+    after a reconnect) merging its volume a second time would silently
+    inflate volume_trend, directly risking a false "increasing"
+    classification neither trend nor momentum data ever supported.
+    Price fields remain exactly as idempotent as before -- only the
+    duplicate's volume is skipped."""
     builder = CandleBuilder(symbol="RELIANCE", interval="1m")
     builder.on_tick(price=100.0, volume=10.0, timestamp=_ts(5), received_at=_ts(5))
     builder.on_tick(price=100.0, volume=10.0, timestamp=_ts(5), received_at=_ts(5))  # exact duplicate
     bar = builder.on_tick(price=101.0, volume=1.0, timestamp=_ts(61), received_at=_ts(61))
-    assert bar is not None
-    assert bar.volume == 20.0  # both copies counted -- documented, not a bug
+    assert bar is not None  # this is the COMPLETED first bucket -- the third tick starts a new one
+    assert bar.volume == 10.0  # the duplicate's 10.0 was NOT re-added (would be 20.0 without the fix)
     assert bar.open == 100.0
-    assert bar.close == 100.0  # idempotent for price -- the duplicate didn't change close, only volume
+    assert bar.close == 100.0  # unchanged -- price was already idempotent for a repeated price
+
+
+def test_two_genuinely_distinct_ticks_at_the_same_price_and_timestamp_second_still_only_count_once():
+    """The documented, accepted tradeoff of the fix above: two REAL,
+    distinct trades that happen to share the same epoch-second timestamp
+    and price cannot be told apart from a redelivered duplicate (Dhan's
+    packets carry no per-message sequence number) -- this is an explicit,
+    narrow false-negative this project accepts (erring toward under- not
+    over-counting), not a claim of perfect accounting. This test proves
+    the ACTUAL behavior so the tradeoff stays visible, not silently
+    assumed."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10.0, timestamp=_ts(5), received_at=_ts(5))
+    builder.on_tick(price=100.0, volume=7.0, timestamp=_ts(5), received_at=_ts(5))  # a second, real trade -- same second, same price
+    bar = builder.on_tick(price=101.0, volume=1.0, timestamp=_ts(61), received_at=_ts(61))
+    assert bar is not None  # this is the COMPLETED first bucket -- the third tick starts a new one
+    assert bar.volume == 10.0  # the second real trade's 7.0 was NOT counted -- documented tradeoff, not a bug
+
+
+def test_two_distinct_ticks_at_different_prices_in_the_same_bucket_both_count_their_volume():
+    """The ordinary, common case: two different prices within the same
+    bucket are never mistaken for a duplicate, regardless of volume."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10.0, timestamp=_ts(5), received_at=_ts(5))
+    builder.on_tick(price=100.5, volume=7.0, timestamp=_ts(6), received_at=_ts(6))
+    bar = builder.on_tick(price=101.0, volume=1.0, timestamp=_ts(61), received_at=_ts(61))
+    assert bar is not None
+    assert bar.volume == 17.0  # both real, distinct ticks fully counted
+
+
+def test_the_very_first_tick_of_a_new_bucket_is_never_mistaken_for_a_duplicate_of_the_prior_bucket():
+    """Regression guard for the exact off-by-one this fix could have
+    introduced: the duplicate check must compare against the PREVIOUS
+    tick already merged into the bucket, computed BEFORE a fresh
+    _BucketState is seeded -- not after, which would make every bucket's
+    own first tick spuriously look like it duplicates itself (freshly
+    seeded close/last_source_timestamp are, by construction, identical
+    to the incoming tick that just seeded them)."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10.0, timestamp=_ts(5), received_at=_ts(5))
+    # New bucket -- first tick's own price/timestamp trivially "equal" the
+    # freshly-seeded state's own close/last_source_timestamp, but this must
+    # NOT be treated as a duplicate of the OLD bucket's last tick.
+    bar = builder.on_tick(price=100.0, volume=5.0, timestamp=_ts(65), received_at=_ts(65))
+    assert bar is not None  # the first bucket completed
+    assert bar.volume == 10.0
+    partial = builder.flush()
+    assert partial is not None
+    assert partial.volume == 5.0  # the new bucket's first tick's volume was NOT dropped
 
 
 def test_a_delayed_first_tick_with_a_valid_exchange_timestamp_still_works_normally():

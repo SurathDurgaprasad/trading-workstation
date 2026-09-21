@@ -102,6 +102,22 @@ def _ticker_packet(security_id: int, price: float, epoch: int) -> bytes:
     return header + body
 
 
+def _quote_packet(security_id: int, price: float, epoch: int, *, last_traded_quantity: int = 0, cumulative_volume: int = 0) -> bytes:
+    """2026-09-21 signal-funnel forensic audit fix: a real Quote packet --
+    the production subscription mode as of this fix (see _send_subscribe).
+    `cumulative_volume` is the packet's own cumulative-day Volume field,
+    deliberately NOT what this project reads for a bar's volume (see
+    DhanMarketDataSource._extract_tick's own docstring) -- included here
+    with an independent, differing value so a test using this helper can
+    prove last_traded_quantity (not cumulative_volume) is what actually
+    flows into a bar."""
+    header = struct.pack("<BhBi", 4, 22, 1, security_id)  # response_code=4 (Quote), segment=1 (NSE_EQ)
+    body = struct.pack(
+        "<fhifiiiffff", price, last_traded_quantity, epoch, price, cumulative_volume, 0, 0, price, price, price, price,
+    )
+    return header + body
+
+
 def _disconnect_packet(reason_code: int) -> bytes:
     header = struct.pack("<BhBi", 50, 10, 0, 0)
     body = struct.pack("<h", reason_code)
@@ -151,6 +167,24 @@ def test_subscribe_connects_and_sends_a_subscribe_message(instrument_map, creden
     assert len(factory.current.sent_messages) == 1
     message = factory.current.sent_messages[0]
     assert message["InstrumentList"] == [{"ExchangeSegment": "NSE_EQ", "SecurityId": "2885"}]
+
+
+def test_subscribe_uses_quote_mode_not_ticker_mode(instrument_map, credentials):
+    """2026-09-21 signal-funnel forensic audit, real root cause: Ticker
+    mode (RequestCode 15) carries no volume field at all, which made
+    strategy.baseline.TrendMomentumBaseline's volume_confirmed gate
+    structurally impossible to ever pass in live production -- the
+    actual reason for zero signals across every live session to date.
+    Quote mode (RequestCode 17) adds last_traded_quantity, a real
+    per-trade volume, while keeping the same LTP/LTT this project
+    already relies on. A regression back to Ticker mode here would
+    silently reintroduce the exact defect this fix closes."""
+    from live.dhan.wire import DhanFeedRequestCode
+
+    source, factory = _source(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    message = factory.current.sent_messages[0]
+    assert message["RequestCode"] == int(DhanFeedRequestCode.SUBSCRIBE_QUOTE)
 
 
 def test_subscribe_url_carries_credentials_as_query_params(instrument_map, credentials):
@@ -218,6 +252,46 @@ def test_a_tick_that_completes_a_bar_is_delivered_via_next_bar(instrument_map, c
     assert event.bar.open == pytest.approx(1428.5)
     assert event.bar.source == DataSource.DHAN
     assert event.bar.status == DataStatus.LIVE
+
+
+def test_extract_tick_uses_last_traded_quantity_not_cumulative_volume_for_a_quote_packet():
+    from live.dhan.wire import parse_packet
+
+    packet = parse_packet(_quote_packet(2885, 1428.5, epoch=60, last_traded_quantity=25, cumulative_volume=999_999))
+    price, volume, epoch = DhanMarketDataSource._extract_tick(packet)  # noqa: SLF001 -- direct unit test of the static method
+    assert price == pytest.approx(1428.5)
+    assert volume == pytest.approx(25.0)
+    assert epoch == 60
+
+
+def test_extract_tick_still_returns_zero_volume_for_a_ticker_packet():
+    """Ticker packets genuinely have no volume field -- must keep passing
+    volume=0.0 honestly, never inventing a number."""
+    from live.dhan.wire import parse_packet
+
+    packet = parse_packet(_ticker_packet(2885, 1428.5, epoch=60))
+    price, volume, epoch = DhanMarketDataSource._extract_tick(packet)  # noqa: SLF001
+    assert price == pytest.approx(1428.5)
+    assert volume == 0.0
+    assert epoch == 60
+
+
+def test_a_real_quote_packet_produces_a_bar_with_real_nonzero_volume_from_ltq_not_cumulative_volume(instrument_map, credentials):
+    """2026-09-21 signal-funnel forensic audit fix, the core end-to-end
+    proof: a real Quote packet's last_traded_quantity (LTQ) -- not its
+    own cumulative-day Volume field, deliberately different here to make
+    sure the right one is used -- is what actually reaches the completed
+    bar's volume, through the full wire -> CandleBuilder -> OHLCVBar
+    path. Before this fix, every live bar's volume was unconditionally
+    0.0 regardless of what any packet carried."""
+    source, factory = _source_with_synthetic_clock(instrument_map, credentials)
+    source.subscribe(["RELIANCE.NS"], "1m")
+    factory.current.simulate_message(_quote_packet(2885, 1428.5, epoch=60, last_traded_quantity=25, cumulative_volume=999_999))
+    factory.current.simulate_message(_quote_packet(2885, 1430.0, epoch=121, last_traded_quantity=10, cumulative_volume=1_000_000))  # crosses into the next 1m bucket
+
+    event = source.next_bar()
+    assert event is not None
+    assert event.bar.volume == pytest.approx(25.0)  # LTQ of the one tick in this bucket -- NOT 999_999 (cumulative_volume)
 
 
 def test_next_bar_returns_no_new_bar_sentinel_on_timeout(instrument_map, credentials):
