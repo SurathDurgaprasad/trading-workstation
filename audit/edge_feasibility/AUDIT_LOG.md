@@ -266,3 +266,103 @@ audit/edge_feasibility/scripts/h_context_market_006_volatility_regime.py,
 PHASE_A_POINT_IN_TIME_UNIVERSE.md, H_CONTEXT_MARKET_006_RESULTS.md,
 PHASE_B_CONTEXT_REGIME_INVESTIGATION.md, PHASE_C_FINAL_RESEARCH_DECISION.md,
 strategy/hypothesis_registry.py (H_CONTEXT_MARKET_006 added), STATE.json (updated).
+
+---
+
+## 2026-09-21 (continuing from a62f58b) — Capital-allocation decision: Path 1 and Path 2 executed, both closed, research tree stopped
+
+User made an explicit capital-allocation decision: pursue exactly two remaining paths, sequentially,
+no intermediate approval, no new hypotheses created merely to continue, stop the tree if both fail.
+
+Path 1 Step 1 (corporate-action/security-identity layer): quant_research/security_identity_map.py
+built (14 tests). Each of the 14 symbols Phase A's own 2022-vs-2026 diff had flagged as unfetchable
+was individually investigated via a real web search (not training-data memory alone) to determine
+the ACTUAL legal structure of its corporate action -- specifically, which of two merging entities
+legally survived (own history safely continuable) versus was absorbed (not safely continuable, since
+splicing two economically distinct companies' returns would be a new, self-inflicted data-integrity
+error). Result: 8 verified recoverable (SRTRANSFIN->SHRIRAMFIN, MCDOWELL-N->UNITDSPR, PVR->PVRINOX,
+TATAMOTORS[pre-2025]->TMPV, AMARAJABAT->ARE&M, GMRINFRA->GMRAIRPORT, IBULHSGFIN->SAMMAANCAP,
+L&TFH->LTF), 3 confirmed genuinely non-recoverable (HDFC, MINDTREE, IDFC), 3 left unresolved (LTI,
+GUJGASLTD, PEL). This investigation also CORRECTED an earlier, unverified Phase A assumption: IDFC
+Ltd was found to be the ABSORBED party in its 2024 merger with IDFC FIRST Bank (a pre-existing,
+separately-listed entity), not a safely-recoverable pair as Phase A had guessed without verification.
+A practical caveat surfaced during the later replay: AMARAJABAT's own correctly-identified successor
+(ARE&M.NS) is blocked by a pre-existing, orthogonal CachedMarketDataProvider safety guard that
+refuses any ticker containing characters outside [A-Z0-9^._-] -- the same "&"-character class
+H_XSECT_006 already documented for GVT&D.NS/M&M.NS. Disclosed, not fixed (out of scope).
+
+Path 1 Step 2: build_point_in_time_snapshots.py retrieved 11 real, dated NSE F&O bhavcopy snapshots
+(annual anchors 2016-2025 plus 2026-09-18) via the already-built quant_research/
+point_in_time_fno_universe.py, paced 3 seconds apart -- zero rate-limiting encountered this time (a
+deliberate, respectful pacing choice after Phase A's own earlier rate-limit observation). 350
+distinct canonical symbols were ever F&O-eligible across the window (vs. ~208 today), confirming
+genuine historical churn, not a data artifact (142 symbols alone in the 2020 snapshot, consistent
+with COVID-era eligibility tightening). h_meanrev_010_point_in_time_replay.py reused H_MEANREV_010's
+own frozen entry/exit/sizing/cost logic byte-for-byte (verified line-by-line against the original
+committed loop), adding only a point-in-time eligibility gate. Result: development FLIPS from the
+original's own STATISTICALLY_MEANINGLESS to a CI-decisive NEGATIVE (-0.888%) -- a genuinely new,
+economically coherent finding: formerly F&O-eligible but later-defaulted companies (DHFL, JP
+Associates, Reliance Capital, several PSU banks resolved via NCLT/merger) are now correctly included
+for the first time, and "buying the dip" on a company that was oversold because it was defaulting,
+not overreacting, is exactly the failure mode a genuine survivorship correction should surface.
+Validation (+1.238%) and out-of-sample (+0.816%) both REMAIN CI-decisive positive, weaker than the
+original but still decisive. Per the frozen decision rule (validation AND out-of-sample must both
+remain CI-decisive): this step SURVIVES.
+
+Path 1 Step 3 (only reached because Step 2 survived): h_meanrev_010_point_in_time_portfolio_realism.py
+reused H_MEANREV_011's own frozen 4-position/₹25,000-per-slot/₹100,000-total scheduler completely
+unmodified, only pre-filtering the candidate event list by the same point-in-time eligibility gate.
+Result: ALL THREE splits STATISTICALLY_MEANINGLESS -- no split reaches CI-decisive significance in
+either direction, confirming with an independently-corrected universe exactly what the original
+H_MEANREV_011 already found. FAILS.
+
+Path 1 decision: mean reversion CLOSED for this research cycle -- a stronger, better-evidenced
+closure than before, since it no longer depends on an unresolved universe-membership question; that
+question has now been directly, empirically answered, and the answer does not change the outcome.
+Added to the registry as H_MEANREV_014, REJECTED (H_MEANREV_009-012's own historical verdicts
+unmodified). Full writeup: PATH1_MEAN_REVERSION_POINT_IN_TIME_CLOSURE.md.
+
+Path 2: docs/research/H_CONTEXT_MARKET_007_VIX_REGIME_PREREGISTRATION.md frozen before any result
+was computed -- explicitly framed, per the user's own instruction, as the SECOND AND FINAL
+pre-declared regime candidate (India VIX, the one alternative reserved in H_CONTEXT_MARKET_006's own
+preregistration), not an open-ended search. h_context_market_007_vix_regime.py bucketed
+H_CONTEXT_MARKET_002's own frozen condition by India VIX regime (build_india_vix_regime_series,
+already-existing, already-tested infrastructure, zero new regime-computation code). Cross-check
+reproduced H_CONTEXT_MARKET_005/006's own cited numbers exactly. Result: the dominant NORMAL bucket
+(~90-100% of the population in every split) reproduces the exact same unexplained era-instability
+found before. The ELEVATED bucket showed a genuinely interesting, directionally CONSISTENT negative
+pattern in the two splits where it was measurable (development, out-of-sample) -- disclosed
+honestly as a real, intriguing finding -- but validation was entirely unmeasurable for that bucket
+(n=0), so it does not satisfy the pre-registered decision rule's explicit "validation AND
+out-of-sample CI-decisive" confirmability requirement. FAILS.
+
+Path 2 decision: F_CONTEXT CLOSED. Per the user's own explicit "not: try different regimes until
+something works" instruction, no third regime variable is sought. Added to the registry as
+H_CONTEXT_MARKET_007, REJECTED (H_CONTEXT_MARKET_002/004/005/006's own historical verdicts
+unmodified). Full writeup: H_CONTEXT_MARKET_007_RESULTS.md.
+
+Final decision: CAPITAL_ALLOCATION_DECISION_FINAL.md -- both paths the user identified as worth
+serious effort have now reached a defensible, decisive, negative conclusion, each independently
+verified rather than assumed. Per the user's own explicit "if BOTH fail -> STOP THIS RESEARCH TREE"
+instruction, no H_MEANREV_015 or H_CONTEXT_MARKET_008 was created. The registry now stands at 59
+entries: 36 REJECTED / 22 INCONCLUSIVE / 1 SUPPORTED. A genuinely different research program (a
+materially different information source, not a variant of this one) is named as the only remaining
+path forward, explicitly left as the user's own future decision.
+
+Live fleet checked non-disruptively multiple times: unchanged, healthy, no action taken. Full
+regression run before committing (see commit message for pass/fail counts). Zero production
+strategy/RiskEngine/order-execution code modified throughout. Real order execution remains disabled.
+
+Deliverables this session: quant_research/security_identity_map.py,
+tests/test_security_identity_map.py,
+audit/edge_feasibility/scripts/build_point_in_time_snapshots.py,
+audit/edge_feasibility/scripts/h_meanrev_010_point_in_time_replay.py,
+audit/edge_feasibility/scripts/h_meanrev_010_point_in_time_portfolio_realism.py,
+docs/research/H_MEANREV_010_POINT_IN_TIME_REPLAY_PREREGISTRATION.md,
+PATH1_MEAN_REVERSION_POINT_IN_TIME_CLOSURE.md,
+docs/research/H_CONTEXT_MARKET_007_VIX_REGIME_PREREGISTRATION.md,
+audit/edge_feasibility/scripts/h_context_market_007_vix_regime.py,
+H_CONTEXT_MARKET_007_RESULTS.md, CAPITAL_ALLOCATION_DECISION_FINAL.md,
+POINT_IN_TIME_SNAPSHOTS.csv, H_MEANREV_010_POINT_IN_TIME_TRADES.csv,
+H_MEANREV_010_POINT_IN_TIME_PORTFOLIO_TRADES.csv,
+strategy/hypothesis_registry.py (H_MEANREV_014, H_CONTEXT_MARKET_007 added), STATE.json (updated).

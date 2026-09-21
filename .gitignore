@@ -29,6 +29,15 @@ runtime/
 # not in a committed binary SQLite file.
 evidence_run/
 
+# Raw downloaded NSE F&O bhavcopy archives (build_point_in_time_snapshots.py's
+# own local cache) -- regeneratable from the real, cited NSE archive URLs
+# (see quant_research/point_in_time_fno_universe.py), NSE's own bulk
+# -retrieval terms of use are unverified, and this project has never
+# committed raw third-party market-data archives (data/market/, data/dhan/
+# above follow the same rule). The derived, committed artifact is
+# POINT_IN_TIME_SNAPSHOTS.csv, not these raw zips.
+audit/edge_feasibility/bhavcopy_cache/
+
 # Personal/reference documents not part of the published project
 documents/
 

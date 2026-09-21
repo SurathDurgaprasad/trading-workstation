@@ -1533,6 +1533,64 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
             ),
         ),
         HypothesisRecord(
+            hypothesis_id="H_CONTEXT_MARKET_007",
+            description=(
+                "Does India VIX regime (an implied-volatility, forward-looking fear-gauge proxy) explain "
+                "H_CONTEXT_MARKET_005's own era sign reversal, given that NIFTY's own REALIZED-volatility regime "
+                "already failed to (H_CONTEXT_MARKET_006, REJECTED)? The second and, per the user's own explicit "
+                "instruction, FINAL pre-declared regime candidate in this investigation line."
+            ),
+            rationale=(
+                "User's own capital-allocation-decision mission (2026-09-21), Path 2, executed only after Path 1 "
+                "(H_MEANREV_014) reached its own terminal closure. Explicitly framed by the user as 'not: try "
+                "different regimes until something works' -- India VIX was the ONE alternative named and "
+                "reserved in H_CONTEXT_MARKET_006's own preregistration, tested once, with the answer accepted "
+                "either way."
+            ),
+            expected_effect="If genuine, one VIX bucket should show a consistent-direction h10 effect across all three splits (at least validation and out-of-sample CI-decisive), materially different from another bucket -- not merely reproduce the unconditioned control's own instability.",
+            dataset_restrictions="Same ORIGINAL_32_NSE_UNIVERSE, same 10-year window/splits as H_CONTEXT_MARKET_002/005/006 -- no universe or horizon change.",
+            experiment_design=(
+                "docs/research/H_CONTEXT_MARKET_007_VIX_REGIME_PREREGISTRATION.md, frozen before any result was "
+                "computed. Reuses quant_research/context_experiments.py's own already-committed, already-tested "
+                "build_india_vix_regime_series() (the same thresholds market_intelligence.regime."
+                "compute_india_vix_context's own live classifier uses, made causal-historical) to bucket "
+                "H_CONTEXT_MARKET_002's own frozen condition (unchanged) into ELEVATED/NORMAL/DEPRESSED at each "
+                "observation's own bar. CIs reported at uncorrected, family_size=2 (this investigation line's "
+                "own two regime-variable tests), and family_size=17 (registry-wide) levels."
+            ),
+            success_criteria="A consistent-direction h10 effect within one bucket, CI-decisive in at least validation AND out-of-sample, with a materially different pattern in another bucket.",
+            failure_criteria="The dominant, best-powered bucket reproduces the same unexplained cross-split sign instability as the unconditioned control, and no bucket satisfies the validation+out-of-sample decisiveness requirement.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "REAL MEASUREMENT (32/32 symbols, 10y, ORIGINAL_32_NSE_UNIVERSE, frozen H_CONTEXT_MARKET_002 "
+                "condition unchanged; h10 primary). CROSS-CHECK: unconditioned control reproduces "
+                "H_CONTEXT_MARKET_005/006's own cited numbers EXACTLY. "
+                "PRIMARY (h10, by India VIX bucket): DEPRESSED is structurally near-empty in every split (n=19/"
+                "0/18) -- India VIX rarely sits meaningfully below its own trailing average while NIFTY "
+                "simultaneously trends down, a disclosed structural co-occurrence limitation, not a data gap. "
+                "NORMAL -- the dominant, best-powered bucket in every split (951/537/695, ~89-100% of the "
+                "population) -- reproduces the control's own exact era-instability pattern UNCHANGED: "
+                "development -0.705% (CI-decisive negative), validation +1.496% (CI-decisive positive, "
+                "identical to control), out-of-sample +1.284% (CI-decisive positive, same sign/magnitude as "
+                "control). ELEVATED -- where powered (development n=59, out-of-sample n=47; validation n=0) -- "
+                "shows a genuinely NEW, directionally CONSISTENT pattern unlike H_CONTEXT_MARKET_006's own "
+                "HIGH_VOLATILITY bucket: CI-decisively NEGATIVE in BOTH measurable splits (development -4.273%, "
+                "out-of-sample -2.893%, the latter the OPPOSITE sign of the control's own positive out-of-sample "
+                "result). This is disclosed as a real, intriguing, unresolved secondary observation -- but "
+                "validation is entirely unmeasurable for this bucket (n=0), so it does NOT satisfy the "
+                "pre-registered decision rule's explicit 'validation AND out-of-sample CI-decisive' requirement "
+                "for a confirmed explanatory effect; two out of three measurable splits agreeing is suggestive, "
+                "not confirmatory, under the frozen rule. Every CI-decisive cell remains CI-decisive under both "
+                "family_size=2 and family_size=17 corrections. "
+                "VERDICT: India VIX regime does NOT explain F_CONTEXT's era sign reversal, on the strength of "
+                "the dominant NORMAL bucket, which alone carries ~90-100% of the population and simply "
+                "reproduces the already-known instability. Per the user's own explicit instruction, this is the "
+                "second and FINAL pre-declared regime variable to fail -- F_CONTEXT is now CLOSED; no third "
+                "regime variable will be sought. H_CONTEXT_MARKET_002/004/005/006's own historical verdicts are "
+                "unmodified. Full writeup: audit/edge_feasibility/H_CONTEXT_MARKET_007_RESULTS.md."
+            ),
+        ),
+        HypothesisRecord(
             hypothesis_id="H_SECTOR_ROTATION_001",
             description=(
                 "Does a stock's own sector's CROSS-SECTIONAL momentum RANK among all 9 real NIFTY sector "
@@ -3569,6 +3627,82 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "multi-position portfolio strategy. H_MEANREV_009 (REJECTED), H_MEANREV_010 (INCONCLUSIVE), and "
                 "H_MEANREV_011 (REJECTED) remain unmodified, cited as comparison points only. Full writeup in "
                 "docs/research/H_MEANREV_012_SIGNAL_STRENGTH_SELECTION_PREREGISTRATION.md."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_MEANREV_014",
+            description=(
+                "Point-in-time universe correction: does H_MEANREV_010's own gross/net edge, and does "
+                "H_MEANREV_011's own realistic-portfolio result, survive when universe membership is built from "
+                "REAL, DATED NSE F&O bhavcopy snapshots (via a corporate-action-aware security-identity "
+                "resolution layer) instead of a single current-Dhan-snapshot applied uniformly across the whole "
+                "10-year backtest? Pre-registered BEFORE any result was inspected: docs/research/"
+                "H_MEANREV_010_POINT_IN_TIME_REPLAY_PREREGISTRATION.md."
+            ),
+            rationale=(
+                "User's own capital-allocation-decision mission (2026-09-21), Path 1: 'Build the security-"
+                "identity/corporate-action layer... determine whether the [previously-identified] problematic "
+                "population can be recovered. If yes: run the corrected H_MEANREV_010 once... If it survives, "
+                "investigate whether the effect survives realistic portfolio constraints.' This directly "
+                "resolves the last open dependency Phase 4/Phase A left unresolved."
+            ),
+            expected_effect="No prior directional assumption -- a methodology-correctness test, not a new alpha search.",
+            dataset_restrictions=(
+                "Universe built from 11 real NSE F&O bhavcopy snapshots (annual anchors 2016-2025 plus "
+                "2026-09-18; classic archives.nseindia.com through ~2024-06, UDiFF nsearchives.nseindia.com "
+                "from ~2024-07 -- both formats directly verified this session), resolved through "
+                "quant_research/security_identity_map.py (8 verified rename/merger-survivor mappings, 3 "
+                "confirmed non-recoverable merger-extinguished exclusions, 3 unresolved exclusions -- see that "
+                "module's own docstring for full sourcing). 350 distinct canonical symbols ever eligible across "
+                "the window (vs. ~208 today) -- genuine historical churn, not an artifact."
+            ),
+            experiment_design=(
+                "Step 2: quant_research.mean_reversion_execution_structure.compute_fixed_notional_trade and "
+                "quant_research.mean_reversion_signal._oversold_2std_relative_weak reused completely "
+                "unmodified (same capital_per_slot=100,000, h10 exit, india_nse_intraday_2026 costs, "
+                "60/20/20 splits as the original H_MEANREV_010); the ONLY addition is a point-in-time "
+                "eligibility gate (a symbol's own signal is only accepted if it was present in the latest real "
+                "snapshot at or before its own signal date) inserted exactly where the original's own 'trade is "
+                "None' branch already lived. Step 3 (only reached because Step 2 survived its own frozen "
+                "decision rule): quant_research.mean_reversion_portfolio.schedule_portfolio (H_MEANREV_011's "
+                "own frozen 4-position/25,000-per-slot/100,000-total scheduler) reused completely unmodified -- "
+                "only the candidate event list was pre-filtered by the same point-in-time eligibility gate "
+                "before scheduling."
+            ),
+            success_criteria="Step 2: validation AND out-of-sample remain CI-decisive positive. Step 3: at least one split reaches CI-decisive positive under realistic portfolio constraints.",
+            failure_criteria="Step 2: validation or out-of-sample loses CI-decisiveness or reverses sign. Step 3: no split reaches CI-decisive significance in either direction.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "STEP 2 (single-symbol, point-in-time universe), h10 primary, n=310/350 symbols buildable (40 "
+                "failed -- many well-known 2018-2020 NBFC/PSU-bank-crisis casualties: DHFL, JP Associates, "
+                "Reliance Capital, Andhra Bank, Allahabad Bank, Syndicate Bank, etc., genuinely excluded, not a "
+                "bug): development n=2765 **-0.888% [-1.264%,-0.513%] NEGATIVE_PERFORMANCE (CI-decisive)** -- "
+                "FLIPS from the original's own STATISTICALLY_MEANINGLESS (+0.08% [-0.27%,+0.44%]), an "
+                "economically coherent new finding (buying 'the dip' on companies that were oversold because "
+                "they were defaulting, not overreacting, once point-in-time membership finally includes their "
+                "own worst historical periods); validation n=698 +1.238% [+0.778%,+1.699%] POSITIVE_PERFORMANCE "
+                "(survives, weaker than the original's own +1.51% [+0.94%,+2.08%]); out-of-sample n=867 "
+                "+0.816% [+0.367%,+1.265%] POSITIVE_PERFORMANCE (survives, weaker than the original's own "
+                "+0.98% [+0.52%,+1.44%]). Per the frozen decision rule (validation AND out-of-sample both "
+                "remain CI-decisive positive): Step 2 SURVIVES. "
+                "STEP 3 (realistic portfolio, point-in-time universe): 16,982 raw candidate events -> 9,825 "
+                "point-in-time-eligible (7,157 excluded as ineligible at their own signal date) -> 495 accepted "
+                "trades (337 rejected for capacity, 8,380 for cash, 597 for an already-open position on the "
+                "same symbol). development n=322 **-0.445% [-1.341%,+0.451%] STATISTICALLY_MEANINGLESS**; "
+                "validation n=94 **-0.032% [-1.190%,+1.125%] STATISTICALLY_MEANINGLESS**; out-of-sample n=79 "
+                "**-0.796% [-2.315%,+0.724%] STATISTICALLY_MEANINGLESS**. NO split reaches CI-decisive "
+                "significance in either direction -- confirms, with an independently corrected universe, "
+                "exactly what the original (current-snapshot) H_MEANREV_011 already found: realistic portfolio "
+                "construction destroys the single-symbol edge. The point-in-time correction does not rescue it "
+                "-- point estimates are, if anything, somewhat more negative than the original's own already "
+                "-disappointing numbers. "
+                "VERDICT: per the user's own frozen sequencing ('if it survives [Step 2] -> portfolio realism "
+                "-> fails -> CLOSE'), mean reversion is REJECTED/CLOSED for this research cycle -- a stronger, "
+                "better-evidenced closure than before, since it no longer depends on an unresolved universe "
+                "-membership question; that question has now been directly, empirically answered, and the "
+                "answer does not change the outcome. H_MEANREV_009/010/011/012's own historical verdicts are "
+                "unmodified, cited as comparison points only. Full writeup: audit/edge_feasibility/"
+                "PATH1_MEAN_REVERSION_POINT_IN_TIME_CLOSURE.md."
             ),
         ),
         # 2026-09-21: the first entry of a NEW kind in this file. Every H_ENTRY_*/
