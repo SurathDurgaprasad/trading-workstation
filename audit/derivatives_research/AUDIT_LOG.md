@@ -144,3 +144,87 @@ Deliverables this continuation:
 `DERIV_001_RESULTS.md`/`.csv`, `DERIV_002_RESULTS.md`/`.csv`,
 `PHASE10_12_DERIVATIVES_FAMILY_AND_STOP_CONDITIONS.md`, `PHASE1_DATA_INVENTORY.md` (addendum),
 `STATE.json` (updated).
+
+---
+
+## 2026-09-21 (continuing) — Final controlled pass: options volatility surface, program closed
+
+User's own explicit framing: "the FINAL CONTROLLED DERIVATIVES PASS," testing whether the options
+IV surface (level, skew, term structure, call/put asymmetry) adds information beyond OHLCV+futures.
+
+**Phase 1** (`PHASE1_OPTIONS_IV_DATA_AVAILABILITY.md`): re-verified Dhan's `/charts/rollingoption`
+live this session (not re-citing the prior pass without re-checking). Confirmed real IV/OI/OHLC/
+spot for both CALL and PUT. Found and disclosed a real, reproducible API defect:
+`expiryCode=0` ("current/near expiry," the documented default) is rejected by this specific
+endpoint; only `expiryCode=1`("next")/`2`("far") work -- meaning genuine near-term IV can never be
+fetched from this endpoint, a real ceiling on any term-structure work (not attempted this pass).
+Confirmed strike granularity (`ATM`/`ATM+1`/`ATM-1`/`ATM+2` all return distinct, correctly-spaced
+real strikes) and a real, economically-expected put/call IV asymmetry already visible in raw data
+(~9.3% call vs. ~11.6% put IV at the same strike). Found a genuine data-quality defect: the final
+1-2 trading sessions before a contract's own expiry show both degenerate near-zero IV readings
+(0.0, 0.4) and implausible ~1,000x-normal volume spikes in the SAME bars -- a real raw-feed
+artifact, not a processing bug.
+
+**Phase 2** (`PHASE2_LIQUIDITY_QUALITY_GATE.md`): liquidity/quality rules frozen BEFORE any
+predictive result -- an IV plausibility floor (3.0%) and a 20x-trailing-median volume ceiling,
+both derived directly from Phase 1's own observed defect pattern, never tuned against a return.
+Adequacy determination: a real full-month sample showed 0% zero-volume/zero-OI/null-IV for the
+ATM-restricted endpoint (dramatically better than the raw bhavcopy full chain's own 85.8%/75.2%
+zero-volume finding from the prior pass) -- a sufficiently liquid sample exists, proceeding.
+
+**Phase 3** (`PHASE3_VOLATILITY_SURFACE_CONSTRUCTION.md`, `quant_research/iv_surface.py`, 22 tests):
+built `compute_atm_iv_level` and `compute_put_call_iv_skew`, each with an exact, documented
+temporal/contract-selection specification (timestamp, expiry/strike selection, no interpolation,
+missing-strike/stale-observation handling, units, normalization) and directly-tested no-look-ahead
+guarantees. Deliberately scoped to these TWO features only (ATM level primary, put/call skew the
+one pre-declared backup) -- strike-based skew and expiry term structure explicitly named and
+deferred, not tested, to avoid the "test dozens of variants" pattern.
+
+**Phase 4** (`docs/research/DERIV_003_004_IV_SURFACE_INFORMATION_CONTENT_PREREGISTRATION.md`):
+frozen before fetching the dense multi-year dataset. Per the mission's own explicit instruction,
+the baseline was redefined to include OHLCV + the previously-tested futures features (basis, OI
+change) -- not OHLCV alone, since those futures features are now "existing" information even though
+neither cleared its own bar independently.
+
+**Phase 5**: 56 real, paced (1 second apart), live, read-only Dhan API calls fetched 2.2 years of
+NIFTY ATM CALL/PUT rolling-option IV data (28 ~29-day windows per side, 3,946 raw bars per side).
+After the frozen quality gate: 3,910/3,756 clean hourly bars, downsampled to 546 daily observations,
+merged with the existing OHLCV+futures baseline to 397 usable rows. **DERIV_003** (ATM IV level):
+NO MEANINGFUL INCREMENTAL INFORMATION -- ΔAUC negative on BOTH validation (-0.0070) and
+out-of-sample (-0.0081), Brier score worsens on both. **DERIV_004** (put/call IV skew): NO
+MEANINGFUL INCREMENTAL INFORMATION -- ΔAUC positive but 6-12x below the pre-registered 0.02
+threshold on both splits (+0.0035 val, +0.0017 oos). **Honestly, prominently disclosed limitation**:
+validation (n=77) and out-of-sample (n=84) fell below the pre-registered 100-observation floor,
+an emergent consequence of intersecting the options data's own shorter ~2.2-year reliable window
+with the temporal 60/20/20 split -- not knowable in advance, not hidden after the fact. Judged not
+to change the conclusion, since both results were decisive misses (one negative-signed, the other
+an order of magnitude short), not marginal ones close enough that a larger sample might plausibly
+flip the verdict.
+
+**Phase 6 decision gate**: neither DERIV_003 nor DERIV_004 passed. Per the mission's own explicit
+instruction, **the derivatives research program is CLOSED.** Phases 7-10 (frozen trading
+experiment, economic validity, portfolio realism, independent replication) correctly not executed
+-- gated behind Phase 6, never reached.
+
+**Terminal report** (`PHASE6_DECISION_GATE_AND_TERMINAL_REPORT.md`) covers the FULL derivatives
+program (both the futures pass and this options pass): data availability, data quality, a 4
+-hypothesis results table (DERIV_001-004, all negative), exact preregistrations, OOS evidence,
+multiple-testing treatment (family_size=4, z=2.4977, disclosure-only since all four entries used a
+fixed effect-size threshold, not a p-value), economic implications (none reached, by design -- no
+result cleared the bar to even attempt a costed test), and a complete, honest limitations section
+(the sample-size caveat above; deliberately narrow scope -- NIFTY-only, h10-only, logistic
+-regression-only, 2-of-5 named IV feature families; no bid/ask data in either source; stock-level
+futures continuity unverified). **Classified: NO DEMONSTRATED EDGE WITH CURRENT INFORMATION SET.**
+No `DERIV_005` or later entry was created to keep the program going.
+
+Zero production strategy/RiskEngine/order-execution code modified throughout this entire mission.
+Real order execution remains disabled. Live fleet not touched. Full regression to be run before
+committing (see commit message for pass/fail counts).
+
+Deliverables this continuation: `audit/derivatives_research/PHASE1_OPTIONS_IV_DATA_AVAILABILITY.md`,
+`PHASE2_LIQUIDITY_QUALITY_GATE.md`, `PHASE3_VOLATILITY_SURFACE_CONSTRUCTION.md`,
+`PHASE6_DECISION_GATE_AND_TERMINAL_REPORT.md`, `DERIV_003_004_RESULTS.md`/`.csv` x2,
+`quant_research/iv_surface.py`, `tests/test_iv_surface.py`,
+`docs/research/DERIV_003_004_IV_SURFACE_INFORMATION_CONTENT_PREREGISTRATION.md`,
+`audit/derivatives_research/scripts/deriv_003_004_iv_surface_information_content.py`,
+`STATE.json` (updated).
