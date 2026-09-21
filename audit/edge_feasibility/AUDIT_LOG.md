@@ -66,3 +66,32 @@ is active -- this offline preregistration work itself never touches the fleet.
 Fleet checked repeatedly through this window (09:34Z 825/83 -> 09:49Z 975/90 bars/signals), consistently
 healthy, 0 trades, same DOWNGRADE/MAX_EXPOSURE pattern throughout. ~11 minutes to 15:30 IST close as of
 this entry.
+
+## 2026-09-21T10:16-10:20Z — H_MEANREV_013 executed, after NSE close, fleet untouched throughout
+
+Wrote `audit/edge_feasibility/scripts/h_meanrev_013_clustering.py`, an isolated offline script:
+independently replicates (never modifies) `_run_schedule`'s own accept/reject decision rule from
+`quant_research/mean_reversion_portfolio.py` so individual candidate events can be labeled, then
+prices EVERY candidate (accepted and rejected) via the existing, unmodified
+`compute_fixed_notional_trade`. Cross-checked correct: replicated labeling produced 791 accepted
+trades, matching the real, imported `schedule_portfolio()` call exactly.
+
+**Result: the clustering hypothesis is NOT SUPPORTED.** Development alone shows a clean, CI-decisive
+monotonic decline from low-clustering (+1.25%) to high-clustering (-0.23%) bins -- exactly the
+pre-registered Outcome A pattern in isolation. Validation and out-of-sample do not reproduce it:
+validation's bin=1 (lowest clustering) is the single worst result in the whole table (-3.59%,
+CI-decisively NEGATIVE), while validation's and out-of-sample's bin=10+ (highest clustering) are
+BOTH CI-decisively POSITIVE (+2.60%/+2.63%). Per the pre-registered decision rule this is Outcome C
+(random/unstable across splits) -- clustering does not explain the portfolio-level result, joining
+H_MEANREV_012's own earlier finding that signal-strength selection doesn't either. Neither of the
+two most plausible mechanisms for H_MEANREV_011's disappointment has survived direct testing.
+
+Survivorship-exposure quantification (measured, not fixed): accepted trades from the ORIGINAL-32
+universe are only 14.7% of trade count but 140.8% of summed net return -- the EXPANDED-ONLY
+(current-F&O-eligibility, more survivorship-exposed) group is a net drag, not the source of
+whatever positive signal exists. Mildly reassuring for the survivorship concern specifically, does
+not change the Outcome-C verdict.
+
+Full writeup: `H_MEANREV_013_RESULTS.md`. Full per-event data: `H_MEANREV_013_RESULTS.csv` (9,811
+rows). Zero production files modified. Live fleet checked before and confirmed unchanged/idle
+throughout (post-close, no new bars, healthy).
