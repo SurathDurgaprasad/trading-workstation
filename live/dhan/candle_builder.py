@@ -35,6 +35,7 @@ per spec §6 rather than left implicit):
 """
 
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -215,7 +216,7 @@ class CandleBuilder:
         wants it."""
         self.rejected_tick_counts: dict[str, int] = {
             "non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0, "late_out_of_order": 0,
-            "implausible_timestamp": 0,
+            "implausible_timestamp": 0, "non_finite_value": 0,
         }
         """Strategy science Phase 16 (observability) -- each rejection is
         already logged (see on_tick), but a log line alone isn't
@@ -394,7 +395,30 @@ class CandleBuilder:
                         return None
 
         price_is_valid = True
-        if price <= 0:
+        if not math.isfinite(price) or not math.isfinite(volume):
+            # Red-team finding (2026-09-22): NaN/Inf pass every comparison
+            # below as False (nan <= 0 is False, nan > threshold is False,
+            # inf <= 0 is False), so neither the non-positive-price nor the
+            # deviation gate ever catches them -- a NaN could previously
+            # merge straight into `close`/`_last_known_price`, permanently
+            # poisoning the deviation gate for the rest of this instance's
+            # life (every future comparison against a NaN baseline is also
+            # silently False), and would eventually raise an UNCAUGHT
+            # pydantic ValidationError when OHLCVBar's own gt=0 field
+            # validation runs at finalize() -- a different exception type
+            # than the DhanWireFormatError the caller's receive-thread
+            # callback actually catches, so it could kill that thread.
+            # A struct-decoded float32 CAN legally carry an IEEE-754 NaN/Inf
+            # bit pattern from a corrupted/garbled packet -- a reachable
+            # input, not a hypothetical. Checked first, explicitly, rather
+            # than relying on ordinary comparisons to catch it.
+            price_is_valid = False
+            self.rejected_tick_counts["non_finite_value"] += 1
+            logger.warning(
+                "CandleBuilder(%s, %s): rejecting a non-finite tick (price=%s, volume=%s, timestamp=%s) -- "
+                "NaN/Inf can never be a real traded price or volume.", self.symbol, self.interval, price, volume, timestamp,
+            )
+        elif price <= 0:
             price_is_valid = False
             self.rejected_tick_counts["non_positive_price"] += 1
             logger.warning(
@@ -486,14 +510,29 @@ class CandleBuilder:
                 "volume=%s a second time.", self.symbol, self.interval, timestamp, price, volume,
             )
 
+        # Red-team finding (2026-09-22): a tick's own exchange timestamp can
+        # legitimately arrive out of order WITHIN a single still-open bucket
+        # (network jitter/reordering; TCP guarantees byte-order on the wire,
+        # never exchange-timestamp order of what's inside it -- the SAME
+        # reasoning the cross-bucket "late_out_of_order" rejection above is
+        # built on). `close` is documented (this module's own docstring) as
+        # "price of the most recent tick" -- meaning most recent BY EXCHANGE
+        # TIME, not by arrival order -- so it must only advance when this
+        # tick's timestamp is not older than the latest one already merged.
+        # high/low/volume are unaffected: every real tick's price and volume
+        # still count toward those regardless of arrival order, matching
+        # the pre-existing, correct behavior for both.
+        is_chronologically_advancing = timestamp >= self._state.last_source_timestamp
+
         self._state.high = max(self._state.high, price)
         self._state.low = min(self._state.low, price)
-        self._state.close = price
         self._state.volume += (0.0 if is_likely_redelivered_duplicate else volume)
         self._last_known_price = price
         self._last_known_timestamp = timestamp
-        self._state.last_received_at = received_at
-        self._state.last_source_timestamp = timestamp
+        if is_chronologically_advancing:
+            self._state.close = price
+            self._state.last_received_at = received_at
+            self._state.last_source_timestamp = timestamp
 
         return completed
 

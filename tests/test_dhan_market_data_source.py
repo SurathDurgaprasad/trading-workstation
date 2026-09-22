@@ -330,7 +330,7 @@ def test_rejected_tick_counts_by_symbol_aggregates_across_the_real_wire_path(ins
     source, factory = _source(instrument_map, credentials)
     source.subscribe(["RELIANCE.NS"], "1m")
 
-    assert source.rejected_tick_counts_by_symbol() == {"RELIANCE.NS": {"non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0, "late_out_of_order": 0, "implausible_timestamp": 0}}
+    assert source.rejected_tick_counts_by_symbol() == {"RELIANCE.NS": {"non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0, "late_out_of_order": 0, "implausible_timestamp": 0, "non_finite_value": 0}}
 
     factory.current.simulate_message(_ticker_packet(2885, 0.0, epoch=10))  # non-positive price, real wire encoding
 
@@ -427,10 +427,14 @@ def test_duplicate_ticks_at_the_same_timestamp_do_not_each_complete_a_bar(instru
 
 def test_out_of_order_tick_within_the_same_bucket_is_absorbed_not_rejected(instrument_map, credentials):
     """A tick that arrives slightly out of order but still within the
-    current bucket is just another data point for that bucket -- Dhan
-    ticks are trusted at this layer; true out-of-order/duplicate BAR
-    protection happens downstream in the existing PaperTradingEngine,
-    unchanged."""
+    current bucket still counts toward high/low/volume -- true out-of-
+    order/duplicate BAR protection happens downstream in the existing
+    PaperTradingEngine, unchanged. But (red-team finding, 2026-09-22)
+    `close` must NOT be dragged backward by an out-of-order tick: it must
+    reflect the chronologically-latest (by exchange timestamp) tick seen,
+    not merely whichever tick happened to arrive last on the wire -- see
+    CandleBuilder's own module docstring, "close = price of the most
+    recent tick," and its dedicated tests in test_dhan_candle_builder.py."""
     source, factory = _source_with_synthetic_clock(instrument_map, credentials)
     source.subscribe(["RELIANCE.NS"], "1m")
     factory.current.simulate_message(_ticker_packet(2885, 100.0, epoch=30))
@@ -438,6 +442,7 @@ def test_out_of_order_tick_within_the_same_bucket_is_absorbed_not_rejected(instr
     factory.current.simulate_message(_ticker_packet(2885, 101.0, epoch=61))
     bar_event = source.next_bar()
     assert bar_event.bar.low == pytest.approx(99.0)
+    assert bar_event.bar.close == pytest.approx(100.0)  # the chronologically-latest tick (epoch=30), not the out-of-order one (epoch=10)
 
 
 def test_disconnect_marks_reconnecting_then_reconnects_within_bound(instrument_map, credentials):

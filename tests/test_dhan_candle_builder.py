@@ -305,7 +305,7 @@ def test_rejected_tick_counts_starts_at_zero_for_every_known_reason():
     builder = CandleBuilder(symbol="RELIANCE", interval="1m")
     assert builder.rejected_tick_counts == {
         "non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0, "late_out_of_order": 0,
-        "implausible_timestamp": 0,
+        "implausible_timestamp": 0, "non_finite_value": 0,
     }
 
 
@@ -866,7 +866,7 @@ def test_a_delayed_first_tick_with_a_valid_exchange_timestamp_still_works_normal
     assert result is None
     assert builder.rejected_tick_counts == {
         "non_positive_price": 0, "negative_volume": 0, "implausible_deviation": 0,
-        "late_out_of_order": 0, "implausible_timestamp": 0,
+        "late_out_of_order": 0, "implausible_timestamp": 0, "non_finite_value": 0,
     }
     assert builder.last_known_price == 100.0
 
@@ -961,3 +961,93 @@ def test_an_overnight_gap_after_baseline_confirmed_is_a_documented_residual_gap_
     next_session_tick_2 = builder.on_tick(price=106.0, volume=1, timestamp=_ts(10 + weekend_gap_seconds + 60), received_at=_ts(10 + weekend_gap_seconds + 60))
     assert next_session_tick_2 is None
     assert builder.rejected_tick_counts["implausible_timestamp"] == 2  # still rejected -- no self-heal once confirmed, unlike the cold-start case
+
+
+# --- Red-team findings, 2026-09-22 ------------------------------------------
+
+
+def test_close_reflects_the_chronologically_latest_tick_not_the_most_recently_arrived_one():
+    """Real defect found by adversarial audit: a tick that arrives OUT OF
+    ORDER within the same still-open bucket (its own exchange timestamp is
+    EARLIER than a tick already merged) must never overwrite `close` --
+    this module's own docstring defines close as "price of the most recent
+    tick," meaning most recent BY EXCHANGE TIME, not by arrival order.
+    high/low/volume are unaffected and must still count every real tick
+    regardless of order."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(30), received_at=_ts(30))
+    # Arrives SECOND but belongs to an EARLIER moment within the same bucket.
+    builder.on_tick(price=99.0, volume=5, timestamp=_ts(10), received_at=_ts(31))
+    bar = builder.on_tick(price=101.0, volume=1, timestamp=_ts(61), received_at=_ts(61))
+
+    assert bar is not None
+    assert bar.close == 100.0  # the chronologically-latest tick (epoch 30), not the out-of-order one (epoch 10)
+    assert bar.low == 99.0  # the out-of-order tick's price still counts toward low
+    assert bar.volume == 15.0  # and still counts toward volume
+
+
+def test_close_still_advances_normally_when_ticks_arrive_in_chronological_order():
+    """Regression guard: the fix above must not disturb the ordinary,
+    overwhelmingly common case of in-order delivery."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(5), received_at=_ts(5))
+    builder.on_tick(price=100.5, volume=7, timestamp=_ts(30), received_at=_ts(30))
+    bar = builder.on_tick(price=101.0, volume=1, timestamp=_ts(61), received_at=_ts(61))
+
+    assert bar is not None
+    assert bar.close == 100.5  # the later-arriving, later-timestamped tick correctly wins
+
+
+@pytest.mark.parametrize("bad_price", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_price_is_rejected_never_merged_into_a_bucket(bad_price):
+    """Real defect found by adversarial audit: NaN/Inf pass every existing
+    comparison as False (nan <= 0, nan > threshold, inf <= 0 are all
+    False), so neither the non-positive-price nor the deviation gate ever
+    caught them -- a NaN could previously poison `close`/
+    `_last_known_price` permanently and eventually raise an uncaught
+    pydantic ValidationError (a different exception type than the
+    DhanWireFormatError the real receive-thread callback actually
+    catches) when the bar finalizes. A struct-decoded float32 CAN legally
+    carry a NaN/Inf bit pattern from a corrupted packet -- reachable, not
+    hypothetical."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))  # seeds a real baseline
+
+    result = builder.on_tick(price=bad_price, volume=5, timestamp=_ts(30), received_at=_ts(30))
+
+    assert result is None
+    assert builder.rejected_tick_counts["non_finite_value"] == 1
+    assert builder.rejected_tick_counts["non_positive_price"] == 0  # caught by the NEW, more specific gate
+    # The bad tick must never have merged -- the next valid tick still sees the ORIGINAL real baseline.
+    bar = builder.on_tick(price=101.0, volume=1, timestamp=_ts(61), received_at=_ts(61))
+    assert bar is not None
+    assert bar.close == 100.0
+    assert bar.high == 100.0
+    assert bar.low == 100.0
+    assert bar.volume == 10.0  # the NaN tick's volume was never added
+
+
+def test_non_finite_volume_is_also_rejected():
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    result = builder.on_tick(price=100.0, volume=float("nan"), timestamp=_ts(0), received_at=_ts(0))
+
+    assert result is None
+    assert builder.rejected_tick_counts["non_finite_value"] == 1
+
+
+def test_a_nan_price_never_permanently_poisons_the_deviation_gate_for_later_ticks():
+    """The specific mechanism the audit flagged: before the fix, letting a
+    NaN merge into `_last_known_price` made EVERY future deviation
+    comparison against that NaN baseline also silently evaluate False,
+    disabling implausible-price protection for the rest of the instance's
+    life. Proven here by confirming an actually-implausible tick (60% away
+    from the real baseline) is still correctly caught AFTER a NaN tick was
+    seen and rejected."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m", max_tick_deviation_pct=20.0)
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(0), received_at=_ts(0))
+    builder.on_tick(price=float("nan"), volume=1, timestamp=_ts(10), received_at=_ts(10))  # rejected, must not poison state
+
+    implausible = builder.on_tick(price=160.0, volume=1, timestamp=_ts(20), received_at=_ts(20))  # 60% away from the real 100.0 baseline
+
+    assert implausible is None
+    assert builder.rejected_tick_counts["implausible_deviation"] == 1
