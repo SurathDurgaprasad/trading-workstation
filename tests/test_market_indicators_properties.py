@@ -36,7 +36,7 @@ from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
-from hypothesis import given, settings, strategies as st
+from hypothesis import HealthCheck, given, settings, strategies as st
 
 from market.data_provider import OHLCV, OHLCVBar
 from market.indicators import (
@@ -49,7 +49,26 @@ from market.indicators import (
     compute_volume_analysis,
 )
 
-_PROPERTY_SETTINGS = settings(max_examples=100, derandomize=True)
+_PROPERTY_SETTINGS = settings(max_examples=100, derandomize=True, suppress_health_check=[HealthCheck.too_slow])
+"""Red-team investigation (2026-09-22): test_compute_sma_never_raises_
+regardless_of_length_vs_period failed intermittently during FULL-SUITE runs
+(never in isolation) -- once as a bare failure, once explicitly as
+Hypothesis's own `FailedHealthCheck: too_slow`. `derandomize=True` (above,
+unchanged) makes the actual generated EXAMPLES fully deterministic across
+runs -- the same inputs are tried every time, in the same order -- which
+already rules out "a different random input occasionally exposes a real
+bug" as the explanation; only Hypothesis's own WALL-CLOCK timing budget for
+data GENERATION (not the indicator computation itself) is sensitive to
+whatever else is running concurrently in a 2700+-test suite. Confirmed by
+running the isolated test 5 consecutive times (all passed, sub-second each)
+and by the fact that `too_slow` is a data-generation-speed heuristic, not a
+correctness check -- suppressing it here changes nothing about what values
+get tested or what compute_sma is expected to return; it only stops
+Hypothesis from failing a test because the surrounding test suite made the
+MACHINE, not the CODE, slow. market/indicators.py itself was read
+line-by-line and found to contain no source of nondeterminism (no dict
+ordering dependency, no uninitialized state) that could otherwise explain
+this."""
 
 _PRICE = st.floats(min_value=0.01, max_value=1_000_000.0, allow_nan=False, allow_infinity=False)
 _VOLUME = st.floats(min_value=0.0, max_value=1_000_000_000.0, allow_nan=False, allow_infinity=False)
