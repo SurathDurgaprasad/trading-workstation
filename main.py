@@ -908,6 +908,21 @@ def _build_market_data_source(args: argparse.Namespace):
         from live.dhan.config import load_dhan_credentials
         from live.dhan.instruments import DhanInstrumentMap
         from live.dhan.market_data_source import DhanMarketDataSource
+        from live.environment_guard import run_startup_environment_checks
+
+        # 2026-09-22 incident (see live/environment_guard.py's own module
+        # docstring): a real live session ran for hours under the wrong
+        # (system, not venv) interpreter before the gap was noticed, via a
+        # dependency reached only by a lazy import deep into the session.
+        # Fail here, once, before opening any real connection -- never
+        # after the fact.
+        env_report = run_startup_environment_checks()
+        print(env_report.format_report())
+        if not env_report.passed:
+            raise SystemExit(
+                "paper-live: startup environment check failed (see STARTUP ENVIRONMENT CHECK above) -- "
+                "refusing to open a real Dhan connection under a wrong or incomplete interpreter."
+            )
 
         credentials = load_dhan_credentials()  # raises DhanCredentialsMissingError with a clear message if unset
         instrument_map = DhanInstrumentMap.download(force=args.refresh_instrument_map)
@@ -1417,6 +1432,27 @@ def run_fleet_supervise_command(args: argparse.Namespace) -> None:
     if not symbols:
         print("fleet-supervise: the resolved symbol list is empty.", file=sys.stderr)
         sys.exit(2)
+
+    if args.source == "dhan":
+        from live.environment_guard import run_startup_environment_checks
+
+        # 2026-09-22 incident (see live/environment_guard.py's own module
+        # docstring): this exact process was launched under the wrong
+        # interpreter for a full session -- every worker below inherits
+        # `sys.executable` from THIS process (live/fleet_supervisor.py's
+        # own launch_worker default), so the mistake would otherwise
+        # silently propagate to the entire fleet. Checked once, here,
+        # before a single worker is launched -- never discovered 15
+        # workers and hours later.
+        env_report = run_startup_environment_checks()
+        print(env_report.format_report())
+        if not env_report.passed:
+            print(
+                "fleet-supervise: startup environment check failed (see STARTUP ENVIRONMENT CHECK above) -- "
+                "refusing to launch any worker under a wrong or incomplete interpreter.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     extra_args = ["--max-bars", str(args.max_bars)] if args.max_bars is not None else None
 

@@ -1812,6 +1812,54 @@ def test_run_fleet_supervise_command_requires_symbols_or_watchlist_file(tmp_path
         run_fleet_supervise_command(args)
 
 
+def test_run_fleet_supervise_command_dhan_refuses_to_launch_any_worker_when_the_startup_environment_check_fails(monkeypatch, tmp_path):
+    """2026-09-22 incident regression: fleet-supervise ran an entire
+    15-worker session under the wrong interpreter for hours because
+    nothing checked before launching. This proves the check now runs
+    BEFORE the first worker is spawned -- not merely that a worker would
+    eventually fail on its own (which every worker's own
+    _build_market_data_source-level check, tested separately, already
+    covers as defense in depth)."""
+    import live.environment_guard as environment_guard
+
+    report = environment_guard.EnvironmentCheckReport(checks=(
+        environment_guard.CheckResult("venv_interpreter", False, "forced failure for this test"),
+    ))
+    monkeypatch.setattr(environment_guard, "run_startup_environment_checks", lambda *a, **kw: report)
+
+    args = parse_args([
+        "fleet-supervise", "--symbols", "AAPL,MSFT", "--runtime-dir", str(tmp_path),
+        "--source", "dhan", "--launch-stagger-seconds", "0",
+    ])
+    with pytest.raises(SystemExit):
+        run_fleet_supervise_command(args)
+
+    assert not (tmp_path / "AAPL").exists(), "no worker's runtime directory should have been created"
+    assert not (tmp_path / "MSFT").exists()
+
+
+def test_run_fleet_supervise_command_mock_never_runs_the_startup_environment_check(tmp_path, capsys):
+    """--source mock (this test's own default) is rehearsal-only and never
+    opens a real Dhan connection -- the guard existing at all must not
+    change mock-source fleet behavior, matching every other mock-based
+    fleet-supervise test in this file."""
+    import live.environment_guard as environment_guard
+
+    def _boom(*a, **kw):
+        raise AssertionError("the startup environment check must never run for --source mock")
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(environment_guard, "run_startup_environment_checks", _boom)
+        args = parse_args([
+            "fleet-supervise", "--symbols", "AAPL,MSFT", "--runtime-dir", str(tmp_path),
+            "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1",
+            "--max-polls", "10", "--launch-stagger-seconds", "0",
+        ])
+        run_fleet_supervise_command(args)  # must not raise
+
+    assert "FLEET SUPERVISE: 2 symbol(s)" in capsys.readouterr().out
+
+
 def test_fleet_summary_subcommand_is_recognized_without_the_analyze_default_prefix():
     """Same regression class as fleet-supervise's own equivalent test --
     a new subparser silently gets misrouted through the implicit
@@ -2040,12 +2088,30 @@ def test_run_paper_live_command_closes_the_market_data_source_on_keyboard_interr
 # --- Phase 15: --source dhan --------------------------------------------------
 
 
+def _patch_environment_check(monkeypatch, *, passed: bool):
+    """Test isolation for the startup environment guard (live/environment_
+    guard.py, wired 2026-09-22 after the incident where a real session ran
+    for hours under the wrong interpreter): tests of --source dhan's OTHER
+    behavior (credential handling, DhanMarketDataSource construction, fleet
+    worker launch) must not depend on whatever real interpreter/venv state
+    happens to run this test suite -- see live/environment_guard.py's own
+    dedicated tests/test_environment_guard.py for the guard's own behavior."""
+    import live.environment_guard as environment_guard
+
+    detail = "test double" if passed else "test double: forced failure"
+    report = environment_guard.EnvironmentCheckReport(checks=(
+        environment_guard.CheckResult("venv_interpreter", passed, detail),
+    ))
+    monkeypatch.setattr(environment_guard, "run_startup_environment_checks", lambda *a, **kw: report)
+
+
 def test_paper_live_source_dhan_fails_cleanly_without_credentials(monkeypatch, tmp_path):
     """No DhanCredentialsMissingError traceback should ever reach the
     operator -- run_paper_live_command must raise a controlled error that
     main()'s own exception handler already knows how to report cleanly."""
     from live.dhan.config import DhanCredentialsMissingError
 
+    _patch_environment_check(monkeypatch, passed=True)
     monkeypatch.delenv("DHAN_CLIENT_ID", raising=False)
     monkeypatch.delenv("DHAN_ACCESS_TOKEN", raising=False)
     args = parse_args([
@@ -2085,6 +2151,7 @@ def test_build_market_data_source_dhan_is_labeled_live(monkeypatch):
     monkeypatch.setattr(DhanInstrumentMap, "download", classmethod(lambda cls, *a, **kw: fake_map))
     monkeypatch.setenv("DHAN_CLIENT_ID", "1000000001")
     monkeypatch.setenv("DHAN_ACCESS_TOKEN", "fake-token-for-tests")
+    _patch_environment_check(monkeypatch, passed=True)
 
     from main import _build_market_data_source
 
@@ -2092,6 +2159,41 @@ def test_build_market_data_source_dhan_is_labeled_live(monkeypatch):
     source, source_label, status_label = _build_market_data_source(args)
     assert "DHAN" in source_label
     assert status_label == "LIVE"
+
+
+def test_build_market_data_source_dhan_refuses_to_connect_when_the_startup_environment_check_fails(monkeypatch):
+    """2026-09-22 incident regression: a real live session ran for hours
+    under the wrong interpreter before anyone noticed. Credentials are
+    deliberately left VALID here -- the point is that the environment
+    check must refuse to even attempt loading credentials or building a
+    real connection when it itself fails, not merely that a downstream
+    step would eventually also fail."""
+    monkeypatch.setenv("DHAN_CLIENT_ID", "1000000001")
+    monkeypatch.setenv("DHAN_ACCESS_TOKEN", "fake-token-for-tests")
+    _patch_environment_check(monkeypatch, passed=False)
+
+    from main import _build_market_data_source
+
+    args = parse_args(["paper-live", "--symbol", "RELIANCE.NS", "--source", "dhan"])
+    with pytest.raises(SystemExit):
+        _build_market_data_source(args)
+
+
+def test_build_market_data_source_mock_never_runs_the_startup_environment_check(monkeypatch):
+    """--source mock is explicitly for rehearsal/testing (see main.py's own
+    --source help text) and never opens a real connection -- the guard
+    must never even be consulted for it."""
+    import live.environment_guard as environment_guard
+
+    def _boom(*a, **kw):
+        raise AssertionError("the startup environment check must never run for --source mock")
+
+    monkeypatch.setattr(environment_guard, "run_startup_environment_checks", _boom)
+
+    from main import _build_market_data_source
+
+    args = parse_args(["paper-live", "--symbol", "AAPL", "--interval", "1d", "--period", "1y"])
+    _build_market_data_source(args)  # must not raise
 
 
 def test_hypothesis_registry_subcommand_defaults():
