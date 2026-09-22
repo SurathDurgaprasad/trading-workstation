@@ -31,7 +31,14 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
+from live.heartbeat import read_heartbeat_age_seconds
 from live.runtime_layout import symbol_runtime_paths
+
+DEFAULT_STALE_AFTER_SECONDS = 300.0
+"""Reuses the SAME threshold live/dhan/market_data_source.py's own
+`connected_idle_timeout_seconds` already established and justified for
+"how long is too long to hear nothing from a worker that claims to be
+alive" -- not a new, independently-chosen number."""
 
 
 class WorkerHealth(str, Enum):
@@ -60,6 +67,23 @@ class WorkerHealth(str, Enum):
     format_fleet_status_line every other status uses) INSTEAD of letting
     it escape and take the whole fleet down -- see poll_fleet_once's own
     per-symbol try/except for the fix."""
+    UNRESPONSIVE = "UNRESPONSIVE"
+    """Red-team finding (2026-09-22): the process object hasn't exited AND
+    the log-tail scan below found no gap/disconnect marker -- but this
+    codebase's own already-documented 2026-09-17 incident is exactly the
+    scenario where a worker sat idle, believing itself connected, for
+    600s+ without ever printing a gap/disconnect line (see
+    docs/DHAN_FEED_INTERRUPTION_1514_INVESTIGATION_2026-09-22.md). A
+    worker stuck inside a blocking call (e.g. a feed read with no
+    timeout) BEFORE it ever reaches its own per-bar print-and-heartbeat
+    step would previously have been reported RUNNING indefinitely --
+    "alive, no gap/disconnect signal in recent log output" is true for a
+    genuinely healthy worker and a permanently-hung one alike. This
+    status means the worker's OWN heartbeat.json has gone stale beyond
+    DEFAULT_STALE_AFTER_SECONDS -- a stronger, time-based signal that
+    takes priority over the log-content check, since a stale heartbeat
+    means the loop hasn't reached ANY of its own reporting steps
+    recently, so whatever the log last showed is old news either way."""
 
 
 @dataclass(frozen=True)
@@ -77,6 +101,12 @@ class WorkerHandle:
     symbol: str
     process: subprocess.Popen
     log_path: Path
+    heartbeat_path: Path | None = None
+    """None only for a handle built without going through launch_worker
+    (e.g. some existing unit tests construct WorkerHandle directly) --
+    check_worker_health treats a missing path exactly like a missing/
+    unreadable heartbeat FILE (read_heartbeat_age_seconds returns None
+    either way), never as a reason to skip the log-based check."""
     restarts: int = 0
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -156,7 +186,7 @@ def launch_worker(
 
     log_file = open(log_path, "a")
     process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, env=worker_env)
-    return WorkerHandle(symbol=paths.symbol, process=process, log_path=log_path)
+    return WorkerHandle(symbol=paths.symbol, process=process, log_path=log_path, heartbeat_path=paths.heartbeat_path)
 
 
 # These literal substrings are read directly off main.py's own
@@ -182,14 +212,20 @@ def _tail_lines(path: Path, *, max_lines: int = 200) -> list[str]:
     return lines[-max_lines:]
 
 
-def check_worker_health(handle: WorkerHandle, *, log_lines: list[str] | None = None) -> WorkerStatus:
+def check_worker_health(
+    handle: WorkerHandle, *, log_lines: list[str] | None = None,
+    stale_after_seconds: float = DEFAULT_STALE_AFTER_SECONDS, now: datetime | None = None,
+) -> WorkerStatus:
     """Read-only health check for ONE worker: process liveness (exit
-    code if it already died) plus a light scan of its own recent log
+    code if it already died), then heartbeat.json's own AGE (see
+    WorkerHealth.UNRESPONSIVE's own docstring for why this exists --
+    2026-09-22 red-team finding), then a light scan of its own recent log
     output for the gap/disconnect markers _run_paper_live_loop and
     live/gap_monitor.py already print -- reuses that existing signal
     rather than re-implementing gap detection a second, independently-
     drifting way. `log_lines` is injectable for deterministic testing;
-    defaults to actually reading the worker's own log file."""
+    defaults to actually reading the worker's own log file. `now` is
+    injectable for the same reason on the heartbeat-age check."""
     exit_code = handle.process.poll()
     if exit_code is not None:
         health = WorkerHealth.EXITED_CLEAN if exit_code == 0 else WorkerHealth.EXITED_ERROR
@@ -197,6 +233,23 @@ def check_worker_health(handle: WorkerHandle, *, log_lines: list[str] | None = N
             symbol=handle.symbol, health=health, pid=handle.process.pid, exit_code=exit_code,
             restarts=handle.restarts, detail=f"process exited with code {exit_code}",
         )
+
+    if handle.heartbeat_path is not None and stale_after_seconds is not None:
+        age_seconds = read_heartbeat_age_seconds(handle.heartbeat_path, now=now)
+        # None (missing/unreadable heartbeat) is deliberately NOT treated
+        # as unresponsive here -- a worker whose very first bar hasn't
+        # completed yet has not written a heartbeat either, and that is
+        # ordinary startup, not a hang. Only a heartbeat that EXISTS and
+        # is provably old is real evidence of a stuck loop.
+        if age_seconds is not None and age_seconds > stale_after_seconds:
+            return WorkerStatus(
+                symbol=handle.symbol, health=WorkerHealth.UNRESPONSIVE, pid=handle.process.pid, exit_code=None,
+                restarts=handle.restarts,
+                detail=(
+                    f"process object alive, but its own heartbeat.json is {age_seconds:.0f}s old "
+                    f"(> {stale_after_seconds:.0f}s threshold) -- the worker's main loop appears stuck"
+                ),
+            )
 
     recent = log_lines if log_lines is not None else _tail_lines(handle.log_path, max_lines=50)
     last_gap_index = max((i for i, line in enumerate(recent) if any(m in line for m in _GAP_MARKERS)), default=-1)
@@ -227,7 +280,13 @@ def should_restart(status: WorkerStatus, *, max_restarts: int) -> bool:
     it was told (e.g. reached --max-bars) and restarting it would be
     wrong, and RUNNING/GAP_DETECTED workers are still alive and are not
     a restart decision at all (a gap is a data-delivery observation, not
-    proof the process itself needs replacing)."""
+    proof the process itself needs replacing). UNRESPONSIVE is
+    deliberately excluded too, for now: the process object is still
+    alive (poll() returned None), so an automatic restart would first
+    need to kill a process this function has no authority to touch --
+    making UNRESPONSIVE VISIBLE (not silently RUNNING) is this fix's own
+    scope; auto-recovering from it is a separate, larger decision left
+    to a human operator or a future, explicitly-scoped change."""
     if status.health != WorkerHealth.EXITED_ERROR:
         return False
     return status.restarts < max_restarts

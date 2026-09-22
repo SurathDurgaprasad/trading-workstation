@@ -217,6 +217,108 @@ def test_check_worker_health_reads_the_real_log_file_when_no_lines_injected(tmp_
     assert status.health == WorkerHealth.RUNNING
 
 
+# --- check_worker_health -- heartbeat-age staleness (red-team finding, 2026-09-22) --
+# The real 2026-09-17 incident this closes: a worker stuck inside a blocking
+# call, with no NEW gap/disconnect log line ever printed, was previously
+# reported RUNNING indefinitely -- "alive, no gap/disconnect signal in
+# recent log output" cannot distinguish a genuinely healthy worker from a
+# permanently-hung one on log content alone.
+
+
+def _write_heartbeat(path, *, age_seconds: float, now):
+    import json
+    from datetime import timedelta
+
+    path.write_text(json.dumps({"pid": 4242, "written_at": (now - timedelta(seconds=age_seconds)).isoformat()}))
+
+
+def test_check_worker_health_unresponsive_when_heartbeat_is_stale_even_with_ordinary_log_lines(tmp_path):
+    """The exact scenario a log-only check cannot see: the process is
+    alive, the log's most recent line is an ORDINARY bar (no gap, no
+    disconnect -- would previously read as RUNNING), but heartbeat.json
+    has not been touched in a very long time, proving the loop is stuck
+    somewhere after that log line was printed."""
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 9, 22, 12, 0, 0, tzinfo=timezone.utc)
+    heartbeat_path = tmp_path / "heartbeat.json"
+    _write_heartbeat(heartbeat_path, age_seconds=900.0, now=now)  # 15 minutes stale
+    handle = WorkerHandle(
+        symbol="RELIANCE.NS", process=_FakeProcess([]), log_path=tmp_path / "session.log", heartbeat_path=heartbeat_path,
+    )
+    log_lines = ["[RELIANCE.NS] bar#   9 2026-09-22T06:15:00  close=1234.50  NO_SIGNAL\n"]
+
+    status = check_worker_health(handle, log_lines=log_lines, now=now)
+
+    assert status.health == WorkerHealth.UNRESPONSIVE
+    assert "900s" in status.detail
+
+
+def test_check_worker_health_running_when_heartbeat_is_fresh(tmp_path):
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 9, 22, 12, 0, 0, tzinfo=timezone.utc)
+    heartbeat_path = tmp_path / "heartbeat.json"
+    _write_heartbeat(heartbeat_path, age_seconds=5.0, now=now)
+    handle = WorkerHandle(
+        symbol="RELIANCE.NS", process=_FakeProcess([]), log_path=tmp_path / "session.log", heartbeat_path=heartbeat_path,
+    )
+
+    status = check_worker_health(handle, log_lines=[], now=now)
+
+    assert status.health == WorkerHealth.RUNNING
+
+
+def test_check_worker_health_not_unresponsive_when_heartbeat_has_never_been_written_yet(tmp_path):
+    """A freshly-launched worker that hasn't completed its first bar yet
+    has no heartbeat.json at all -- that is ordinary startup, not a hang,
+    and must not be misreported UNRESPONSIVE."""
+    handle = WorkerHandle(
+        symbol="RELIANCE.NS", process=_FakeProcess([]), log_path=tmp_path / "session.log",
+        heartbeat_path=tmp_path / "heartbeat.json",  # does not exist
+    )
+
+    status = check_worker_health(handle, log_lines=[])
+
+    assert status.health == WorkerHealth.RUNNING
+
+
+def test_check_worker_health_stale_after_seconds_is_configurable(tmp_path):
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 9, 22, 12, 0, 0, tzinfo=timezone.utc)
+    heartbeat_path = tmp_path / "heartbeat.json"
+    _write_heartbeat(heartbeat_path, age_seconds=30.0, now=now)
+    handle = WorkerHandle(
+        symbol="RELIANCE.NS", process=_FakeProcess([]), log_path=tmp_path / "session.log", heartbeat_path=heartbeat_path,
+    )
+
+    status = check_worker_health(handle, log_lines=[], now=now, stale_after_seconds=10.0)
+
+    assert status.health == WorkerHealth.UNRESPONSIVE
+
+
+def test_check_worker_health_backward_compatible_when_heartbeat_path_is_none(tmp_path):
+    """Existing callers/tests that build a WorkerHandle without a
+    heartbeat_path (the field's own default) must behave exactly as
+    before this fix -- the staleness check is simply skipped, never an
+    error."""
+    handle = WorkerHandle(symbol="RELIANCE.NS", process=_FakeProcess([]), log_path=tmp_path / "session.log")
+
+    status = check_worker_health(handle, log_lines=["[RELIANCE.NS] bar#   1  NO_SIGNAL\n"])
+
+    assert status.health == WorkerHealth.RUNNING
+
+
+def test_should_restart_never_restarts_an_unresponsive_worker():
+    """UNRESPONSIVE means the process object is still alive (poll()
+    returned None) -- should_restart has no authority to kill it, so it
+    must never be treated as a restart candidate, exactly like RUNNING/
+    GAP_DETECTED."""
+    status = WorkerStatus(symbol="RELIANCE.NS", health=WorkerHealth.UNRESPONSIVE, pid=1, exit_code=None, restarts=0, detail="")
+    assert should_restart(status, max_restarts=5) is False
+
+
 # --- should_restart -------------------------------------------------------------
 
 
@@ -491,3 +593,8 @@ def test_launch_worker_real_subprocess_runs_to_completion_and_logs_bars(tmp_path
     assert "bar#" in log_text
     assert handle.log_path.parent.name == "logs"
     assert handle.log_path.parent.parent.name == "AAPL"
+
+    assert handle.heartbeat_path is not None
+    assert handle.heartbeat_path.name == "heartbeat.json"
+    assert handle.heartbeat_path.parent.name == "AAPL"
+    assert handle.heartbeat_path.exists()  # the real worker's own _run_paper_live_loop wrote it

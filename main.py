@@ -1489,11 +1489,33 @@ def run_fleet_supervise_command(args: argparse.Namespace) -> None:
     write_heartbeat(supervisor_heartbeat_path)
 
     handles = {}
-    for i, symbol in enumerate(symbols):
-        if i > 0 and args.launch_stagger_seconds > 0:
-            time_module.sleep(args.launch_stagger_seconds)
-        handles[symbol] = _relaunch(symbol, 0)
-        print(f"  launched {symbol} (pid={handles[symbol].process.pid})")
+    try:
+        for i, symbol in enumerate(symbols):
+            if i > 0 and args.launch_stagger_seconds > 0:
+                time_module.sleep(args.launch_stagger_seconds)
+            handles[symbol] = _relaunch(symbol, 0)
+            print(f"  launched {symbol} (pid={handles[symbol].process.pid})")
+    except Exception as exc:
+        # Red-team finding (2026-09-22): this loop previously had no
+        # exception boundary at all -- a single symbol's launch_worker()
+        # raising (subprocess.Popen failing: missing interpreter, OS
+        # process-table exhaustion, a bad path) propagated straight out of
+        # this function, past the try/finally below (this loop runs
+        # BEFORE it), leaving every already-launched worker as an
+        # ORPHANED, never-terminated subprocess and giving the operator a
+        # raw traceback instead of a fleet-level report. Mirrors
+        # poll_fleet_once's own per-symbol try/except fix for the exact
+        # same class of gap in the ongoing-supervision loop.
+        launched = sorted(handles)
+        not_launched = [s for s in symbols if s not in handles]
+        print(
+            f"FLEET SUPERVISE: launch failed on {symbol!r} ({type(exc).__name__}: {exc}) -- "
+            f"terminating the {len(launched)} worker(s) already launched ({', '.join(launched) or 'none'}) "
+            f"before they are orphaned. Never launched: {', '.join(not_launched) or 'none'}.",
+            file=sys.stderr,
+        )
+        shutdown_fleet(handles)
+        raise SystemExit(1) from exc
 
     stop_requested = False
 

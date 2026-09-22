@@ -10,6 +10,7 @@ import pytest
 
 from live.heartbeat import (
     classify_previous_session,
+    read_heartbeat_age_seconds,
     write_graceful_shutdown_marker,
     write_heartbeat,
 )
@@ -79,3 +80,31 @@ def test_corrupted_heartbeat_file_is_treated_as_abnormal_not_silently_ignored(pa
     report = classify_previous_session(heartbeat_path, shutdown_path)
     assert report.classification == "ABNORMAL_TERMINATION"
     assert "could not be read/parsed" in report.detail
+
+
+# --- read_heartbeat_age_seconds (red-team finding, 2026-09-22) --------------
+# Added so live/fleet_supervisor.py's check_worker_health can detect a
+# worker that is alive-but-stuck: nothing in this codebase previously read
+# heartbeat.json WHILE a session was running, only at the NEXT session's
+# own startup.
+
+
+def test_read_heartbeat_age_seconds_returns_the_real_elapsed_time(tmp_path):
+    path = tmp_path / "heartbeat.json"
+    now = datetime(2026, 9, 22, 12, 0, 0, tzinfo=timezone.utc)
+    write_heartbeat(path, now=now - timedelta(seconds=42))
+
+    age = read_heartbeat_age_seconds(path, now=now)
+
+    assert age == pytest.approx(42.0)
+
+
+def test_read_heartbeat_age_seconds_returns_none_when_file_is_missing(tmp_path):
+    assert read_heartbeat_age_seconds(tmp_path / "does_not_exist.json") is None
+
+
+def test_read_heartbeat_age_seconds_returns_none_for_a_corrupted_file(tmp_path):
+    path = tmp_path / "heartbeat.json"
+    path.write_text("not valid json{{{")
+
+    assert read_heartbeat_age_seconds(path) is None

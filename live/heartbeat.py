@@ -66,6 +66,30 @@ def write_graceful_shutdown_marker(path: Path, *, reason: str, now: datetime | N
         pass
 
 
+def read_heartbeat_age_seconds(path: Path, *, now: datetime | None = None) -> float | None:
+    """Red-team finding (2026-09-22): nothing in this codebase reads
+    heartbeat.json WHILE a session is running -- classify_previous_session
+    above only ever looks at it at the NEXT process's own startup, and
+    live/fleet_supervisor.py's own health check never opens it at all,
+    relying entirely on log-line content with no time component. A worker
+    that hangs inside a blocking call (e.g. a feed read with no timeout)
+    stops calling write_heartbeat() -- exactly like it stops printing new
+    log lines -- so this file going silently stale IS real, load-bearing
+    evidence of a stuck loop, not merely a liveness nicety. Returns None
+    (not 0, not raising) if the file is missing or unreadable -- an
+    absent/corrupt heartbeat is a DIFFERENT condition from a genuinely
+    stale one, and callers should decide separately how to treat "no
+    evidence at all" versus "evidence this is old." Best-effort, matching
+    write_heartbeat's own posture: a read failure here must never raise
+    into a caller's own health-check loop."""
+    try:
+        data = json.loads(path.read_text())
+        last_heartbeat_at = _parse_iso(data["written_at"])
+    except (OSError, ValueError, KeyError):
+        return None
+    return ((now or datetime.now(timezone.utc)) - last_heartbeat_at).total_seconds()
+
+
 @dataclass(frozen=True)
 class PreviousSessionReport:
     classification: str

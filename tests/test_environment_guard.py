@@ -258,6 +258,31 @@ def test_ensure_running_under_project_venv_never_loops_when_the_guard_env_var_is
     assert calls == []
 
 
+def test_ensure_running_under_project_venv_fails_loudly_not_with_a_raw_traceback_when_the_venv_python_is_corrupted(tmp_path, monkeypatch):
+    """Red-team finding (2026-09-22): venv_python.exists() being True does
+    not mean it is a VALID interpreter -- a corrupted/non-PE binary at that
+    exact path raises OSError from subprocess.run. This call sits before
+    main()'s own try/except _CONTROLLED_ERRORS block, so an uncaught
+    OSError here would previously have been a raw traceback instead of
+    this module's own clear, actionable message."""
+    exe = _make_fake_venv(tmp_path)  # venv_python.exists() is True
+    wrong_python = tmp_path / "system" / "python.exe"
+    wrong_python.parent.mkdir(parents=True)
+    wrong_python.write_text("stand-in")
+    monkeypatch.delenv("TRADINGAGENTS_VENV_REEXEC_GUARD", raising=False)
+
+    def _broken_runner(command, **kwargs):
+        raise OSError("[WinError 193] %1 is not a valid Win32 application")
+
+    with pytest.raises(SystemExit) as exc_info:
+        ensure_running_under_project_venv(
+            executable=str(wrong_python), project_root=tmp_path, runner=_broken_runner,
+        )
+
+    assert exc_info.value.code == 1
+    assert isinstance(exc_info.value.__cause__, OSError)  # the real cause is preserved, not swallowed
+
+
 def test_ensure_running_under_project_venv_does_nothing_when_no_venv_exists_on_this_machine(tmp_path, monkeypatch):
     """No venv/ directory at all (e.g. a from-scratch clone that never ran
     setup) -- there is nothing to re-exec INTO. Must return quietly and let

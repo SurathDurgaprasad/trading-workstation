@@ -251,7 +251,26 @@ def ensure_running_under_project_venv(
     )
     env = dict(os.environ)
     env[_REEXEC_GUARD_ENV_VAR] = "1"
-    completed = runner([str(venv_python), *command_line], env=env)
+    try:
+        completed = runner([str(venv_python), *command_line], env=env)
+    except OSError as exc:
+        # Red-team finding (2026-09-22): this call sits BEFORE main()'s own
+        # try/except _CONTROLLED_ERRORS block (it must -- the whole point is
+        # to run before anything else does), so an OSError here (e.g.
+        # venv_python.exists() is True but the file is a corrupted/non-PE
+        # binary -- a real, distinct failure mode from "missing entirely")
+        # would otherwise propagate as a raw, unactionable traceback instead
+        # of this module's own clear, operator-facing message style. Fails
+        # loudly and immediately either way -- subprocess.run against a
+        # broken interpreter raises synchronously, it does not hang -- this
+        # only changes HOW clearly that failure is reported.
+        print(
+            f"STARTUP: found {venv_python} but could not execute it ({type(exc).__name__}: {exc}) -- "
+            "the venv may be corrupted or incomplete. Recreate it (e.g. 'python -m venv venv' followed by "
+            "'pip install -r requirements.txt') and try again.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
     sys.exit(completed.returncode)
 
 

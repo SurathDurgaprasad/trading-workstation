@@ -1862,6 +1862,49 @@ def test_run_fleet_supervise_command_mock_never_runs_the_startup_environment_che
     assert "FLEET SUPERVISE: 2 symbol(s)" in capsys.readouterr().out
 
 
+def test_run_fleet_supervise_command_cleans_up_already_launched_workers_when_a_later_one_fails_to_launch(tmp_path, capsys):
+    """Red-team finding (2026-09-22): the initial launch loop had no
+    exception boundary at all -- a single symbol's launch_worker() raising
+    partway through a multi-symbol launch previously propagated a raw
+    traceback AND left every already-launched worker as an orphaned,
+    never-terminated subprocess (this ran before the try/finally that
+    calls shutdown_fleet). Proven with two REAL, short-lived mock workers
+    launched successfully, then a third symbol's launch forced to fail."""
+    import live.fleet_supervisor as fleet_supervisor_module
+
+    real_launch_worker = fleet_supervisor_module.launch_worker
+    launched_handles = []
+
+    def _launch_worker_that_fails_on_msft(*, symbol, **kwargs):
+        if symbol == "MSFT":
+            raise OSError("simulated subprocess.Popen failure")
+        handle = real_launch_worker(symbol=symbol, **kwargs)
+        launched_handles.append(handle)
+        return handle
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(fleet_supervisor_module, "launch_worker", _launch_worker_that_fails_on_msft)
+        args = parse_args([
+            "fleet-supervise", "--symbols", "AAPL,MSFT,GOOG", "--runtime-dir", str(tmp_path),
+            "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1",
+            "--max-polls", "10", "--launch-stagger-seconds", "0",
+        ])
+        with pytest.raises(SystemExit) as exc_info:
+            run_fleet_supervise_command(args)
+
+    assert exc_info.value.code == 1
+    output = capsys.readouterr()
+    assert "launch failed on 'MSFT'" in output.err
+    assert "AAPL" in output.err  # named as already-launched
+    assert "GOOG" in output.err  # named as never-launched (loop stopped at MSFT)
+
+    # The real cleanup claim: AAPL's already-launched process must actually
+    # be terminated, not left running as an orphan.
+    assert len(launched_handles) == 1
+    launched_handles[0].process.wait(timeout=10)
+    assert launched_handles[0].process.poll() is not None
+
+
 def test_fleet_summary_subcommand_is_recognized_without_the_analyze_default_prefix():
     """Same regression class as fleet-supervise's own equivalent test --
     a new subparser silently gets misrouted through the implicit
