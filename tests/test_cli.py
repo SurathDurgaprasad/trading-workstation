@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 
 from main import (
@@ -2229,3 +2231,73 @@ def test_hypothesis_registry_command_filters_by_status(capsys):
     output = capsys.readouterr().out
     assert "H_ENTRY_001" in output  # the one SUPPORTED hypothesis
     assert "H_EXIT_001" not in output  # OPEN, must be excluded
+
+
+# --- main() launcher hardening: ensure_running_under_project_venv wiring ----
+# 2026-09-22 incident (see live/environment_guard.py's own module docstring):
+# fleet-supervise ran a full real session under the wrong interpreter before
+# anyone noticed. main() now calls ensure_running_under_project_venv() for
+# the two commands that ever open a real Dhan connection, BEFORE either
+# command's own body runs -- proven here by having the (patched) check raise
+# a distinctive sentinel and asserting it fires (or does not) at the right
+# time, rather than mocking out the entire live pipeline just to prove
+# ordering.
+
+
+class _SentinelCalled(Exception):
+    pass
+
+
+def _install_venv_check_sentinel(monkeypatch):
+    import live.environment_guard as environment_guard
+
+    def _boom(*a, **kw):
+        raise _SentinelCalled()
+
+    monkeypatch.setattr(environment_guard, "ensure_running_under_project_venv", _boom)
+
+
+def test_main_runs_the_venv_check_for_fleet_supervise_source_dhan_before_anything_else(monkeypatch, tmp_path):
+    import main as main_module
+
+    _install_venv_check_sentinel(monkeypatch)
+    monkeypatch.setattr(sys, "argv", [
+        "main.py", "fleet-supervise", "--symbols", "AAPL", "--runtime-dir", str(tmp_path), "--source", "dhan",
+    ])
+
+    with pytest.raises(_SentinelCalled):
+        main_module.main()
+
+
+def test_main_runs_the_venv_check_for_paper_live_source_dhan_before_anything_else(monkeypatch, tmp_path):
+    import main as main_module
+
+    _install_venv_check_sentinel(monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["main.py", "paper-live", "--symbol", "RELIANCE.NS", "--source", "dhan"])
+
+    with pytest.raises(_SentinelCalled):
+        main_module.main()
+
+
+def test_main_never_runs_the_venv_check_for_fleet_supervise_source_mock(monkeypatch, tmp_path, capsys):
+    import main as main_module
+
+    _install_venv_check_sentinel(monkeypatch)
+    monkeypatch.setattr(sys, "argv", [
+        "main.py", "fleet-supervise", "--symbols", "AAPL,MSFT", "--runtime-dir", str(tmp_path),
+        "--source", "mock", "--max-bars", "3", "--poll-interval-seconds", "1",
+        "--max-polls", "10", "--launch-stagger-seconds", "0",
+    ])
+
+    main_module.main()  # must not raise _SentinelCalled
+
+    assert "FLEET SUPERVISE: 2 symbol(s)" in capsys.readouterr().out
+
+
+def test_main_never_runs_the_venv_check_for_an_unrelated_command(monkeypatch):
+    import main as main_module
+
+    _install_venv_check_sentinel(monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["main.py", "hypothesis-registry"])
+
+    main_module.main()  # must not raise _SentinelCalled

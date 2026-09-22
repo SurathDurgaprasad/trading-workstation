@@ -4908,6 +4908,25 @@ def main() -> None:
     setup_logging()
     args = parse_args()
 
+    # 2026-09-22 incident (see live/environment_guard.py's own module
+    # docstring): fleet-supervise ran a full real session under the wrong
+    # (system, not venv) interpreter before the gap was noticed. The
+    # fail-closed check inside run_fleet_supervise_command/
+    # _build_market_data_source (added the same night) stops that from
+    # happening silently again; this transparently FIXES it instead,
+    # before either of those ever runs, for the two commands that ever
+    # open a real Dhan connection -- an operator (or a scheduled task) that
+    # merely runs `python main.py fleet-supervise ...` now ends up under
+    # the correct interpreter regardless of which `python` was on PATH.
+    if args.command == "fleet-supervise" and getattr(args, "source", None) == "dhan":
+        from live.environment_guard import ensure_running_under_project_venv
+
+        ensure_running_under_project_venv()
+    elif args.command == "paper-live" and getattr(args, "source", None) == "dhan":
+        from live.environment_guard import ensure_running_under_project_venv
+
+        ensure_running_under_project_venv()
+
     try:
         if args.command == "backtest":
             run_backtest_command(args)

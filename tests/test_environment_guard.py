@@ -10,6 +10,7 @@ import pytest
 from live.environment_guard import (
     EnvironmentCheckReport,
     CheckResult,
+    ensure_running_under_project_venv,
     run_startup_environment_checks,
     verify_dependency_fingerprint,
     verify_required_runtime_imports,
@@ -186,3 +187,91 @@ def test_environment_check_report_format_report_shows_pass_and_fail_per_check(tm
 
     assert "[PASS] a: fine" in text
     assert "[FAIL] b: broken" in text
+
+
+# --- ensure_running_under_project_venv (self-correcting launcher hardening) --
+
+
+class _FakeCompletedProcess:
+    def __init__(self, returncode: int):
+        self.returncode = returncode
+
+
+def test_ensure_running_under_project_venv_is_a_no_op_when_already_correct(tmp_path):
+    exe = _make_fake_venv(tmp_path)
+    calls = []
+
+    result = ensure_running_under_project_venv(
+        executable=str(exe), project_root=tmp_path, runner=lambda *a, **kw: calls.append((a, kw)),
+    )
+
+    assert result is False
+    assert calls == [], "the common case (already correct) must never spawn a subprocess"
+
+
+def test_ensure_running_under_project_venv_reexecs_under_the_venv_and_exits_with_the_childs_code(tmp_path, monkeypatch):
+    """The 2026-09-22 incident itself, reproduced and proven fixed: launched
+    under a wrong interpreter, must transparently relaunch under the
+    project's own venv python with the SAME argv, and propagate the
+    spawned child's own exit code rather than swallowing or inventing one."""
+    exe = _make_fake_venv(tmp_path)
+    wrong_python = tmp_path / "system" / "python.exe"
+    wrong_python.parent.mkdir(parents=True)
+    wrong_python.write_text("system interpreter stand-in")
+    monkeypatch.delenv("TRADINGAGENTS_VENV_REEXEC_GUARD", raising=False)
+
+    captured = {}
+
+    def fake_runner(command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs.get("env")
+        return _FakeCompletedProcess(returncode=7)
+
+    with pytest.raises(SystemExit) as exc_info:
+        ensure_running_under_project_venv(
+            executable=str(wrong_python), project_root=tmp_path,
+            argv=["main.py", "fleet-supervise", "--symbols", "AAPL", "--source", "dhan"],
+            runner=fake_runner,
+        )
+
+    assert exc_info.value.code == 7, "must propagate the spawned child's own exit code, not invent one"
+    assert captured["command"] == [str(exe), "main.py", "fleet-supervise", "--symbols", "AAPL", "--source", "dhan"]
+    assert captured["env"]["TRADINGAGENTS_VENV_REEXEC_GUARD"] == "1", "the re-exec'd child must carry the loop guard"
+
+
+def test_ensure_running_under_project_venv_never_loops_when_the_guard_env_var_is_already_set(tmp_path, monkeypatch):
+    """Safety net: if the guard variable is already set (this IS the
+    re-exec'd child, or something set it), never re-exec again even if
+    somehow still not inside the venv -- prevents an infinite subprocess
+    chain on a broken environment."""
+    wrong_python = tmp_path / "system" / "python.exe"
+    wrong_python.parent.mkdir(parents=True)
+    wrong_python.write_text("stand-in")
+    monkeypatch.setenv("TRADINGAGENTS_VENV_REEXEC_GUARD", "1")
+    calls = []
+
+    result = ensure_running_under_project_venv(
+        executable=str(wrong_python), project_root=tmp_path, runner=lambda *a, **kw: calls.append((a, kw)),
+    )
+
+    assert result is False
+    assert calls == []
+
+
+def test_ensure_running_under_project_venv_does_nothing_when_no_venv_exists_on_this_machine(tmp_path, monkeypatch):
+    """No venv/ directory at all (e.g. a from-scratch clone that never ran
+    setup) -- there is nothing to re-exec INTO. Must return quietly and let
+    the caller's own fail-closed verify_venv_interpreter check report the
+    real problem, not raise or loop here."""
+    wrong_python = tmp_path / "system" / "python.exe"
+    wrong_python.parent.mkdir(parents=True)
+    wrong_python.write_text("stand-in")
+    monkeypatch.delenv("TRADINGAGENTS_VENV_REEXEC_GUARD", raising=False)
+    calls = []
+
+    result = ensure_running_under_project_venv(
+        executable=str(wrong_python), project_root=tmp_path, runner=lambda *a, **kw: calls.append((a, kw)),
+    )
+
+    assert result is False
+    assert calls == []

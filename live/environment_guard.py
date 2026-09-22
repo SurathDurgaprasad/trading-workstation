@@ -29,7 +29,9 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -182,6 +184,75 @@ def verify_dependency_fingerprint(*, requirements_path: Path | None = None) -> C
             f"{len(drifted)} version(s) drifted from requirements.txt (non-blocking): " + "; ".join(drifted),
         )
     return CheckResult("dependency_fingerprint", True, "every declared dependency's installed version matches requirements.txt.")
+
+
+_REEXEC_GUARD_ENV_VAR = "TRADINGAGENTS_VENV_REEXEC_GUARD"
+
+
+def _venv_python_path(project_root: Path) -> Path:
+    venv_dir = (project_root / "venv").resolve()
+    return venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def ensure_running_under_project_venv(
+    *, executable: str | None = None, project_root: Path | None = None, argv: list[str] | None = None,
+    runner=subprocess.run,
+) -> bool:
+    """Self-correcting launcher hardening, layered ON TOP of (never a
+    replacement for) ``verify_venv_interpreter``'s own fail-closed check:
+    call this FIRST, before any real work -- if the current process is not
+    already running under this project's own venv, transparently
+    re-executes the exact same command line under the correct interpreter
+    instead of merely failing with a message an operator has to notice and
+    act on themselves.
+
+    This is what makes the 2026-09-22 incident ("fleet-supervise launched
+    under the system Python for an entire session") structurally impossible
+    to repeat, regardless of how the process was invoked -- typed directly,
+    from a scheduled task, from a wrapper script -- rather than only
+    detected after the fact. ``run_fleet_supervise_command`` and
+    ``_build_market_data_source`` (main.py) both still call
+    ``run_startup_environment_checks`` afterward, unconditionally -- this
+    function is a convenience that makes that later check almost always
+    find nothing to report, not a replacement for it (a machine with no
+    venv at all, or a broken one, still needs that fail-closed check to
+    actually stop the launch).
+
+    Returns False whenever this process's own execution continues normally
+    (already correct, or re-exec was not possible/needed -- e.g. no venv on
+    this machine at all, left for the caller's own fail-closed check to
+    report). When a re-exec IS performed, this function never returns at
+    all: it calls ``sys.exit()`` with the spawned child's own exit code, so
+    the parent process's only remaining job is to disappear once the real,
+    correctly-launched child is done. Guarded by an environment variable
+    against looping forever if the venv itself is missing or broken:
+    re-execs AT MOST ONCE per process tree."""
+    exe = Path(executable if executable is not None else sys.executable).resolve()
+    root = project_root if project_root is not None else _default_project_root()
+    expected_dir = (root / "venv").resolve()
+    try:
+        exe.relative_to(expected_dir)
+        return False  # already correct -- the common case, must be a fast no-op
+    except ValueError:
+        pass
+
+    if os.environ.get(_REEXEC_GUARD_ENV_VAR):
+        return False  # already re-exec'd once in this process tree -- never loop
+
+    venv_python = _venv_python_path(root)
+    if not venv_python.exists():
+        return False  # nothing to re-exec INTO; the caller's own fail-closed check reports this
+
+    command_line = argv if argv is not None else sys.argv
+    print(
+        f"STARTUP: launched under {exe}, not this project's own venv ({expected_dir}) -- "
+        f"transparently re-launching under {venv_python} instead.",
+        flush=True,  # must land before the re-exec'd child's own output, across the process boundary
+    )
+    env = dict(os.environ)
+    env[_REEXEC_GUARD_ENV_VAR] = "1"
+    completed = runner([str(venv_python), *command_line], env=env)
+    sys.exit(completed.returncode)
 
 
 def run_startup_environment_checks(
