@@ -473,7 +473,15 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "null result on this first, simplest operationalization of the mechanism; it does not by itself "
                 "rule out every possible mean-reversion formulation (different lookback windows, different exit "
                 "structure tied to reversion-to-mean rather than the baseline's fixed R:R, or a shorter holding "
-                "horizon were not tested here and remain genuinely open questions, not evidence against)."
+                "horizon were not tested here and remain genuinely open questions, not evidence against). "
+                "COST MODEL DISCLOSURE (R6, continuous red-team follow-up, 2026-09-23): this run used the "
+                "generic, non-NSE-specific default backtesting.costs.CostModel() -- NOT "
+                "CostModel.india_nse_intraday_2026(), the preset every later hypothesis in this registry uses "
+                "(see H_MEANREV_003's own entry, which discloses this retroactively). The NSE preset is strictly "
+                "more expensive (~0.11% extra round-trip: added fees_pct/taxes_pct, doubled exit slippage), so "
+                "re-running with it would push every point estimate above further negative, not toward "
+                "significance -- this does not threaten the REJECTED verdict, and no rerun is planned; disclosed "
+                "here for completeness now that it was found undisclosed in this entry specifically."
             ),
         ),
         HypothesisRecord(
