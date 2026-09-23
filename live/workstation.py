@@ -104,12 +104,14 @@ def get_live_sim_status() -> dict:
     try:
         active, _, reason = state_store.kill_switch_state()
         pending_count = len(state_store.list_pending())
+        feed_status_rows = state_store.list_feed_status()
     finally:
         state_store.close()
     report = reconcile(engine.store)
+    status, source = _summarize_feed_source(feed_status_rows)
     return {
-        "status": "SIMULATED",
-        "source": "MOCK",
+        "status": status,
+        "source": source,
         "kill_switch_active": active,
         "kill_switch_reason": reason,
         "pending_approvals_count": pending_count,
@@ -117,6 +119,33 @@ def get_live_sim_status() -> dict:
         "open_positions_count": sum(1 for p in engine.store.list_positions() if p.status.value == "OPEN"),
         "reconciliation_ok": report.ok,
     }
+
+
+def _summarize_feed_source(feed_status_rows: list) -> tuple[str, str]:
+    """Red-team finding (2026-09-22 continuous audit): get_live_sim_status()
+    previously HARDCODED status="SIMULATED"/source="MOCK" unconditionally --
+    never actually derived from what was running. This is dormant on the
+    dashboard itself (dashboard/app.py never renders these two keys), but
+    IS surfaced verbatim to any MCP client via get_live_sim_status_tool
+    (mcp_server/server.py), where it would falsely report "source: MOCK"
+    during a genuine, real --source dhan live session. Derives an honest
+    answer from live_state.db's own feed_status table (written per-symbol
+    by whichever pipeline actually ran, real DataSource/DataStatus values
+    -- see live/state_store.py::FeedStatusRecord) instead of a fixed
+    string. No feed data yet (a fresh session, or one that hasn't
+    processed a single bar) is reported as UNKNOWN, never guessed as
+    either MOCK or a real source. Mixed sources across symbols (not
+    reachable via fleet-supervise today, since one --source applies to
+    every worker, but not structurally impossible for some future direct
+    multi-process setup) is reported as MIXED rather than silently
+    picking one and hiding the other."""
+    if not feed_status_rows:
+        return "UNKNOWN", "UNKNOWN"
+    sources = {row.source for row in feed_status_rows}
+    statuses = {row.status for row in feed_status_rows}
+    source = sources.pop() if len(sources) == 1 else "MIXED"
+    status = statuses.pop() if len(statuses) == 1 else "MIXED"
+    return status, source
 
 
 def get_pending_approvals() -> list:

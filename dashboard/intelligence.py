@@ -52,9 +52,10 @@ def get_latest_scan():
     if not SCANNER_DB_PATH.exists():
         return None
     store = ScanHistoryStore(SCANNER_DB_PATH)
-    report = store.latest_report()
-    store.close()
-    return report
+    try:
+        return store.latest_report()
+    finally:
+        store.close()
 
 
 def get_latest_decision(symbol: str):
@@ -63,9 +64,10 @@ def get_latest_decision(symbol: str):
     if not DECISIONS_DB_PATH.exists():
         return None
     store = DecisionStore(DECISIONS_DB_PATH)
-    decision = store.latest_decision_for_symbol(symbol)
-    store.close()
-    return decision
+    try:
+        return store.latest_decision_for_symbol(symbol)
+    finally:
+        store.close()
 
 
 def get_latest_research(symbol: str):
@@ -74,9 +76,10 @@ def get_latest_research(symbol: str):
     if not RESEARCH_DB_PATH.exists():
         return None
     store = ResearchStore(RESEARCH_DB_PATH)
-    report = store.latest_report_for_symbol(symbol)
-    store.close()
-    return report
+    try:
+        return store.latest_report_for_symbol(symbol)
+    finally:
+        store.close()
 
 
 def get_learning_snapshot() -> dict | None:
@@ -97,31 +100,39 @@ def get_learning_snapshot() -> dict | None:
 
     prediction_store = PredictionStore(PREDICTIONS_DB_PATH)
     decision_store = DecisionStore(DECISIONS_DB_PATH) if DECISIONS_DB_PATH.exists() else None
+    try:
+        items: list[EvaluatedPrediction] = []
+        for prediction in prediction_store.list_predictions():
+            evaluation = prediction_store.latest_evaluation_for_prediction(prediction.prediction_id)
+            if evaluation is None:
+                continue
+            decision = decision_store.get_decision(prediction.decision_id) if decision_store is not None else None
+            items.append(EvaluatedPrediction(prediction=prediction, evaluation=evaluation, decision=decision))
 
-    items: list[EvaluatedPrediction] = []
-    for prediction in prediction_store.list_predictions():
-        evaluation = prediction_store.latest_evaluation_for_prediction(prediction.prediction_id)
-        if evaluation is None:
-            continue
-        decision = decision_store.get_decision(prediction.decision_id) if decision_store is not None else None
-        items.append(EvaluatedPrediction(prediction=prediction, evaluation=evaluation, decision=decision))
-
-    # Mission requirement (Section 16 -- "PREDICTIONS: active/resolved/
-    # accuracy") found genuinely missing via this session's own adversarial
-    # audit: `items` above only ever holds EVALUATED predictions -- a
-    # prediction whose latest evaluation genuinely says ACTIVE (still
-    # unresolved) was silently invisible on the dashboard, which showed
-    # only "N evaluated prediction(s) considered" with no breakdown of how
-    # many of those are still pending. Reuses predictions.tracker.
-    # summarize_predictions verbatim -- the SAME function shadow-run's own
-    # "[4/4] Learning summary" CLI printout already uses -- rather than
-    # inventing a second counting method that could silently disagree
-    # with it.
-    prediction_summary = summarize_predictions(prediction_store.list_all_evaluations())
-
-    prediction_store.close()
-    if decision_store is not None:
-        decision_store.close()
+        # Mission requirement (Section 16 -- "PREDICTIONS: active/resolved/
+        # accuracy") found genuinely missing via this session's own adversarial
+        # audit: `items` above only ever holds EVALUATED predictions -- a
+        # prediction whose latest evaluation genuinely says ACTIVE (still
+        # unresolved) was silently invisible on the dashboard, which showed
+        # only "N evaluated prediction(s) considered" with no breakdown of how
+        # many of those are still pending. Reuses predictions.tracker.
+        # summarize_predictions verbatim -- the SAME function shadow-run's own
+        # "[4/4] Learning summary" CLI printout already uses -- rather than
+        # inventing a second counting method that could silently disagree
+        # with it.
+        prediction_summary = summarize_predictions(prediction_store.list_all_evaluations())
+    finally:
+        # Red-team finding (2026-09-22 continuous audit): both stores were
+        # previously closed with a bare call AFTER all the computation above
+        # -- any exception raised mid-computation (e.g. from one of the
+        # compute_* calls below, or from a store lookup) left both
+        # connections open on that path, inconsistent with this exact
+        # codebase's own established try/finally convention for the
+        # identical operation elsewhere (live/workstation.py,
+        # live/fleet_summary.py).
+        prediction_store.close()
+        if decision_store is not None:
+            decision_store.close()
 
     if not items:
         return None
@@ -156,13 +167,15 @@ def get_paper_execution_snapshot() -> dict | None:
         return None
 
     store = PaperStore(PAPER_DB_PATH)
-    account = store.get_account()
-    pending_orders = store.list_pending_orders()
-    positions = store.list_positions()
-    open_positions = [p for p in positions if p.status == PositionStatus.OPEN]
-    closed_positions = [p for p in positions if p.status == PositionStatus.CLOSED]
-    journal_entries = sorted(store.list_journal_entries(), key=lambda e: _naive(e.created_at), reverse=True)[:20]
-    store.close()
+    try:
+        account = store.get_account()
+        pending_orders = store.list_pending_orders()
+        positions = store.list_positions()
+        open_positions = [p for p in positions if p.status == PositionStatus.OPEN]
+        closed_positions = [p for p in positions if p.status == PositionStatus.CLOSED]
+        journal_entries = sorted(store.list_journal_entries(), key=lambda e: _naive(e.created_at), reverse=True)[:20]
+    finally:
+        store.close()
 
     if account is None:
         return None
@@ -191,9 +204,11 @@ def get_scheduler_status_snapshot() -> dict | None:
         return None
 
     store = SchedulerRunStore(SCHEDULER_DB_PATH)
-    active_lock = store.active_lock()
-    recent_runs = store.list_runs(limit=20)
-    store.close()
+    try:
+        active_lock = store.active_lock()
+        recent_runs = store.list_runs(limit=20)
+    finally:
+        store.close()
 
     return {"active_lock": active_lock, "recent_runs": recent_runs}
 
@@ -221,8 +236,10 @@ def get_kill_switch_status() -> dict:
 
     STATE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     store = LiveStateStore(STATE_DB_PATH)
-    active, activated_at, reason = store.kill_switch_state()
-    store.close()
+    try:
+        active, activated_at, reason = store.kill_switch_state()
+    finally:
+        store.close()
     return {"active": active, "activated_at": activated_at, "reason": reason}
 
 
