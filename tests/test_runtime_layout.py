@@ -48,6 +48,26 @@ def test_empty_symbol_raises():
         symbol_runtime_paths("runtime", "   ")
 
 
+@pytest.mark.parametrize("hostile_symbol", ["../../etc/passwd", "..\\..\\windows\\system32", "AAPL/../../secret", "A/B", "A\\B"])
+def test_a_symbol_containing_a_path_separator_or_parent_reference_is_rejected(hostile_symbol):
+    """Defensive hardening (2026-09-22 continuous red-team pass): every
+    current caller sources `symbol` from a trusted, operator-supplied
+    place -- not independently exploitable today -- but symbol_runtime_
+    paths must never resolve outside the given runtime_dir tree, so this
+    is rejected explicitly rather than left to accidentally work."""
+    with pytest.raises(ValueError, match="path separator"):
+        symbol_runtime_paths("runtime", hostile_symbol)
+
+
+def test_an_ordinary_dotted_symbol_still_works(tmp_path):
+    """Regression guard: the new check must not reject legitimate NSE-
+    suffixed symbols like 'RELIANCE.NS', which contain a dot but no path
+    separator or '..' sequence."""
+    paths = symbol_runtime_paths(str(tmp_path), "RELIANCE.NS")
+    assert paths.symbol == "RELIANCE.NS"
+    assert paths.root == tmp_path / "RELIANCE.NS"
+
+
 # --- ensure_symbol_runtime_dirs ----------------------------------------------
 
 

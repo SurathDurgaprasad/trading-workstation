@@ -61,6 +61,17 @@ def symbol_runtime_paths(runtime_dir: str | Path, symbol: str) -> SymbolRuntimeP
     normalized = symbol.strip().upper()
     if not normalized:
         raise ValueError("symbol must not be empty.")
+    if "/" in normalized or "\\" in normalized or ".." in normalized:
+        # Defensive hardening (2026-09-22 continuous red-team pass): every
+        # current caller sources `symbol` from an operator-supplied CLI
+        # argument or a local YAML watchlist file, never from network/HTTP
+        # input, so this was not independently exploitable today -- but a
+        # symbol containing a path separator or `..` could otherwise
+        # resolve `root` outside the intended runtime_dir tree entirely.
+        # Rejected explicitly rather than left to accidentally work (or
+        # accidentally break) if a future caller ever sources `symbol`
+        # from a less-trusted place.
+        raise ValueError(f"symbol must not contain a path separator or '..': {symbol!r}")
     root = Path(runtime_dir) / normalized
     return SymbolRuntimePaths(
         symbol=normalized,

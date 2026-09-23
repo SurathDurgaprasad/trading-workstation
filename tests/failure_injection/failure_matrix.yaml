@@ -776,3 +776,60 @@
   test: tests/test_scheduler_runner.py::test_a_scheduler_run_reclaimed_mid_flight_after_submitting_a_real_order_is_never_duplicated_by_the_retry
   evidence_grade: B
   note: "Real execution through run_tick -> _execute_slot -> main.run_shadow_run_command -> submit_signal(), no mocking of the execution path itself (only market/news/sector data providers are faked, this test file's own pre-existing convention). Honest mutation-testing limitation: disabling submit_signal()'s front-door idempotency check did NOT make this test fail -- the DB-level UNIQUE constraint + exception-handling back door (cycle 15) independently prevented the duplicate, a genuine defense-in-depth finding. This test's real contribution is proving the SCHEDULER-LEVEL composition (deterministic signal regeneration + correct due-slot retry eligibility after RECLAIMED status), not re-proving submit_signal()'s own already-mutation-tested idempotency."
+
+- id: FI-CANDLE-NONFINITE-TICK-NEVER-POISONS-STATE
+  component: dhan_candle_builder
+  failure: "a struct-decoded tick carries a NaN or +/-Inf price or volume (a legal IEEE-754 bit pattern from a corrupted/garbled packet) -- every prior validity comparison (price <= 0, deviation_pct > threshold) silently evaluates False against NaN/Inf, so the value previously passed every existing gate"
+  injection_method: "CandleBuilder.on_tick() fed price=float('nan')/float('inf')/float('-inf') directly, parametrized, both as the very first tick and immediately after a real, valid baseline tick"
+  expected:
+    detection: true
+    trade_authorization: N/A -- data-integrity finding in the live ingestion path, not a trade-authorization one
+    safe_response: "FIXED, 2026-09-22 full-system red-team pass. A new, explicit math.isfinite(price)/math.isfinite(volume) check runs FIRST, before the non-positive-price/negative-volume/deviation checks -- the tick is rejected outright (rejected_tick_counts['non_finite_value']), never merges into close/high/low/volume, and never updates _last_known_price (closing the specific mechanism by which a NaN could otherwise permanently poison the deviation-plausibility gate for the rest of that CandleBuilder instance's life)."
+    recovery: automatic -- the next valid tick is processed completely normally, proven directly (not merely assumed)
+    safety_invariant: INVALID_DATA_NO_TRADE
+  test: tests/test_dhan_candle_builder.py::test_non_finite_price_is_rejected_never_merged_into_a_bucket
+  evidence_grade: B
+  note: "A dedicated companion test (test_a_nan_price_never_permanently_poisons_the_deviation_gate_for_later_ticks) proves the poisoning mechanism specifically: sends a real baseline tick, a rejected NaN tick, then an actually-implausible (60% deviation) tick, and asserts the implausible tick is STILL correctly caught -- proving the NaN was never allowed to corrupt _last_known_price. Before this fix, a NaN tick would eventually reach OHLCVBar's own pydantic Field(gt=0) validation and raise an UNCAUGHT ValidationError -- a different exception type than the DhanWireFormatError the real WebSocket receive-thread callback (market_data_source.py) actually catches, a real crash risk on that thread. Full finding: docs/FULL_SYSTEM_RED_TEAM_2026-09-22.md, F2."
+
+- id: FI-FLEET-WORKER-ALIVE-BUT-STUCK-NOW-DETECTED
+  component: fleet_supervisor
+  failure: "a worker process is technically alive (poll() returns None) but has stopped making real progress -- e.g. stuck inside a blocking call before it ever reaches its own per-bar print-and-heartbeat step. Before this fix, check_worker_health had NO time-based signal at all: process-exit check plus a log-content scan for gap/disconnect markers, neither with an age component, so a worker stuck AFTER printing an ordinary bar line was reported RUNNING indefinitely. Not hypothetical -- docs/DHAN_FEED_INTERRUPTION_1514_INVESTIGATION_2026-09-22.md documents the real 2026-09-17 incident this exact scenario describes."
+  injection_method: "a WorkerHandle built with a real heartbeat.json artificially aged past the staleness threshold (via a controllable `now`), paired with ORDINARY (non-gap, non-disconnect) log lines that would previously have read as healthy"
+  expected:
+    detection: true
+    health: "new WorkerHealth.UNRESPONSIVE status, checked BEFORE the log-content scan (a stale heartbeat is treated as decisive: whatever the log last showed is old news either way)"
+    safe_response: "VISIBLE, not auto-recovered by design -- should_restart() deliberately never treats UNRESPONSIVE as a restart candidate, since the process object is still alive and this function has no authority to kill it; auto-recovery is an explicitly separate, larger decision left to a human operator or a future change, not made unsupervised"
+    recovery: manual (operator must notice and act -- this fix's own scope is detection/visibility only)
+    safety_invariant: NO_FALSE_HEALTH_SIGNAL
+  test: tests/test_fleet_supervisor.py::test_check_worker_health_unresponsive_when_heartbeat_is_stale_even_with_ordinary_log_lines
+  evidence_grade: B
+  note: "Threshold (300s) deliberately reuses live/dhan/market_data_source.py's own already-justified connected_idle_timeout_seconds rather than inventing a new number. Backward-compatibility proven directly (test_check_worker_health_backward_compatible_when_heartbeat_path_is_none): a WorkerHandle built without heartbeat_path (every pre-existing caller/test) behaves byte-for-byte as before this fix -- the staleness check is a pure addition, never a behavior change for the untouched path. Full finding: docs/FULL_SYSTEM_RED_TEAM_2026-09-22.md, F3."
+
+- id: FI-CRITIC-UNEXPECTED-EXCEPTION-FAILS-CLOSED
+  component: critic_gate
+  failure: "an unexpected exception during critic evaluation (malformed market-context input, missing benchmark data, a market-data provider raising mid-evaluation)"
+  injection_method: "critic_evaluate() (or the internal Decision-construction step) monkeypatched to raise a generic RuntimeError from inside CriticGate.evaluate()"
+  expected:
+    detection: true
+    trade_authorization: "the exception is caught and converted to blocked=True -- structurally cannot become an APPROVE/DOWNGRADE by falling through any exception path, since the caught branch is the ONLY place blocked is set on an exception"
+    safe_response: "returns CriticGateResult(blocked=True, ...) -- the same rejection shape a genuine HARD-severity check failure produces, so downstream code (live/pipeline.py) treats it identically to any other CRITIC_REJECTED outcome, no special-case needed"
+    recovery: automatic -- the NEXT signal's own evaluation is unaffected (no shared poisoned state across evaluations)
+    safety_invariant: EXCEPTION_NEVER_BECOMES_APPROVE
+  test: tests/test_live_critic_gate.py::test_an_unexpected_exception_during_evaluation_fails_closed_not_a_crash
+  evidence_grade: B
+  note: "Companion test test_a_provider_failure_fails_closed_not_open independently covers the data-fetch/refresh path specifically (_refresh_if_needed), a different code location from the evaluation path this row covers -- both converge on the same blocked=True shape. Re-verified during the 2026-09-22 full-system red-team pass (not newly added by it): critic/engine.py's evaluate() is a pure, deterministic function with no LLM/I/O in the authoritative path at all, so this row also stands as evidence that an LLM response can never reach this exception boundary in the first place -- there is nothing LLM-shaped to fail here. Full finding: docs/FULL_SYSTEM_RED_TEAM_2026-09-22.md, Critical Safety Invariants table."
+
+- id: FI-ENV-GUARD-CORRUPTED-VENV-INTERPRETER
+  component: environment_guard
+  failure: "venv/Scripts/python.exe (or venv/bin/python) EXISTS as a file but is a corrupted/non-PE binary, a distinct failure mode from 'missing entirely' -- subprocess.run against it raises OSError (e.g. Windows WinError 193) synchronously"
+  injection_method: "ensure_running_under_project_venv() called with a real fake-venv directory (venv_python.exists() is True) and an injected `runner` callable that raises OSError, simulating the real subprocess.run failure mode"
+  expected:
+    detection: true
+    health: N/A
+    safe_response: "FIXED, 2026-09-22 full-system red-team pass. The runner(...) call is now wrapped in try/except OSError, printing a clear, actionable message ('found <path> but could not execute it... recreate it') and exiting via SystemExit(1) from exc (the real cause preserved, not swallowed) -- this call sits deliberately BEFORE main()'s own try/except _CONTROLLED_ERRORS block (it must, to run before anything else does), so before this fix the raw OSError propagated as an unactionable traceback instead."
+    recovery: manual -- operator must recreate the venv; this fix only makes the failure immediately legible instead of a raw traceback
+    safety_invariant: FAIL_CLOSED_ON_BROKEN_ENVIRONMENT
+  test: tests/test_environment_guard.py::test_ensure_running_under_project_venv_fails_loudly_not_with_a_raw_traceback_when_the_venv_python_is_corrupted
+  evidence_grade: C
+  note: "evidence_grade C (deterministic injection via a fake runner callable), not B -- this test does not spawn a genuinely corrupted binary on disk (constructing a real non-PE file that reliably fails to exec across platforms is not worth the fragility); it proves the exception-handling contract given that subprocess.run DOES raise OSError for this failure class, which is standard, well-documented Python/OS behavior, not independently re-verified against a real corrupted binary in this test. subprocess.run raising synchronously (rather than hanging) for a non-executable target is itself standard OS/interpreter behavior, not something this project's own code controls. Full finding: docs/FULL_SYSTEM_RED_TEAM_2026-09-22.md, F5."
+  note: "Real execution through run_tick -> _execute_slot -> main.run_shadow_run_command -> submit_signal(), no mocking of the execution path itself (only market/news/sector data providers are faked, this test file's own pre-existing convention). Honest mutation-testing limitation: disabling submit_signal()'s front-door idempotency check did NOT make this test fail -- the DB-level UNIQUE constraint + exception-handling back door (cycle 15) independently prevented the duplicate, a genuine defense-in-depth finding. This test's real contribution is proving the SCHEDULER-LEVEL composition (deterministic signal regeneration + correct due-slot retry eligibility after RECLAIMED status), not re-proving submit_signal()'s own already-mutation-tested idempotency."

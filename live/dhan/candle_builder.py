@@ -55,6 +55,23 @@ class _BucketState:
     volume: float
     last_received_at: datetime
     last_source_timestamp: datetime
+    last_merged_timestamp: datetime
+    last_merged_price: float
+    """Red-team second-order finding (2026-09-22): the close-ordering fix
+    made `last_source_timestamp`/`close` track the CHRONOLOGICAL MAX tick
+    merged into this bucket, not the most-recently-MERGED one -- correct
+    for what a bar's own `close` should mean, but wrong for redelivery
+    detection, which needs "what was the last tick this instance actually
+    processed" (arrival order), independent of exchange-time order. Without
+    a separate pair of fields for this, a genuine wire-redelivery of an
+    out-of-order tick would stop matching `last_source_timestamp`/`close`
+    (since those had already moved on to a chronologically-later tick) and
+    its volume would be double-counted -- reopening the exact defect the
+    redelivery heuristic exists to prevent. These two fields are updated
+    UNCONDITIONALLY on every merged tick, mirroring the pre-fix behavior
+    of last_source_timestamp/close, and are used ONLY by
+    is_likely_redelivered_duplicate below -- never for the bar's own
+    close/source_timestamp fields."""
 
 
 class CandleBuilder:
@@ -490,17 +507,23 @@ class CandleBuilder:
         # Computed BEFORE _state is possibly (re)seeded below -- comparing
         # against the PREVIOUS tick already merged into this same, still-
         # open bucket. See on_tick's own docstring for why this exists and
-        # its documented, deliberate limitation.
+        # its documented, deliberate limitation. Deliberately compares
+        # against last_merged_timestamp/last_merged_price (arrival order),
+        # NOT last_source_timestamp/close (chronological-max order, since
+        # the close-ordering fix) -- see _BucketState's own docstring for
+        # why using the chronological-max fields here would miss a real
+        # redelivery of an out-of-order tick and double-count its volume.
         is_likely_redelivered_duplicate = (
             self._state is not None
-            and timestamp == self._state.last_source_timestamp
-            and price == self._state.close
+            and timestamp == self._state.last_merged_timestamp
+            and price == self._state.last_merged_price
         )
 
         if self._state is None:
             self._state = _BucketState(
                 bucket_start=bucket_start, open=price, high=price, low=price, close=price,
                 volume=0.0, last_received_at=received_at, last_source_timestamp=timestamp,
+                last_merged_timestamp=timestamp, last_merged_price=price,
             )
 
         if is_likely_redelivered_duplicate and volume > 0:
@@ -529,6 +552,11 @@ class CandleBuilder:
         self._state.volume += (0.0 if is_likely_redelivered_duplicate else volume)
         self._last_known_price = price
         self._last_known_timestamp = timestamp
+        # Unconditional, unlike close/last_source_timestamp below -- tracks
+        # arrival order for is_likely_redelivered_duplicate's own use on
+        # the NEXT tick, regardless of this tick's chronological position.
+        self._state.last_merged_timestamp = timestamp
+        self._state.last_merged_price = price
         if is_chronologically_advancing:
             self._state.close = price
             self._state.last_received_at = received_at

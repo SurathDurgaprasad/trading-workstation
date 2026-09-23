@@ -1051,3 +1051,26 @@ def test_a_nan_price_never_permanently_poisons_the_deviation_gate_for_later_tick
 
     assert implausible is None
     assert builder.rejected_tick_counts["implausible_deviation"] == 1
+
+
+def test_a_genuine_redelivery_of_an_out_of_order_tick_still_does_not_double_count_volume():
+    """Second-order red-team finding (2026-09-22): the close-ordering fix
+    (see test_close_reflects_the_chronologically_latest_tick_...) made
+    last_source_timestamp/close track the CHRONOLOGICAL-MAX tick, not the
+    most-recently-MERGED one. Without a separate arrival-order baseline,
+    a genuine wire-redelivery of an out-of-order tick would stop matching
+    last_source_timestamp/close (already moved on to a later-timestamped
+    tick) and its volume would be double-counted -- silently reopening
+    the exact defect the redelivery heuristic exists to prevent."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=100.0, volume=10, timestamp=_ts(50), received_at=_ts(50))  # seeds bucket, chronological max so far
+    builder.on_tick(price=99.0, volume=5, timestamp=_ts(10), received_at=_ts(51))  # real, out-of-order, does NOT advance close
+    builder.on_tick(price=99.0, volume=5, timestamp=_ts(10), received_at=_ts(52))  # genuine redelivery of the tick above
+
+    bar = builder.on_tick(price=101.0, volume=1, timestamp=_ts(61), received_at=_ts(61))
+
+    assert bar is not None
+    # 10 (first) + 5 (real out-of-order) + 0 (redelivery correctly suppressed) -- the
+    # completing tick's own volume=1 belongs to the NEXT bucket, not this bar. NOT 20.
+    assert bar.volume == 15.0
+    assert bar.close == 100.0  # unaffected: still the chronologically-latest tick
