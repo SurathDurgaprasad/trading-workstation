@@ -1902,7 +1902,42 @@ def test_run_fleet_supervise_command_cleans_up_already_launched_workers_when_a_l
     # be terminated, not left running as an orphan.
     assert len(launched_handles) == 1
     launched_handles[0].process.wait(timeout=10)
-    assert launched_handles[0].process.poll() is not None
+
+
+def test_run_fleet_supervise_command_still_reports_the_original_failure_when_cleanup_itself_raises(tmp_path, capsys):
+    """Second-order red-team finding (2026-09-22): the fix above's own
+    cleanup call (shutdown_fleet) had no exception boundary of its own --
+    a failure INSIDE cleanup (e.g. a broken stdout pipe, or an unexpected
+    error inside shutdown_fleet itself) would replace the clean
+    SystemExit(1) report with a raw, uncaught traceback, the very failure
+    mode the original fix exists to prevent, one level deeper."""
+    import live.fleet_supervisor as fleet_supervisor_module
+
+    def _fail_to_launch(*, symbol, **kwargs):
+        raise OSError("simulated subprocess.Popen failure")
+
+    def _shutdown_fleet_that_also_raises(handles, **kwargs):
+        raise RuntimeError("simulated cleanup failure")
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(fleet_supervisor_module, "launch_worker", _fail_to_launch)
+        # run_fleet_supervise_command imports shutdown_fleet locally (`from
+        # live.fleet_supervisor import ... shutdown_fleet`), re-resolved
+        # fresh from the module at call time -- patching the source
+        # attribute here is what actually takes effect, mirroring how
+        # launch_worker is patched above.
+        monkeypatch.setattr(fleet_supervisor_module, "shutdown_fleet", _shutdown_fleet_that_also_raises)
+        args = parse_args([
+            "fleet-supervise", "--symbols", "AAPL", "--runtime-dir", str(tmp_path),
+            "--source", "mock", "--launch-stagger-seconds", "0",
+        ])
+        with pytest.raises(SystemExit) as exc_info:
+            run_fleet_supervise_command(args)
+
+    assert exc_info.value.code == 1  # NOT a raw RuntimeError escaping instead
+    output = capsys.readouterr()
+    assert "launch failed on 'AAPL'" in output.err
+    assert "cleanup after the launch failure above ALSO raised" in output.err
 
 
 def test_fleet_summary_subcommand_is_recognized_without_the_analyze_default_prefix():

@@ -1508,13 +1508,31 @@ def run_fleet_supervise_command(args: argparse.Namespace) -> None:
         # same class of gap in the ongoing-supervision loop.
         launched = sorted(handles)
         not_launched = [s for s in symbols if s not in handles]
-        print(
-            f"FLEET SUPERVISE: launch failed on {symbol!r} ({type(exc).__name__}: {exc}) -- "
-            f"terminating the {len(launched)} worker(s) already launched ({', '.join(launched) or 'none'}) "
-            f"before they are orphaned. Never launched: {', '.join(not_launched) or 'none'}.",
-            file=sys.stderr,
-        )
-        shutdown_fleet(handles)
+        try:
+            # Second-order red-team finding (2026-09-22): a failure INSIDE
+            # this cleanup itself (e.g. a broken stdout pipe under log
+            # redirection -- BrokenPipeError, an OSError subclass -- from
+            # either print() call, or an unexpected error inside
+            # shutdown_fleet) previously had no boundary of its own, so it
+            # would replace this handler's own clean SystemExit(1) report
+            # with a raw, uncaught traceback -- the very failure mode this
+            # fix exists to prevent, now one level deeper. Never let a
+            # cleanup failure suppress the ORIGINAL launch failure or skip
+            # terminating whatever workers are still running.
+            print(
+                f"FLEET SUPERVISE: launch failed on {symbol!r} ({type(exc).__name__}: {exc}) -- "
+                f"terminating the {len(launched)} worker(s) already launched ({', '.join(launched) or 'none'}) "
+                f"before they are orphaned. Never launched: {', '.join(not_launched) or 'none'}.",
+                file=sys.stderr,
+            )
+            shutdown_fleet(handles)
+        except Exception as cleanup_exc:
+            print(
+                f"FLEET SUPERVISE: cleanup after the launch failure above ALSO raised "
+                f"({type(cleanup_exc).__name__}: {cleanup_exc}) -- some worker(s) among "
+                f"{', '.join(launched) or 'none'} may still be running and require manual cleanup.",
+                file=sys.stderr,
+            )
         raise SystemExit(1) from exc
 
     stop_requested = False
