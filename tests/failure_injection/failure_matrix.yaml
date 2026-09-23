@@ -832,4 +832,31 @@
   test: tests/test_environment_guard.py::test_ensure_running_under_project_venv_fails_loudly_not_with_a_raw_traceback_when_the_venv_python_is_corrupted
   evidence_grade: C
   note: "evidence_grade C (deterministic injection via a fake runner callable), not B -- this test does not spawn a genuinely corrupted binary on disk (constructing a real non-PE file that reliably fails to exec across platforms is not worth the fragility); it proves the exception-handling contract given that subprocess.run DOES raise OSError for this failure class, which is standard, well-documented Python/OS behavior, not independently re-verified against a real corrupted binary in this test. subprocess.run raising synchronously (rather than hanging) for a non-executable target is itself standard OS/interpreter behavior, not something this project's own code controls. Full finding: docs/FULL_SYSTEM_RED_TEAM_2026-09-22.md, F5."
-  note: "Real execution through run_tick -> _execute_slot -> main.run_shadow_run_command -> submit_signal(), no mocking of the execution path itself (only market/news/sector data providers are faked, this test file's own pre-existing convention). Honest mutation-testing limitation: disabling submit_signal()'s front-door idempotency check did NOT make this test fail -- the DB-level UNIQUE constraint + exception-handling back door (cycle 15) independently prevented the duplicate, a genuine defense-in-depth finding. This test's real contribution is proving the SCHEDULER-LEVEL composition (deterministic signal regeneration + correct due-slot retry eligibility after RECLAIMED status), not re-proving submit_signal()'s own already-mutation-tested idempotency."
+
+- id: FI-PAPER-DASHBOARD-CLI-STALE-ACCOUNT-RISK-DECISION
+  component: paper_engine
+  failure: "a second OS process (e.g. the dashboard) holds its own PaperTradingEngine instance against the SAME db file a first process (e.g. a paper-live CLI session) is actively writing to. Before this fix, the second process's self.account was loaded once at construction and never refreshed -- submit_signal()'s RiskEngine evaluation could approve a signal against a stale, healthy-looking account even after the FIRST process had already tripped a real circuit breaker (consecutive-loss hard limit, max drawdown, max daily loss)."
+  injection_method: "two separate PaperStore/PaperTradingEngine instances against the same real temp db file (the faithful simulation of two OS processes) -- the second process persists a real circuit-breaker-tripped account state via its own connection; the first process's already-constructed engine (never touched since construction) then calls submit_signal()"
+  expected:
+    detection: true
+    trade_authorization: "the stale-cache path would have wrongly APPROVED; the fix must REJECT, honoring the OTHER process's committed circuit-breaker state"
+    safe_response: "FIXED, 2026-09-23 open-issues remediation pass (G9). PaperTradingEngine.refresh_account() re-reads the account fresh from the store at the top of every transactional method (submit_signal/process_bar/close_at_end_of_data) and every read-only display function in live/workstation.py and mcp_server/server.py -- never trusting a process-lifetime-cached copy for a risk decision or a displayed value."
+    recovery: automatic -- correct on every subsequent call, no restart needed
+    safety_invariant: RISK_ENGINE_CANNOT_BE_BYPASSED
+  test: tests/test_paper_engine.py::test_submit_signal_sees_a_second_processs_committed_account_changes
+  evidence_grade: B
+  note: "A second, companion test (test_two_engine_instances_racing_different_signals_for_the_same_symbol_never_both_open_an_order) proves the complementary cross-process TOCTOU fix (PaperStore.transaction() now uses BEGIN IMMEDIATE, not SQLite's default DEFERRED BEGIN): two real threads, two real connections, racing to submit DIFFERENT signals for the SAME symbol -- exactly one may ever hold the symbol's single PENDING-order slot. Full finding: docs/MASTER_KNOWN_ISSUES.md G9, docs/FINAL_OPEN_ISSUES_REMEDIATION_2026-09-23.md."
+
+- id: FI-TRADES-DUPLICATE-POSITION-REJECTED-AT-DB-LEVEL
+  component: paper_store
+  failure: "a position closes into a Trade more than once -- e.g. two racing processes/threads both reach _close_position for the same position_id, or an application bug calls save_trade twice for one position -- previously relied ENTIRELY on application discipline (a single call site + transaction atomicity), with no schema-level backstop, unlike every OTHER terminal-state transition in this project (Position/PaperOrder)."
+  injection_method: "two separate PaperStore connections to the same real temp db file, both attempting save_trade for the SAME position_id (one already has a real trade from a genuinely-closed position) at a synchronized moment"
+  expected:
+    detection: true
+    trade_authorization: N/A -- data-integrity finding in the persistence layer, not a trade-authorization one
+    safe_response: "FIXED, 2026-09-23 open-issues remediation pass (G14). PaperStore._migrate_trades_unique_position_id_index() adds a real DB-level UNIQUE(position_id) index; save_trade() catches the resulting sqlite3.IntegrityError and raises the typed paper.errors.DuplicateTradeForPositionError, mirroring predictions/store.py's own DuplicatePredictionError pattern."
+    recovery: N/A -- the duplicate write is rejected outright, never committed
+    safety_invariant: NO_UNAUTHORIZED_DUPLICATE_EXECUTION
+  test: tests/test_paper_store.py::test_two_connections_racing_to_save_a_trade_for_the_same_position_never_both_succeed
+  evidence_grade: B
+  note: "A companion migration test (test_migration_disables_the_unique_index_gracefully_when_preexisting_duplicate_trades_exist) proves a pre-existing database with real historical duplicate position_id rows (simulated with raw sqlite3, never going through PaperStore first) degrades gracefully -- the constraint is reported inactive rather than crashing startup or deleting data. Full finding: docs/MASTER_KNOWN_ISSUES.md G14."

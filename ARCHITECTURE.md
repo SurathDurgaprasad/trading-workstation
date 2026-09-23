@@ -75,7 +75,7 @@ commands use. There is no second, parallel order-submission path.
 | `learning/` | Read-only performance/calibration reports over prediction history | `predictions/` |
 | `experiments/`, `strategy/experiment_store.py`, `strategy/promotion_store.py` | Named experiment tracking and advisory-only promotion recommendations | `learning/` |
 | `scheduler/` | Unattended triggering of `shadow-run`/`evaluate`/`learn` on a configurable schedule, with overlap prevention and crash recovery | `main.py`'s own command functions (in-process, not subprocess) |
-| `dashboard/` | Read-only Starlette web UI over the same stores every CLI command reads/writes | All of the above, read-only |
+| `dashboard/` | Starlette web UI over the same stores every CLI command reads/writes — mostly read-only, but 4 POST routes (approve/reject a pending signal, activate/reset the kill switch) DO write, via the same `live/workstation.py` functions the CLI's own interactive approval prompt calls (see the "Dashboard/CLI concurrency" note below) | All of the above |
 | `mcp_server/` | Optional MCP tool server (23 read-only/paper-only tools) for AI-assistant observability | `paper/`, `live/workstation.py` — opt-in, not imported by `main.py`'s core command set |
 | `core/timeutil.py` | The one place naive-vs-aware datetime normalization is decided (two documented conventions: market/bar data stays naive, record/system metadata is UTC-aware) | stdlib `datetime`, `pandas` |
 | `core/sqlite_util.py` | The one place every SQLite connection is opened (WAL mode, busy timeout, auto-creates a missing parent directory, raises a clear `DatabaseCorruptedError` for a corrupt/non-SQLite file), plus shared migration primitives (`ensure_column`, `ensure_schema_version`, `try_create_unique_index`), health primitives (`integrity_check`, `db_size_bytes`), and `parse_model_json` (wraps every store's `Model.model_validate_json(row)` read, raising a clear `MalformedRowError` instead of a raw `pydantic.ValidationError` for a malformed row) | stdlib `sqlite3` |
@@ -98,7 +98,31 @@ Two stores (`predictions.db`, the forecast store) additionally enforce
 a `UNIQUE(symbol, entry_time)` / `UNIQUE(symbol, as_of)` constraint at
 the database level, not just in application logic — closing a genuine
 race where a manual CLI run overlapping a scheduled run could
-previously double-insert.
+previously double-insert. `paper.db`/`live_sim_trading.db`'s own
+`trades` table has the same kind of protection, `UNIQUE(position_id)`
+(2026-09-23, see `docs/MASTER_KNOWN_ISSUES.md` G14).
+
+### Dashboard/CLI concurrency (single-writer discipline)
+
+The dashboard and a `paper-live` CLI session can run simultaneously
+against the same account by design (`live/workstation.py`'s own module
+docstring: "so an operator can observe or decide from either the CLI or
+an MCP-connected client and see the same state") — this is NOT prevented
+architecturally, and is a supported, documented use case, not an
+accident. What makes it safe: `PaperTradingEngine.refresh_account()`
+re-reads the account fresh from the store immediately before every
+risk-affecting decision and every display value (never trusting a
+process-lifetime-cached copy — see `docs/MASTER_KNOWN_ISSUES.md` G9),
+and `PaperStore.transaction()` uses SQLite's own `BEGIN IMMEDIATE` to
+acquire a real, OS-level write lock at the START of any transaction
+that will read-then-write shared state (order/position/account rows) —
+so at most one process's transaction can be mid-flight against that
+state at any moment; a second, concurrent transaction blocks (existing
+30s busy timeout) or fails loudly, never silently interleaves. This
+holds for the single-symbol workstation only — the fleet workflow
+(`fleet-supervise`/`/fleet`/`fleet-summary`) needs no such discipline
+at all, since each symbol already has a fully isolated
+`runtime/{SYMBOL}/` directory with its own separate database files.
 
 ## Datetime policy
 

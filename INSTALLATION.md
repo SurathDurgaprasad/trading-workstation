@@ -92,9 +92,9 @@ step here requires Claude Code, an IDE, or any tool beyond Python and
    figure is stale** (the suite has grown substantially since it was last
    measured under genuine fresh-clone conditions): the full suite against
    this machine's own working copy — which already has cached market data
-   present, a different condition than a fresh clone — passed **2,765
-   tests, 0 failed** as of 2026-09-22 (see
-   `docs/CONTINUOUS_FULL_SYSTEM_RED_TEAM_FINAL_2026-09-22.md`). The
+   present, a different condition than a fresh clone — passed **2,779
+   tests, 0 failed** as of 2026-09-23 (see
+   `docs/FINAL_OPEN_ISSUES_REMEDIATION_2026-09-23.md`). The
    fresh-clone skip count specifically (how many tests skip cleanly with
    no cache present) was not re-verified in that run and needs a genuine
    clean-clone re-check before being restated here as a specific number.
