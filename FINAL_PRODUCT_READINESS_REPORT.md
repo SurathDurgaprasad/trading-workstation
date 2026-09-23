@@ -7,8 +7,20 @@ cycle (`main == origin/main` verified at every commit). Current HEAD:
 summarizes), `FINAL_FAILURE_MODE_ANALYSIS.md` (48 numbered entries),
 `TRADING_STRATEGY_READINESS.md` (the seven-dimension strategy-readiness
 breakdown this report's Sections 7/11 summarize), `tests/
-failure_injection/failure_matrix.yaml` (110 executable rows),
-`ARCHITECTURE.md`, `SECURITY.md`.
+failure_injection/failure_matrix.yaml` (grows over time — check the
+file itself for the current row count, do not trust a number pinned
+here), `ARCHITECTURE.md`, `SECURITY.md`.
+
+**This report is dated 2026-09-15 and has since been superseded by two
+newer, independent audits**: `docs/FULL_SYSTEM_RED_TEAM_2026-09-22.md`
+(a fresh, adversarial full-repository audit — 6 real defects found and
+fixed, 2 research-methodology items flagged for a human decision) and
+`docs/DHAN_FEED_INTERRUPTION_1514_INVESTIGATION_2026-09-22.md` (an
+open, still-unresolved question about a recurring live-feed
+interruption pattern). A reader relying on this report alone would miss
+both. Nothing below has been edited to match those newer findings —
+read them separately, not as a replacement for this document's own
+historical record.
 
 This report supersedes the version of itself written at the end of an
 earlier three-pass hardening campaign (that version's own historical

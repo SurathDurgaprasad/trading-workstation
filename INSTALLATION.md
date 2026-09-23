@@ -88,9 +88,16 @@ step here requires Claude Code, an IDE, or any tool beyond Python and
    tests that use locally-cached historical market data (`data/market/`)
    skip cleanly if that cache is absent (it is intentionally not
    committed to the repository) — this was verified with a genuine
-   clean clone + fresh venv + single `pytest` invocation: 2020 passed,
-   0 failed, 82 skipped, no network-dependent test left unaccounted
-   for.
+   clean clone + fresh venv + single `pytest` invocation. **This exact
+   figure is stale** (the suite has grown substantially since it was last
+   measured under genuine fresh-clone conditions): the full suite against
+   this machine's own working copy — which already has cached market data
+   present, a different condition than a fresh clone — passed **2,765
+   tests, 0 failed** as of 2026-09-22 (see
+   `docs/CONTINUOUS_FULL_SYSTEM_RED_TEAM_FINAL_2026-09-22.md`). The
+   fresh-clone skip count specifically (how many tests skip cleanly with
+   no cache present) was not re-verified in that run and needs a genuine
+   clean-clone re-check before being restated here as a specific number.
 
 7. **Run a health check** against a real (mock-data) pipeline pass:
 

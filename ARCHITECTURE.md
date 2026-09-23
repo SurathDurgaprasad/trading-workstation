@@ -216,7 +216,15 @@ layers alongside the existing example-based suite:
   `connect_timeout_seconds` (default 30s) routes a stalled connection
   attempt through the same reconnect funnel every other failure already
   uses. Found and fixed cycle 8, revisiting a gap cycle 7 had explicitly
-  disclosed but left unfixed pending a dedicated re-audit.
+  disclosed but left unfixed pending a dedicated re-audit. **Scope note**:
+  this covers only the CONNECTING handshake, not a connection that opens
+  normally and then goes silent much later — that separate case is
+  covered by `connected_idle_timeout_seconds` (default 300s, added
+  after the real 2026-09-17 incident where all 13 unaffected workers
+  went quiet for 600s+ with no error ever logged; see
+  `live/dhan/market_data_source.py`'s own field docstring and
+  `docs/DHAN_FEED_INTERRUPTION_1514_INVESTIGATION_2026-09-22.md` for the
+  still-unresolved root cause of that specific recurring pattern).
 - **A Dhan feed consumer that falls behind can never grow memory
   without bound** — `DhanMarketDataSource._bar_queue` is a bounded
   `queue.Queue(maxsize=max_queued_bars)` (default 2000); the wire
