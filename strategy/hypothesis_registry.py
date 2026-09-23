@@ -3791,4 +3791,340 @@ def build_hypothesis_registry() -> tuple[HypothesisRecord, ...]:
                 "hypothesis (its own registry entry, its own id), never a revision of this one."
             ),
         ),
+        # ------------------------------------------------------------------
+        # EDGE DISCOVERY mission (2026-09-23): 59 OHLCV-family hypotheses
+        # above (H_ENTRY_*/H_EXIT_*/H_MEANREV_*/H_RELSTRENGTH_*/H_BREAKOUT_*/
+        # H_VOL_*/H_EXTREME_*/H_MOMENTUM_*/H_XSECT_*/H_CONTEXT_*/
+        # H_TRANSMISSION_*/H_GAP_*/H_SECTOR_ROTATION_*/H_OPENRANGE_*/
+        # H_CALENDAR_*/H_BREADTH_*/H_BASELINE_001) plus the 4-entry
+        # derivatives program (audit/derivatives_research/) and the ML
+        # Phase 1 triple-barrier baseline are ALL CLOSED -- no hypothesis
+        # has ever reached PROMOTED. Per this mission's own explicit
+        # instruction ("the next research program may investigate ONLY
+        # genuinely new information sources... Family A/B/C"), the entries
+        # below are the first new hypotheses since that closure, each
+        # prefixed with a NEW id family signalling a genuinely different
+        # market mechanism, never a disguised re-test of anything above.
+        # Family B (market microstructure -- bid/ask, quote imbalance,
+        # order-flow) is NOT represented here: confirmed, before any
+        # hypothesis was written, that NO historical microstructure data
+        # exists anywhere in this repository or via any free source this
+        # project already trusts (see docs/EDGE_DISCOVERY_FINAL_REPORT.md
+        # section 4/6) -- per this mission's own Section 10 stop condition
+        # ("required data does not exist" -> close immediately), that
+        # family is closed WITHOUT a registry entry, exactly as H_GAP_001/
+        # H_GAP_002's own real-time execution gap was disclosed rather than
+        # invented around.
+        # ------------------------------------------------------------------
+        HypothesisRecord(
+            hypothesis_id="H_EVENT_001",
+            description=(
+                "Family A (corporate/event information). NSE stocks exhibit a statistically measurable, "
+                "economically tradable short-horizon price drift in the trading days immediately AFTER a "
+                "known ex-dividend date, beyond the mechanical price drop equal to the dividend amount -- "
+                "i.e. real information/liquidity/behavioral effects (dividend-capture unwind, index-tracker "
+                "rebalancing, or a genuine post-event drift anomaly) leave a residual, tradable signature."
+            ),
+            rationale=(
+                "Genuinely new information source, never tested by any prior hypothesis in this registry: the "
+                "ex-dividend date is a real, company-disclosed, exchange-confirmed event with its own timestamp "
+                "-- independent of any OHLCV price/volume history. market_intelligence/corporate_actions.py "
+                "already confirmed (live, against RELIANCE.NS) that yfinance exposes real, deep dividend "
+                "history (31 events, 1996-2026 for RELIANCE.NS alone) for NSE-suffixed symbols with no new "
+                "credential, no scraping, no cost -- a dependency this project already trusts. Distinguished "
+                "from every closed OHLCV family: the entry signal here is a corporate-disclosed calendar date, "
+                "never a derived price/volume/indicator condition."
+            ),
+            expected_effect=(
+                "If a real, tradable effect exists, mean forward return in a short window (1/2/3/5 trading "
+                "days) starting the ex-dividend date should be confidently non-zero (95% CI entirely above or "
+                "below zero) and should survive backtesting.costs.CostModel.india_nse_intraday_2026()'s ~0.21% "
+                "realistic round-trip cost."
+            ),
+            dataset_restrictions=(
+                "ORIGINAL_32_NSE_UNIVERSE (quant_research/universe_expansion.py) -- the SAME default 32-symbol "
+                "universe most prior hypotheses used, chosen here specifically to avoid universe cherry-picking "
+                "toward this new family's own result; a widened-universe follow-up (if this measurement shows "
+                "promise) would be its own hypothesis, per H_XSECT_006's own precedent showing universe choice "
+                "can reverse an effect. 10-year daily OHLCV (period='10y') via the existing cached market-data "
+                "provider. Full dividend history per symbol via yfinance Ticker.dividends (research-only fetch, "
+                "quant_research/event_study.py -- NOT market_intelligence/corporate_actions.py's own "
+                "dividend_history_limit=3-bounded live-facing API, which is unsuitable for a full historical "
+                "study). LEAKAGE: the ex-dividend date is a real historical fact, always in the past relative "
+                "to the forward-return window measured (entry at ex-date close/next-open, never earlier); no "
+                "OHLCV data on or after the ex-date is used to define the event itself."
+            ),
+            experiment_design=(
+                "quant_research.market_behavior.build_universe_datasets builds the causal per-symbol frame "
+                "(unchanged from every prior hypothesis). quant_research.event_study.attach_dividend_event_columns "
+                "adds trading_days_since_ex_div (0 on the ex-date bar itself, forward-counted, NaN before the "
+                "first known dividend). condition_fn: trading_days_since_ex_div == 0 (entry at the ex-date's own "
+                "close). measure_condition pools fwd_return_{1,2,3,5} across development/validation/out_of_sample "
+                "periods (each symbol's own 60/20/20 split via backtesting.splits.split_periods, unchanged "
+                "convention). Stage 1 (raw measurement, no costs) establishes whether the effect is CI-decisive "
+                "in every split. Only if Stage 1 clears all three splits does Stage 2 apply "
+                "CostModel.india_nse_intraday_2026() round-trip cost to the point estimate and mean-CI bounds "
+                "before any promotion claim -- reusing learning.profitability.compute_profitability_report_from_returns "
+                "on the cost-adjusted returns, the same statistical gate every trade-return verdict in this "
+                "project already uses. No stop/target/position-sizing is defined for Stage 1 (pure measurement, "
+                "same posture as H_XSECT_001's own raw-measurement stage)."
+            ),
+            success_criteria=(
+                "Mean forward return's 95% CI lies entirely on one side of zero in ALL THREE splits (development, "
+                "validation, out_of_sample), same sign throughout, AND the cost-adjusted point estimate remains "
+                "on that same side of zero after applying the ~0.21% realistic NSE round-trip cost."
+            ),
+            failure_criteria=(
+                "Any split's CI straddles zero (STATISTICALLY_MEANINGLESS), any split reverses sign relative to "
+                "the others, sample size in any split is below the 30-trade floor, or the cost-adjusted estimate "
+                "crosses zero even when the raw estimate did not."
+            ),
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Real run, 2026-09-23, ORIGINAL_32_NSE_UNIVERSE, 10y daily, 1149 total ex-dividend events "
+                "(quant_research.event_study.attach_dividend_event_columns, verified zero symbols with missing "
+                "dividend history). Stage 1 (raw measurement, quant_research.market_behavior.measure_condition, "
+                "condition trading_days_since_ex_div==0): EVERY split, EVERY horizon (h=1,2,3,5) CI straddles "
+                "zero (STATISTICALLY_MEANINGLESS) except out_of_sample h=5, whose own CI [-0.067%, +1.084%] "
+                "STILL includes zero. Sample sizes 313/101/105-107 per split, all above the 30-floor -- this is "
+                "a real null result, not underpowered. No split reached CI-decisive in either direction; Stage 2 "
+                "(cost adjustment) was correctly skipped per this mission's own stop condition ('OOS fails' -> "
+                "close, do not build further machinery on a dead signal). CONCLUSION: no demonstrated post-ex-"
+                "dividend-date drift on this universe/window. See docs/EDGE_DISCOVERY_FINAL_REPORT.md for the "
+                "full per-split/per-horizon table."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_EVENT_002",
+            description=(
+                "Family A (corporate/event information). NSE stocks exhibit measurable anticipatory price "
+                "run-up in the trading days immediately BEFORE a scheduled, already-publicly-known ex-dividend "
+                "date -- distinct from H_EVENT_001's post-event question."
+            ),
+            rationale=(
+                "Same new information source as H_EVENT_001 (ex-dividend calendar), opposite side of the event. "
+                "Genuinely different mechanism from H_EVENT_001 (anticipatory positioning vs. post-event "
+                "unwind/drift) and from every closed momentum/breakout family (the trigger here is a scheduled "
+                "corporate date, never a derived price pattern)."
+            ),
+            expected_effect=(
+                "Mean cumulative return in the N trading days immediately preceding a known ex-dividend date is "
+                "confidently positive (dividend-capture demand pushing price up into the event)."
+            ),
+            dataset_restrictions=(
+                "Same universe/data/tooling as H_EVENT_001. EXPLICIT LEAKAGE-RISK DISCLOSURE, read before "
+                "interpreting any result: yfinance's Ticker.dividends records only the EX-DATE itself, never the "
+                "company's own original announcement/record-date-intimation timestamp, which in reality precedes "
+                "the ex-date by some real lead time. This experiment CANNOT verify that lead time from any "
+                "locally-available data. It instead relies on an INFERRED, not directly measured, regulatory "
+                "fact: SEBI LODR Regulation 42 requires a listed company to intimate the exchange of a record "
+                "date/book closure a minimum number of working days in advance of the ex-date, a publicly "
+                "documented, external regulatory requirement independent of this project's own data. N=5 "
+                "trading days (a conservative, PRE-CHOSEN, not tuned-after-seeing-results window well inside "
+                "that regulatory minimum) is used as the entry point. If this experiment's leakage audit (run "
+                "before any split is inspected) cannot affirmatively support N=5 trading days as safely inside "
+                "the real disclosure lead time, this hypothesis is REJECTED on leakage grounds alone, regardless "
+                "of what the raw price pattern shows -- per this mission's own Section 6 rule ('If leakage "
+                "cannot be ruled out: REJECT THE EXPERIMENT')."
+            ),
+            experiment_design=(
+                "Same build_universe_datasets/attach_dividend_event_columns base as H_EVENT_001. "
+                "trading_days_until_ex_div computed by backward-counting from each known future ex-date (a real "
+                "historical fact relative to any earlier bar -- the ex-date has already occurred somewhere in "
+                "the symbol's own future history at the time this column is computed, but each ROW's own value "
+                "only describes a date that has NOT yet happened relative to that row, consistent with the "
+                "leakage disclosure above: this measures 'N days before a date that, per SEBI LODR Reg. 42, "
+                "would already have been publicly announced'). condition_fn: trading_days_until_ex_div == 5. "
+                "measure_condition pools fwd_return_{1,3,5} (through the event) across dev/val/oos. Same "
+                "two-stage (raw measurement, then cost-adjusted) design as H_EVENT_001."
+            ),
+            success_criteria="Same statistical bar as H_EVENT_001 (CI-decisive same-sign positive in all three splits, survives realistic cost), AND the leakage audit affirmatively clears the N=5 assumption.",
+            failure_criteria="Leakage audit cannot clear the N=5 assumption (automatic REJECT regardless of the price pattern), OR the same statistical failure modes as H_EVENT_001.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Real run, 2026-09-23, same universe/data as H_EVENT_001, condition trading_days_until_ex_div==5. "
+                "REJECTED on its own stated statistical criteria BEFORE the leakage question needed to matter: "
+                "development h=5 CI [-1.374%, -0.167%] is CI-decisive NEGATIVE (n=279); out_of_sample h=5 CI "
+                "[-1.779%, -0.356%] is ALSO CI-decisive NEGATIVE (n=107) -- both the OPPOSITE sign from the "
+                "stated expected_effect (positive anticipatory run-up). validation h=1/h=3 DID come back "
+                "CI-decisive positive (n=101, [+0.169%,+0.774%] and [+0.013%,+0.883%]), but this is a sign-"
+                "reversal across splits (positive in validation, negative in development AND out_of_sample at "
+                "the same h=5 horizon) -- exactly the 'flips sign across splits' failure pattern this registry "
+                "has repeatedly treated as no real effect (e.g. H_CONTEXT_MARKET_003, H_BREADTH_001). Per "
+                "strategy.promotion_gate's own rule, any split confidently NEGATIVE_PERFORMANCE disqualifies "
+                "regardless of other splits. LEAKAGE AUDIT (recorded for completeness, though moot given the "
+                "result above): the N=5-trading-day assumption was never independently verified against a real "
+                "announcement-date dataset -- this experiment could not have been promoted even had the price "
+                "pattern been favorable, without first sourcing genuine record-date-announcement timestamps. "
+                "CONCLUSION: no demonstrated pre-ex-dividend-date run-up; do not create H_EVENT_003 with a "
+                "different N to rescue this (would be undisclosed post-hoc threshold tuning)."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_XMOM_001",
+            description=(
+                "Family C (cross-sectional/relative information). Stocks in the TOP quintile of medium-term "
+                "(60-trading-day) trailing return relative to NIFTY CONTINUE to outperform over the following "
+                "20 trading days -- classic cross-sectional momentum, the mirror opposite of this registry's "
+                "own already-closed H_XSECT_001 (bottom-quintile, short-lookback LAGGARD REVERSAL)."
+            ),
+            rationale=(
+                "Materially different from every closed cross-sectional entry: H_XSECT_001-006 tested the "
+                "BOTTOM quintile (laggards) over a 60-day lookback for a 20-day REVERSAL; this tests the TOP "
+                "quintile (leaders) for CONTINUATION -- opposite bucket, opposite direction of expected effect, "
+                "a genuinely distinct hypothesis about market mechanism (underreaction/momentum vs. "
+                "overreaction/reversal), not a parameter retune of a closed family. F_CONTEXT's regime "
+                "conditioning and H_RELSTRENGTH_001 (single-symbol relative strength, already REJECTED with a "
+                "reversed dose-response) are also distinct: this is a cross-sectional RANKING measurement via "
+                "quant_research.cross_sectional.rank_cross_sectionally, never a single-symbol threshold."
+            ),
+            expected_effect=(
+                "Q1 (top quintile, highest 60-day relative return) shows a confidently positive 20-day forward "
+                "return, and this is DIFFERENT FROM (not merely similar to) the unconditioned universe-wide mean."
+            ),
+            dataset_restrictions=(
+                "ORIGINAL_32_NSE_UNIVERSE, 10-year daily OHLCV, quant_research.cross_sectional's existing, "
+                "already-tested rank_cross_sectionally/attach_relative_score_column machinery (unmodified) -- "
+                "the score column is trailing_return_60 (raw, from quant_research.cross_sectional."
+                "add_lookback_return_columns) minus each symbol's own NIFTY-relative trailing_return_60 "
+                "(attach_relative_score_column, key_for_symbol always 'NIFTY', reusing the exact NIFTY-relative "
+                "mechanism H_XSECT_003 already validated as mathematically sound). LEAKAGE: trailing_return_60 "
+                "is a strictly backward-looking pct_change(60); fwd_return_20 is the pre-existing, already-"
+                "audited forward-return label computed once by quant_research.alpha_features.add_forward_return_targets."
+            ),
+            experiment_design=(
+                "rank_cross_sectionally(datasets, score_column='nifty_relative_return_60', horizons=(20,), "
+                "n_buckets=5, min_symbols_per_date=10) run separately per period (development/validation/"
+                "out_of_sample, via shared_period_boundaries -- the SAME shared-calendar convention H_XSECT_001 "
+                "already established). Stage 1: raw Q1 ForwardReturnSummary per split. Stage 2 (only if Stage 1 "
+                "clears): apply CostModel.india_nse_intraday_2026() to Q1's pooled returns and re-run the "
+                "profitability statistical gate, exactly mirroring H_XSECT_001->H_XSECT_002's own established "
+                "two-stage pattern -- but this entry stops at Stage 2 measurement/costing, and does NOT build a "
+                "stop/target executable wrapper unless Stage 2 itself clears (H_XSECT_002/004's own repeated "
+                "failure mode was the stop/target wrapper design, not the raw signal; building one prematurely "
+                "here would risk repeating that exact, already-demonstrated dead end)."
+            ),
+            success_criteria="Q1's 95% CI lies entirely above zero in all three splits, AND is not simply a restatement of the unconditioned (all-symbols, all-dates) mean return for the same horizon/period, AND survives realistic cost.",
+            failure_criteria="Any split CI-meaningless or reversed-sign, sample below 30 per split, or the effect vanishes/reverses after cost.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Real run, 2026-09-23, ORIGINAL_32_NSE_UNIVERSE, 10y daily, NIFTY-relative trailing_return_60, "
+                "quant_research.cross_sectional.rank_cross_sectionally, n_buckets=5, min_symbols_per_date=10, "
+                "horizon=20. REJECTED, cleanly, on two independent grounds: (1) Q1 (leaders) is NOT "
+                "distinguishable from Q5 (laggards) in the direction the hypothesis predicts -- in BOTH "
+                "development (Q1 mean +1.53% CI[1.36%,1.69%] vs Q5 +1.65% CI[1.45%,1.85%]) and validation (Q1 "
+                "+1.30% CI[1.10%,1.51%] vs Q5 +2.38% CI[2.15%,2.61%]), Q5 (laggards) OUTPERFORMS Q1 (leaders) -- "
+                "the opposite of momentum continuation. (2) out_of_sample reverses sign entirely: Q1 goes "
+                "CI-decisive NEGATIVE (-0.47%, CI[-0.71%,-0.24%], n=3359) while the unconditioned universe mean "
+                "is essentially zero (CI[-0.10%,+0.10%]) and Q5 is CI-decisive POSITIVE (+0.49%, "
+                "CI[0.26%,0.72%]). No split shows the predicted pattern; the measured effect (where any exists) "
+                "runs opposite to momentum and is not stable across splits. CONCLUSION: no demonstrated "
+                "cross-sectional momentum continuation on this universe/window; the closed H_XSECT laggard-"
+                "reversal family remains the only cross-sectional pattern with any raw-measurement support in "
+                "this registry, and even that fails at execution (H_XSECT_002/004/006)."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_XVOL_001",
+            description=(
+                "Family C (cross-sectional/relative information). A stock's own trading volume, abnormal "
+                "RELATIVE TO its cross-sectional peers (the same universe, same date) on a given day, predicts "
+                "its short-horizon (1/3/5-day) forward return -- distinct from every prior volume test, which "
+                "measured a stock's volume relative only to ITS OWN history, never to its peers on the same day."
+            ),
+            rationale=(
+                "H_ENTRY_002/H_ENTRY_004 (volume/momentum-acceleration confirmation filters) and "
+                "quant_research/volume_signal.py's own prior work all measured a symbol's OWN trailing volume "
+                "ratio (today's volume vs. its own N-day average) -- never a genuinely cross-sectional, "
+                "same-date comparison against peers. Abnormal relative volume is explicitly named as a Family C "
+                "example in this mission's own specification and has never been tested in this registry."
+            ),
+            expected_effect=(
+                "Stocks with the highest cross-sectional relative-volume z-score on a given date (top quintile, "
+                "abnormally high volume vs. peers that day) show a confidently non-zero forward return over the "
+                "following 1/3/5 days -- direction not pre-committed (could reflect informed trading/momentum, "
+                "or could reflect crowded/exhausted moves reverting); the hypothesis is that a real, non-zero "
+                "effect of EITHER sign exists, tested two-sided."
+            ),
+            dataset_restrictions=(
+                "ORIGINAL_32_NSE_UNIVERSE, 10-year daily OHLCV. New column, not previously computed anywhere in "
+                "this repository: for each date, each symbol's own volume z-scored against the SAME-DATE cross-"
+                "section of all symbols' volumes (not a time-series z-score) -- (volume - cross_sectional_mean) "
+                "/ cross_sectional_stdev, computed once per date across the whole universe. LEAKAGE: volume is "
+                "the bar's own already-closed volume (available at that bar's close, same convention every "
+                "existing OHLCV-based hypothesis already uses); the cross-sectional mean/stdev use only that "
+                "SAME date's volumes across symbols (no look-ahead to a future date's cross-section)."
+            ),
+            experiment_design=(
+                "New function in quant_research/cross_sectional_relative.py: attach_cross_sectional_zscore_column "
+                "(generalizes attach_bucket_membership_column's own per-date cross-sectional pass, computing a "
+                "continuous z-score instead of a bucket label). rank_cross_sectionally on the resulting z-score "
+                "column, n_buckets=5, horizons=(1,3,5), per split. Stage 1 raw measurement on Q1 (highest "
+                "relative volume) vs Q5 (lowest); Stage 2 cost-adjustment only if Stage 1 clears."
+            ),
+            success_criteria="Q1 or Q5's 95% CI lies entirely on one side of zero in all three splits, consistent sign, distinct from the unconditioned mean, and survives realistic cost.",
+            failure_criteria="No split-consistent, CI-decisive effect in either tail, or it vanishes after cost.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Real run, 2026-09-23, same universe as H_XMOM_001, new quant_research.cross_sectional_relative."
+                "attach_cross_sectional_zscore_column on volume_ratio, horizons 1/3/5. Q1 (abnormally high "
+                "relative volume) vs Q5 (abnormally low) SIGN FLIPS between splits: development has Q1 slightly "
+                "ahead of Q5 at every horizon (e.g. h=5: +0.40% vs +0.34%, both CI-decisive positive but close); "
+                "validation REVERSES -- Q5 ahead of Q1 at every horizon (h=5: +0.57% vs +0.36%); out_of_sample "
+                "the spread mostly collapses to CI-meaningless (h=3, h=5 both straddle zero for both buckets). "
+                "No split-consistent direction, and where an effect exists it is small relative to the general "
+                "small positive multi-day drift both buckets share -- not a genuine differential relative-volume "
+                "signal. CONCLUSION: no demonstrated edge from abnormal cross-sectional relative volume."
+            ),
+        ),
+        HypothesisRecord(
+            hypothesis_id="H_XVOLATILITY_001",
+            description=(
+                "Family C (cross-sectional/relative information). A stock's own realized volatility, abnormal "
+                "RELATIVE TO its cross-sectional peers on a given date, predicts its short-horizon (1/3/5-day) "
+                "forward return -- distinct from H_VOL_001 (that entry's own volatility-CONTRACTION test was a "
+                "single symbol's own time-series regime, backtesting.regime.classify_volatility_at, never a "
+                "same-date comparison against peers) and from H_MEANREV_008 (which characterized RISK of "
+                "already-formed buckets post-hoc, not a standalone cross-sectional predictor)."
+            ),
+            rationale=(
+                "Abnormal volatility relative to peers is explicitly named as a Family C example in this "
+                "mission's own specification and has never been tested in this registry as a standalone, "
+                "forward-looking cross-sectional signal."
+            ),
+            expected_effect=(
+                "Stocks with the highest cross-sectional realized-volatility z-score on a given date (top "
+                "quintile, abnormally volatile vs. peers that day) show a confidently non-zero forward return "
+                "over the following 1/3/5 days, tested two-sided (no pre-committed direction)."
+            ),
+            dataset_restrictions=(
+                "Same universe/period/tooling as H_XVOL_001. New column: each symbol's own trailing 20-day "
+                "realized volatility (std dev of daily returns, already available as a building block via "
+                "market.indicators/alpha_features -- reused, not recomputed, wherever an existing column already "
+                "provides it), then cross-sectionally z-scored against the SAME-DATE universe, mirroring "
+                "H_XVOL_001's own construction exactly (same function, different input column). LEAKAGE: "
+                "trailing 20-day realized volatility is strictly backward-looking; the cross-section is computed "
+                "per-date, no future-date leakage."
+            ),
+            experiment_design=(
+                "attach_cross_sectional_zscore_column (H_XVOL_001's own new function) applied to the trailing "
+                "20-day realized-volatility column instead of volume. Same rank_cross_sectionally / two-stage "
+                "measurement-then-cost design as H_XVOL_001."
+            ),
+            success_criteria="Same statistical bar as H_XVOL_001 (CI-decisive, split-consistent, either tail, survives cost).",
+            failure_criteria="Same as H_XVOL_001.",
+            status=HypothesisStatus.REJECTED,
+            evidence=(
+                "Real run, 2026-09-23, same universe/tooling as H_XVOL_001, new realized_vol_20 (20-day rolling "
+                "std dev of daily returns) cross-sectionally z-scored. Same sign-instability failure mode: "
+                "development has Q5 (low relative volatility) slightly ahead of Q1 (high) at every horizon (h=5: "
+                "+0.41% vs +0.36%); validation REVERSES at h=3/h=5 -- Q1 now ahead of Q5 (h=5: +0.47% vs +0.32%); "
+                "out_of_sample is mostly not CI-decisive for either bucket (h=1 both straddle zero; h=3/h=5 only "
+                "Q1 marginally clears zero, Q5 does not). No split-consistent direction across dev/val/oos. "
+                "CONCLUSION: no demonstrated edge from abnormal cross-sectional relative realized volatility. "
+                "All 5 Family A/C hypotheses this mission tested (H_EVENT_001/002, H_XMOM_001, H_XVOL_001, "
+                "H_XVOLATILITY_001) are now REJECTED -- see docs/EDGE_DISCOVERY_FINAL_REPORT.md for the full "
+                "adversarial audit and the mission's own required final decision-tree conclusion."
+            ),
+        ),
     )
