@@ -1074,3 +1074,82 @@ def test_a_genuine_redelivery_of_an_out_of_order_tick_still_does_not_double_coun
     # completing tick's own volume=1 belongs to the NEXT bucket, not this bar. NOT 20.
     assert bar.volume == 15.0
     assert bar.close == 100.0  # unaffected: still the chronologically-latest tick
+
+
+# --- G12: cross-thread synchronization (continuous red-team, 2026-09-23) ---
+
+
+def test_on_tick_and_last_known_price_and_timestamp_survive_real_concurrent_contention():
+    """G12 regression (docs/MASTER_KNOWN_ISSUES.md): a genuine, real
+    multi-threaded test, not theoretical -- one thread continuously feeds
+    on_tick() (simulating the WebSocket receive thread), a SECOND thread
+    concurrently polls last_known_price_and_timestamp() (simulating a
+    dashboard/monitoring poll), for many iterations. Two things must both
+    hold under real contention: (1) no crash/exception on either thread --
+    a torn read of an in-progress mutation would be a real bug even if it
+    happened not to raise; (2) every (price, timestamp) pair observed by
+    the reader must be an ACTUAL pair this builder produced (price and
+    timestamp from the SAME tick), proving last_known_price_and_timestamp()
+    is genuinely atomic as a pair, not just individually-safe per field."""
+    import threading
+
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m", max_tick_deviation_pct=None, max_timestamp_skew_seconds=None)
+    n_ticks = 2000
+    # Every tick's price is uniquely tied to its own timestamp (price ==
+    # second_of_epoch), so a torn/mismatched pair is trivially detectable.
+    valid_pairs = {float(i): _ts(i) for i in range(n_ticks)}
+
+    errors: list[BaseException] = []
+    observed_mismatches: list[tuple] = []
+    stop = threading.Event()
+
+    def _writer() -> None:
+        try:
+            for i in range(n_ticks):
+                builder.on_tick(price=float(i), volume=1.0, timestamp=_ts(i), received_at=_ts(i))
+        except BaseException as exc:  # noqa: BLE001 -- capture, report from the main thread
+            errors.append(exc)
+        finally:
+            stop.set()
+
+    def _reader() -> None:
+        try:
+            while not stop.is_set():
+                pair = builder.last_known_price_and_timestamp()
+                if pair is not None:
+                    price, ts = pair
+                    if valid_pairs.get(price) != ts:
+                        observed_mismatches.append(pair)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    writer = threading.Thread(target=_writer)
+    reader = threading.Thread(target=_reader)
+    reader.start()
+    writer.start()
+    writer.join(timeout=30)
+    reader.join(timeout=30)
+
+    assert not writer.is_alive() and not reader.is_alive(), "a thread hung -- possible deadlock"
+    assert errors == [], f"a thread raised: {errors}"
+    assert observed_mismatches == [], f"a torn/mismatched (price, timestamp) pair was observed: {observed_mismatches[:5]}"
+
+    final_price, final_ts = builder.last_known_price_and_timestamp()
+    assert final_price == float(n_ticks - 1)
+    assert final_ts == _ts(n_ticks - 1)
+
+
+def test_rejected_tick_counts_snapshot_is_a_real_copy_not_a_live_reference():
+    """G12: the snapshot must not alias the internal dict -- a caller on
+    another thread mutating its own copy (or simply holding it while
+    on_tick keeps incrementing the real one) must never see or cause
+    action-at-a-distance."""
+    builder = CandleBuilder(symbol="RELIANCE", interval="1m")
+    builder.on_tick(price=-1.0, volume=1.0, timestamp=_ts(0), received_at=_ts(0))  # rejected: non_positive_price
+
+    snapshot = builder.rejected_tick_counts_snapshot()
+    assert snapshot["non_positive_price"] == 1
+
+    builder.on_tick(price=-1.0, volume=1.0, timestamp=_ts(1), received_at=_ts(1))  # a second rejection, real state advances
+    assert snapshot["non_positive_price"] == 1  # the earlier snapshot is frozen, unaffected
+    assert builder.rejected_tick_counts_snapshot()["non_positive_price"] == 2  # a fresh snapshot sees it

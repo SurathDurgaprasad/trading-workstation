@@ -36,6 +36,7 @@ per spec §6 rather than left implicit):
 
 import logging
 import math
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -244,6 +245,35 @@ class CandleBuilder:
         instead of scanning logs by hand. Never reset automatically --
         one CandleBuilder instance lives for one (symbol, interval) pair
         for the life of the process."""
+        self._lock = threading.Lock()
+        """Continuous red-team follow-up, 2026-09-23 (G12, docs/MASTER_KNOWN_ISSUES.md):
+        `on_tick` (the sole writer of every field above) runs on the
+        WebSocket receive thread; `last_known_price`/`last_known_timestamp`/
+        `flush()`/`rejected_tick_counts_snapshot()` (this class's only
+        read-only accessors intended for a DIFFERENT caller, e.g. a
+        dashboard/monitoring poll -- see each one's own docstring) were
+        previously unsynchronized, relying implicitly on CPython's GIL to
+        make each individual attribute read/write atomic. Confirmed still
+        genuinely DORMANT (no production caller of any of these methods
+        exists outside this class's own tests as of this pass --
+        `live/dhan/market_data_source.py`'s own `last_known_price`/
+        `partial_candle`/`rejected_tick_counts_by_symbol` wrappers are
+        themselves never called by the live pipeline today), so this is
+        not closing a live, currently-exploitable bug -- but relying on
+        GIL atomicity for a COMPOUND read (multiple related fields must be
+        observed as of the same tick, e.g. `last_known_price` paired with
+        `last_known_timestamp`) was never actually safe even under the
+        GIL (each individual attribute read is atomic; the PAIR is not),
+        and is explicitly NOT guaranteed at all under a free-threaded
+        (PEP 703, no-GIL) Python build, which `sys._is_gil_enabled()`
+        confirms is a real, selectable build of the exact interpreter
+        version this project runs on (3.14). A single, non-reentrant
+        `threading.Lock`, held only for simple, non-blocking,
+        non-recursive attribute reads/writes (this class is documented
+        pure -- "no I/O, no network" -- and no locked method ever calls
+        another locked method), cannot deadlock: there is only ever one
+        lock, acquired and released within a single call, on a class with
+        no callback into caller code while held."""
 
     def _bucket_start_for(self, timestamp: datetime) -> datetime:
         epoch = timestamp.timestamp()
@@ -300,6 +330,14 @@ class CandleBuilder:
         (erring toward under-counting over double-counting) consistent
         with this project's existing "never risk manufacturing volume
         that wasn't real" posture, not a guarantee of perfect accounting."""
+        with self._lock:
+            return self._on_tick_locked(price=price, volume=volume, timestamp=timestamp, received_at=received_at)
+
+    def _on_tick_locked(self, *, price: float, volume: float, timestamp: datetime, received_at: datetime) -> OHLCVBar | None:
+        """The real body of on_tick -- see G12's note on `self._lock` in
+        `__init__` for why this is split into a thin public wrapper plus
+        this private method, rather than wrapping on_tick's own
+        docstring-bearing signature directly."""
         if self._last_known_timestamp is not None and self._max_timestamp_skew_seconds is not None:
             skew_seconds = abs((timestamp - self._last_known_timestamp).total_seconds())
             if skew_seconds > self._max_timestamp_skew_seconds:
@@ -584,9 +622,10 @@ class CandleBuilder:
         repeatedly (e.g. once per dashboard poll) never disturbs the real
         candle this same bucket will eventually finalize into via
         on_tick's own natural rollover."""
-        if self._state is None:
-            return None
-        return self._finalize(self._state, is_partial=True)
+        with self._lock:
+            if self._state is None:
+                return None
+            return self._finalize(self._state, is_partial=True)
 
     @property
     def last_known_price(self) -> float | None:
@@ -599,7 +638,8 @@ class CandleBuilder:
         __init__'s own docstring) but was never exposed publicly until
         now -- the exact gap identified in the live-data-architecture
         investigation."""
-        return self._last_known_price
+        with self._lock:
+            return self._last_known_price
 
     @property
     def last_known_timestamp(self) -> "datetime | None":
@@ -609,4 +649,35 @@ class CandleBuilder:
         market_data.quality.SourceHealth.from_bar_timestamp, the same
         freshness math every other bar in this project is judged by)
         rather than assuming it is always "now"."""
-        return self._last_known_timestamp
+        with self._lock:
+            return self._last_known_timestamp
+
+    def last_known_price_and_timestamp(self) -> "tuple[float, datetime] | None":
+        """G12 follow-up (2026-09-23, docs/MASTER_KNOWN_ISSUES.md): reads
+        `last_known_price`/`last_known_timestamp` together as ONE atomic
+        pair, under a single lock acquisition. The two `@property`
+        accessors above are each individually lock-protected, but calling
+        them separately (as `live/dhan/market_data_source.py`'s
+        `last_known_price()` wrapper used to) is still a compound
+        operation across TWO separate lock acquisitions -- `on_tick` could
+        run in between them, so the price a caller reads could legitimately
+        belong to an EARLIER tick than the timestamp it reads alongside it.
+        This is the safe way to read both as of the same tick. Returns
+        None if no valid tick has been accepted yet (mirroring
+        `last_known_price`'s own None-until-first-tick contract)."""
+        with self._lock:
+            if self._last_known_price is None:
+                return None
+            return self._last_known_price, self._last_known_timestamp
+
+    def rejected_tick_counts_snapshot(self) -> dict[str, int]:
+        """G12 (docs/MASTER_KNOWN_ISSUES.md): a lock-protected copy of
+        `rejected_tick_counts`, for a caller on a different thread than
+        `on_tick`'s own (e.g. `live/dhan/market_data_source.py`'s
+        `rejected_tick_counts_by_symbol`, this method's only current
+        caller). The bare `rejected_tick_counts` attribute itself is left
+        as-is (still directly read by this class's own single-threaded
+        tests, which need no lock) -- this is the safe way for a
+        cross-thread caller to read it."""
+        with self._lock:
+            return dict(self.rejected_tick_counts)

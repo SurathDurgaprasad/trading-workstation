@@ -369,8 +369,16 @@ class DhanMarketDataSource:
         session seen, across every symbol" without grepping logs or
         reaching into private per-symbol state directly. A snapshot at
         call time -- counts only ever grow for the life of this source
-        instance, never reset here."""
-        return {symbol: dict(builder.rejected_tick_counts) for symbol, builder in self._candle_builders.items()}
+        instance, never reset here.
+
+        G12 follow-up (2026-09-23, docs/MASTER_KNOWN_ISSUES.md): uses each
+        builder's own lock-protected `rejected_tick_counts_snapshot()`
+        rather than reading `builder.rejected_tick_counts` directly --
+        this method may be called from a different thread than the one
+        driving `on_tick` (e.g. a dashboard/monitoring poll), so the read
+        must be synchronized against concurrent mutation the same way
+        `last_known_price`/`partial_candle` below already are."""
+        return {symbol: builder.rejected_tick_counts_snapshot() for symbol, builder in self._candle_builders.items()}
 
     def last_known_price(self, symbol: str) -> tuple[float, datetime] | None:
         """LIVE SYSTEM HARDENING mission, Part 2: the finest-grained live
@@ -383,11 +391,19 @@ class DhanMarketDataSource:
         it never advances or is consumed by the pipeline's own bar
         processing, so calling it (e.g. for a dashboard/monitoring poll)
         has no effect on signal generation, which continues to see only
-        genuinely completed candles via next_bar()."""
+        genuinely completed candles via next_bar().
+
+        G12 follow-up (2026-09-23, docs/MASTER_KNOWN_ISSUES.md): uses
+        CandleBuilder.last_known_price_and_timestamp() -- a single atomic
+        read of the pair -- rather than reading the two separate
+        `last_known_price`/`last_known_timestamp` properties one after
+        another, which could otherwise observe a price and a timestamp
+        from two DIFFERENT ticks if `on_tick` ran in between the two
+        reads."""
         builder = self._candle_builders.get(symbol)
-        if builder is None or builder.last_known_price is None:
+        if builder is None:
             return None
-        return builder.last_known_price, builder.last_known_timestamp
+        return builder.last_known_price_and_timestamp()
 
     def partial_candle(self, symbol: str):
         """Returns the subscribed symbol's CURRENT in-progress candle
