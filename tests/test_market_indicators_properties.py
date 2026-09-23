@@ -49,7 +49,9 @@ from market.indicators import (
     compute_volume_analysis,
 )
 
-_PROPERTY_SETTINGS = settings(max_examples=100, derandomize=True, suppress_health_check=[HealthCheck.too_slow])
+_PROPERTY_SETTINGS = settings(max_examples=100, derandomize=True)
+
+_FLAKY_UNDER_LOAD_SETTINGS = settings(max_examples=100, derandomize=True, suppress_health_check=[HealthCheck.too_slow])
 """Red-team investigation (2026-09-22): test_compute_sma_never_raises_
 regardless_of_length_vs_period failed intermittently during FULL-SUITE runs
 (never in isolation) -- once as a bare failure, once explicitly as
@@ -68,7 +70,17 @@ Hypothesis from failing a test because the surrounding test suite made the
 MACHINE, not the CODE, slow. market/indicators.py itself was read
 line-by-line and found to contain no source of nondeterminism (no dict
 ordering dependency, no uninitialized state) that could otherwise explain
-this."""
+this.
+
+Second-order red-team review (2026-09-22, same night): the original fix
+applied this suppression to the SHARED `_PROPERTY_SETTINGS` object, used
+by all 14 property tests in this file, not just the one that actually
+flaked -- silently disabling Hypothesis's own speed-regression detection
+for the other 13 tests too, permanently and unconditionally, not only
+"under concurrent full-suite load." Narrowed to this SEPARATE settings
+object, applied only to the one test that has actually demonstrated the
+load-induced flake, so the other 13 keep their genuine-regression
+detection intact."""
 
 _PRICE = st.floats(min_value=0.01, max_value=1_000_000.0, allow_nan=False, allow_infinity=False)
 _VOLUME = st.floats(min_value=0.0, max_value=1_000_000_000.0, allow_nan=False, allow_infinity=False)
@@ -81,7 +93,7 @@ def _close_series(values: list[float]) -> pd.Series:
 # --- compute_sma -------------------------------------------------------------
 
 
-@_PROPERTY_SETTINGS
+@_FLAKY_UNDER_LOAD_SETTINGS
 @given(closes=st.lists(_PRICE, min_size=0, max_size=60), period=st.integers(min_value=1, max_value=20))
 def test_compute_sma_never_raises_regardless_of_length_vs_period(closes, period):
     """No unexpected exception -- including the degenerate cases (empty
