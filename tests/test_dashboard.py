@@ -866,3 +866,62 @@ def test_api_state_returns_a_real_json_snapshot(client):
     assert body["pending_approvals_count"] == 0
     assert "as_of" in body
     assert body["prices"] == []
+
+
+# --- G10: uncaught-exception handling (continuous red-team, 2026-09-23) ----
+
+
+def test_an_uncaught_exception_in_a_route_returns_a_clean_page_not_a_raw_traceback(monkeypatch):
+    """G10 regression (docs/MASTER_KNOWN_ISSUES.md): previously this app
+    registered no exception_handlers, so ANY uncaught exception inside a
+    route handler propagated raw. Forces a genuine exception inside
+    research_page's own workstation.get_feed_status() call (no try/except
+    wraps that specific line) and proves the app-level handler now
+    intercepts it: a clean 500 HTML page is actually SENT over the wire
+    (what a real browser served by uvicorn would receive), never a raw
+    traceback string.
+
+    Uses raise_server_exceptions=False: Starlette's ServerErrorMiddleware
+    always calls the registered handler AND sends its response first --
+    then re-raises so a real ASGI server can still log it (see
+    starlette/middleware/errors.py's own comment, "We always continue to
+    raise the exception... allows test clients to optionally raise the
+    error within the test case"). TestClient's default
+    (raise_server_exceptions=True) surfaces that re-raise as a Python
+    exception in the test itself; disabling it here is what lets this
+    test inspect the actual HTTP response our handler produced, exactly
+    as a real client would receive it."""
+    import live.workstation as workstation_module
+    from dashboard.app import app
+
+    def _boom():
+        raise RuntimeError("simulated genuine failure, e.g. a corrupted DB file")
+
+    monkeypatch.setattr(workstation_module, "get_feed_status", _boom)
+
+    lenient_client = TestClient(app, raise_server_exceptions=False)
+    response = lenient_client.get("/research")
+    assert response.status_code == 500
+    assert "SOMETHING WENT WRONG" in response.text
+    assert "Traceback" not in response.text
+    assert "RuntimeError" not in response.text
+
+    # This ALSO proves a real second-order bug (found by this exact test,
+    # against an earlier version of the fix) stays fixed: monkeypatching
+    # get_feed_status globally means EVERY workstation.get_feed_status()
+    # call fails, including the ones _page()'s own live banners
+    # (_broker_connectivity_banner and friends) make. An earlier version
+    # of the handler reused _page() for styling, so the error page itself
+    # raised a second, unhandled exception in exactly this scenario --
+    # this assertion (a real 200-shaped body, not an empty/failed
+    # response) is what would have caught that.
+    assert len(response.text) > 200
+
+
+def test_other_pages_are_unaffected_by_the_new_exception_handler(client):
+    """Regression guard: registering exception_handlers={Exception: ...}
+    must not change any NORMAL (non-erroring) response -- Starlette only
+    invokes a registered handler when a route actually raises."""
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "SOMETHING WENT WRONG" not in response.text

@@ -27,6 +27,7 @@ to generate bars/signals for this page to show and act on.
 """
 
 import html
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -39,6 +40,8 @@ import live.workstation as workstation
 from core.config import PROJECT_ROOT
 from core.timeutil import as_utc_aware
 from dashboard import intelligence
+
+logger = logging.getLogger(__name__)
 
 _REFRESH_SECONDS = 15
 
@@ -413,8 +416,10 @@ def _page(body: str, *, active_path: str = "/") -> str:
     scientific verdict, market status) -- only their visual container
     changed, never their content or the real data source behind them.
     Still meta-refreshes (this project has no client-side framework and
-    no WebSocket layer; see `/api/state` for the one piece of this page
-    that DOES update without a full reload)."""
+    no WebSocket layer). `/api/state` is a real, correct, read-only JSON
+    endpoint (see its own docstring) but nothing on this page currently
+    calls it — the ONLY refresh mechanism today, for every value on every
+    page, is this full-page reload every `_REFRESH_SECONDS`."""
     return f"""<!doctype html>
 <html>
 <head>
@@ -1235,11 +1240,27 @@ async def api_state(request: Request) -> JSONResponse:
     """UI integration -- Live Data UX requirement ("do not refresh the
     entire page; update only changed values"). A small, read-only JSON
     snapshot of exactly the same real fields the top status bar and
-    Overview watchlist already render server-side -- polled by a small
-    vanilla-JS snippet to update ONLY those DOM nodes in place, no
-    framework, no WebSocket (this project has neither), no full page
-    reload. Same local-SQLite-only, zero-network-fetch discipline as
-    every other read in this module."""
+    Overview watchlist already render server-side.
+
+    Continuous red-team follow-up, 2026-09-23 (G11, docs/MASTER_KNOWN_ISSUES.md):
+    this endpoint's own data is real and correct, but the "polled by a
+    small vanilla-JS snippet to update DOM nodes in place" behavior this
+    docstring used to describe was never actually implemented -- no such
+    script exists anywhere in this module or in `_page()`'s own HTML
+    shell (grep confirms: no `<script>`, no `fetch(`, no `setInterval`
+    anywhere in this file). The dashboard's ONLY real refresh mechanism
+    today, for every page and every value, is `_page()`'s full-page
+    `<meta http-equiv="refresh">` reload every `_REFRESH_SECONDS`. This
+    endpoint is kept (it is a real, safe, read-only, zero-network-fetch
+    snapshot, and a future partial-refresh implementation would want
+    exactly this shape) but is not currently consumed by anything —
+    building the actual polling script is a deliberate, separately-scoped
+    frontend decision, not made under this pass (see that report's own
+    Part 7 finding: since no client-side polling exists today, there is
+    no live polling-response-race to protect against either; that
+    protection would need to be added AT THE SAME TIME as the polling
+    script itself, using each response's own `as_of` timestamp below to
+    discard an out-of-order reply)."""
     status = workstation.get_live_sim_status()
     feed_status = workstation.get_feed_status()
     prices = []
@@ -1779,20 +1800,69 @@ call this page can make is to a local Ollama daemon, never a market-data provide
     return HTMLResponse(_page(body))
 
 
-app = Starlette(routes=[
-    Route("/", overview, methods=["GET"]),
-    Route("/signals", signals_page, methods=["GET"]),
-    Route("/signals/{signal_id}", signal_detail_page, methods=["GET"]),
-    Route("/portfolio", portfolio_page, methods=["GET"]),
-    Route("/fleet", fleet_page, methods=["GET"]),
-    Route("/system", system_page, methods=["GET"]),
-    Route("/research", research_page, methods=["GET"]),
-    Route("/api/state", api_state, methods=["GET"]),
-    Route("/approve", approve, methods=["POST"]),
-    Route("/reject", reject, methods=["POST"]),
-    Route("/kill-switch/activate", kill_switch_activate, methods=["POST"]),
-    Route("/kill-switch/reset", kill_switch_reset, methods=["POST"]),
-    Route("/intelligence", intelligence_page, methods=["GET"]),
-    Route("/intelligence/{symbol}", decision_detail_page, methods=["GET"]),
-    Route("/health", health_page, methods=["GET"]),
-])
+async def _handle_uncaught_exception(request: Request, exc: Exception) -> HTMLResponse:
+    """Continuous red-team follow-up, 2026-09-23 (G10, docs/MASTER_KNOWN_ISSUES.md):
+    previously this Starlette app registered no `exception_handlers` at
+    all, so ANY uncaught exception in a route handler (a corrupted DB
+    file raising core.sqlite_util.DatabaseCorruptedError, or any other
+    genuine bug) produced a raw 500 traceback instead of a clean page.
+    This is a single, generic, safety-neutral handler: it never hides OR
+    changes WHICH exception occurred -- the real exception and traceback
+    are logged server-side via `logger.exception`, the same pattern every
+    other error path in this project already uses -- it only changes what
+    the BROWSER shows. Deliberately not split by exception type (the
+    earlier audit's own stated reason for deferring this): a single
+    generic "something went wrong, see the server log" page is honest and
+    safe for every failure class here, since this module contains no
+    business logic of its own to get subtly wrong (see this file's own
+    module docstring) -- a corrupted DB and a coding bug both simply mean
+    "this page could not be rendered right now," nothing more specific is
+    safe to claim without risking a misleading message.
+
+    Second-order bug found and fixed while writing this fix's own
+    regression test (tests/test_dashboard.py): an earlier version of this
+    handler reused `_page()` for consistent visual styling -- but `_page()`
+    itself renders several live banners (`_broker_connectivity_banner()`
+    and friends), which read the exact same workstation/DB state that
+    could be the very thing failing (a genuinely corrupted
+    `data/live_sim_trading.db`, for instance). That made the error page
+    ITSELF capable of raising a SECOND, unhandled exception -- exactly
+    the failure this handler exists to prevent, now happening one level
+    up, with no handler left to catch it. This version is deliberately
+    self-contained: a static string, no `workstation`/`intelligence`/live
+    DB reads of any kind, so it can render even when every other page on
+    this dashboard cannot."""
+    logger.exception("Unhandled exception while serving %s %s", request.method, request.url.path, exc_info=exc)
+    html_body = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Trading Workstation (PAPER)</title>
+<style>body{background:#0B0F13;color:#E6E9EC;font-family:Inter,system-ui,sans-serif;padding:40px;}
+a{color:#4C8DFF;}p.muted{color:#9AA4AF;}</style></head>
+<body>
+<h2>SOMETHING WENT WRONG</h2>
+<p class="muted">An unexpected error occurred while rendering this page. It has been logged server-side.
+This is a read/act surface only -- no trading decision was made or changed by this error.</p>
+<p><a href="/">Return to Overview</a></p>
+</body></html>"""
+    return HTMLResponse(html_body, status_code=500)
+
+
+app = Starlette(
+    routes=[
+        Route("/", overview, methods=["GET"]),
+        Route("/signals", signals_page, methods=["GET"]),
+        Route("/signals/{signal_id}", signal_detail_page, methods=["GET"]),
+        Route("/portfolio", portfolio_page, methods=["GET"]),
+        Route("/fleet", fleet_page, methods=["GET"]),
+        Route("/system", system_page, methods=["GET"]),
+        Route("/research", research_page, methods=["GET"]),
+        Route("/api/state", api_state, methods=["GET"]),
+        Route("/approve", approve, methods=["POST"]),
+        Route("/reject", reject, methods=["POST"]),
+        Route("/kill-switch/activate", kill_switch_activate, methods=["POST"]),
+        Route("/kill-switch/reset", kill_switch_reset, methods=["POST"]),
+        Route("/intelligence", intelligence_page, methods=["GET"]),
+        Route("/intelligence/{symbol}", decision_detail_page, methods=["GET"]),
+        Route("/health", health_page, methods=["GET"]),
+    ],
+    exception_handlers={Exception: _handle_uncaught_exception},
+)
