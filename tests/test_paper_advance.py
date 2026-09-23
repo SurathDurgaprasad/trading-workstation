@@ -412,7 +412,18 @@ def test_advance_holds_back_a_stale_pending_order_on_max_daily_loss():
     # Directly force a same-day loss beyond the 3% threshold (equivalent to
     # what several real intraday losing trades would produce) -- isolates
     # this specific halt condition without needing a multi-cycle drive.
+    # G9 follow-up (2026-09-23): also persisted, not just mutated in
+    # memory -- PaperTradingEngine._refresh_account() now re-reads the
+    # account from the store at the top of every transactional method
+    # (submit_signal included), exactly matching what every REAL account
+    # mutation already does before any other engine call could see it
+    # (roll_to_day/mark_to_market/etc. always run inside a
+    # store.transaction() that saves before returning). An in-memory-only
+    # mutation, never persisted, is not a state this engine can ever
+    # legitimately be in outside a test shortcut -- so this test must
+    # persist it too, the same way the real production code path would.
     engine.account.daily_start_equity = engine.account.equity / (1 - risk_config.max_daily_loss_pct / 100 - 0.01)
+    engine.store.save_account(engine.account)
     assert engine.account.daily_pnl < 0
     assert -engine.account.daily_pnl >= engine.account.daily_start_equity * risk_config.max_daily_loss_pct / 100
 

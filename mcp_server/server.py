@@ -304,8 +304,17 @@ def submit_paper_market_bar_tool(symbol: str, bar: OHLCVBar) -> str:
 @mcp.tool()
 @observed_tool("get_account")
 def get_account_tool() -> Account:
-    """The current paper-trading account state — read-only."""
-    return _get_paper_engine().account
+    """The current paper-trading account state — read-only.
+
+    Continuous red-team follow-up, 2026-09-23 (G9-DISPLAY, docs/MASTER_KNOWN_ISSUES.md):
+    refreshed from the store first. This module's own `_paper_engine`
+    singleton is cached for the MCP server process's lifetime, same as
+    `live/workstation.py`'s `get_live_engine()` -- another process writing
+    to the same `data/paper_trading.db` (e.g. `main.py paper ...`) would
+    otherwise never be reflected here."""
+    engine = _get_paper_engine()
+    engine.refresh_account()
+    return engine.account
 
 
 @mcp.tool()
@@ -335,8 +344,12 @@ def get_journal_entry_tool(signal_id: str) -> JournalEntry | None:
 @observed_tool("get_paper_status")
 def get_paper_status_tool() -> PaperStatus:
     """A one-call summary: account state, open position count, total
-    journal entries (signals seen), total completed trades — read-only."""
+    journal entries (signals seen), total completed trades — read-only.
+
+    G9-DISPLAY follow-up (2026-09-23, docs/MASTER_KNOWN_ISSUES.md):
+    refreshed from the store first — see get_account_tool's own docstring."""
     engine = _get_paper_engine()
+    engine.refresh_account()
     return PaperStatus(
         account=engine.account,
         open_positions_count=sum(1 for p in engine.store.list_positions() if p.status.value == "OPEN"),

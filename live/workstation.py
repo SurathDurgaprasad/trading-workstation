@@ -100,6 +100,7 @@ def reset_kill_switch() -> None:
 
 def get_live_sim_status() -> dict:
     engine = get_live_engine()
+    engine.refresh_account()  # G9-DISPLAY (docs/MASTER_KNOWN_ISSUES.md): never show a stale cached account
     state_store = new_live_state_store()
     try:
         active, _, reason = state_store.kill_switch_state()
@@ -178,11 +179,18 @@ def get_positions() -> list:
 
 
 def get_account_state():
-    return get_live_engine().account
+    """G9-DISPLAY (docs/MASTER_KNOWN_ISSUES.md): refreshed from the store
+    before every read -- see PaperTradingEngine.refresh_account()'s own
+    docstring for why a stale, process-lifetime-cached account must never
+    be shown as current."""
+    engine = get_live_engine()
+    engine.refresh_account()
+    return engine.account
 
 
 def get_risk_state() -> dict:
     engine = get_live_engine()
+    engine.refresh_account()  # G9-DISPLAY: see get_account_state's own docstring
     account = engine.account
     config = engine.risk_engine.config
     return {
@@ -208,8 +216,10 @@ def get_risk_halt_reasons() -> list[str]:
     (this one included) can ask "is trading halted?" without duplicating
     that logic. Empty list means not halted -- never fabricated; this
     reuses the live engine's own real account/config state, no new risk
-    math written here."""
+    math written here. G9-DISPLAY (docs/MASTER_KNOWN_ISSUES.md): refreshed
+    from the store first -- see get_account_state's own docstring."""
     engine = get_live_engine()
+    engine.refresh_account()
     reasons = engine.risk_engine.account_level_halt_reasons(engine.account)
     return [r.value for r in reasons]
 
@@ -268,13 +278,21 @@ def get_risk_decision_for_pending(record):
     the risk breakdown for one PendingApprovalRecord, for display only --
     the SAME pure, side-effect-free pattern live/prediction_recorder.py's
     own record_prediction_for_signal() already uses (RiskEngine.evaluate()
-    is a pure function of (signal, account); account state has not
-    changed since this signal was generated, so this reproduces exactly
-    what was, or will be, used for the real decision -- it never creates,
-    approves, or resizes anything). Returns None if the account/risk
-    engine is unavailable for any reason -- never fabricated."""
+    is a pure function of (signal, account)). It never creates, approves,
+    or resizes anything -- the REAL decision is made fresh, independently,
+    by approve_pending_signal() -> submit_signal() when the human actually
+    clicks Approve. Returns None if the account/risk engine is unavailable
+    for any reason -- never fabricated.
+
+    G9-DISPLAY (docs/MASTER_KNOWN_ISSUES.md): refreshed from the store
+    first. Account state is NOT guaranteed unchanged since this signal was
+    generated -- a concurrent CLI session (the same documented use case
+    G9 covers) could have opened/closed a different position since --
+    refreshing keeps this PREVIEW honest; it is still only ever a
+    preview, never the authoritative decision."""
     try:
         engine = get_live_engine()
+        engine.refresh_account()
         return engine.risk_engine.evaluate(record.signal, engine.account)
     except Exception:  # noqa: BLE001 -- display-only; a failure here must never break the page
         return None

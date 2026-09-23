@@ -62,6 +62,14 @@ def test_get_risk_halt_reasons_reflects_a_real_consecutive_loss_hard_limit_breac
 
     engine = PaperTradingEngine(PaperStore(tmp_path / "live_sim.db"))
     engine.account.consecutive_losses = 6  # risk/config.py's own default consecutive_loss_hard_limit
+    # G9-DISPLAY follow-up (2026-09-23): also persisted, not just mutated
+    # in memory -- get_risk_halt_reasons() now calls engine.refresh_account()
+    # before reading engine.account (see that function's own docstring),
+    # matching what every REAL account mutation already does before any
+    # other call could observe it. An in-memory-only mutation, never
+    # persisted, is not a state this engine can legitimately be in outside
+    # a test shortcut.
+    engine.store.save_account(engine.account)
     monkeypatch.setattr(workstation, "get_live_engine", lambda: engine)
 
     assert workstation.get_risk_halt_reasons() == ["CONSECUTIVE_LOSS_LIMIT"]

@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from backtesting.trade import Trade
-from paper.errors import InvalidOrderTransitionError, InvalidPositionTransitionError
+from paper.errors import DuplicateTradeForPositionError, InvalidOrderTransitionError, InvalidPositionTransitionError
 from paper.models import JournalEntry, JournalOutcome, PaperFill, PaperOrder, Position
 from risk.account import Account
 from risk.contracts import RiskDecision
@@ -130,7 +130,33 @@ class PaperStore:
         self._conn = sqlite_util.connect(self.db_path)
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
+        self.trade_position_uniqueness_enforced_at_db_level = self._migrate_trades_unique_position_id_index()
         sqlite_util.ensure_schema_version(self._conn, self.CURRENT_SCHEMA_VERSION)
+
+    def _migrate_trades_unique_position_id_index(self) -> bool:
+        """Continuous red-team follow-up, 2026-09-23 (G14, docs/MASTER_KNOWN_ISSUES.md):
+        `trades.position_id` (a position closes into a Trade at most once)
+        previously had no DB-level uniqueness at all -- application
+        discipline only (a single call site, plus store.transaction()'s
+        own atomicity). No column backfill is needed here (`position_id`
+        has always been a populated, NOT NULL column, unlike
+        predictions/store.py's own entry_time migration, which had to add
+        and backfill a brand-new column first) -- this is purely an
+        additive index. Mirrors predictions/store.py's own
+        `_migrate_entry_time_column_and_unique_index` exactly: attempts a
+        real `CREATE UNIQUE INDEX IF NOT EXISTS`, and if an already-
+        deployed database happens to already contain duplicate
+        position_id rows in `trades` (only possible under the old
+        app-level-only discipline, and not observed in this project's own
+        databases), the index creation is skipped rather than crashing
+        startup or silently deleting a row -- see
+        core.sqlite_util.try_create_unique_index's own docstring. Returns
+        whether the DB-level constraint is actually active, surfaced via
+        `trade_position_uniqueness_enforced_at_db_level` so a caller/
+        health-check can know which guarantee it's actually getting."""
+        return sqlite_util.try_create_unique_index(
+            self._conn, index_name="idx_trades_position_id_unique", table="trades", columns="position_id"
+        )
 
     def close(self) -> None:
         self._conn.close()
@@ -155,8 +181,34 @@ class PaperStore:
         """Explicit BEGIN/COMMIT/ROLLBACK (spec §10) — no partial writes on
         failure. Nested calls are NOT supported (a single flat transaction
         per paper-trading step is all this phase needs); attempting one
-        raises rather than silently misbehaving."""
-        self._conn.execute("BEGIN")
+        raises rather than silently misbehaving.
+
+        Continuous red-team follow-up, 2026-09-23 (G9): `BEGIN IMMEDIATE`,
+        not plain `BEGIN` (SQLite's default DEFERRED mode). A deferred
+        transaction only acquires the write lock at its FIRST write
+        statement, so two concurrent processes (e.g. the dashboard and a
+        `paper-live` CLI session sharing the same default
+        `data/live_sim_trading.db`) could each start a transaction, each
+        run their own read-then-decide logic against a snapshot that does
+        not yet reflect the other's still-uncommitted write, and then both
+        commit — a classic cross-process check-then-act race (lost
+        updates / duplicate orders for the same symbol), independent of
+        and in addition to the in-memory `self.account` staleness
+        `PaperTradingEngine._refresh_account` closes. `BEGIN IMMEDIATE`
+        acquires SQLite's own RESERVED lock atomically at the START of the
+        transaction instead: a second, concurrent `BEGIN IMMEDIATE` on
+        another connection blocks (via the busy timeout already configured
+        in `core.sqlite_util.connect`) until the first transaction commits
+        or rolls back, then proceeds against the now-current state — never
+        two writers interleaved. This uses SQLite's own native OS-level
+        file lock, not an application-level lock row: it cannot be left
+        stale by a crashed holder (the OS releases the lock the instant
+        the crashed process's file descriptor closes), and a losing
+        transaction either waits briefly or fails loudly with
+        `sqlite3.OperationalError: database is locked` — never silently
+        proceeds against stale data. See tests/test_paper_engine.py's
+        cross-process concurrency tests."""
+        self._conn.execute("BEGIN IMMEDIATE")
         try:
             yield
         except Exception:
@@ -299,10 +351,23 @@ class PaperStore:
     # --- trades ------------------------------------------------------------------
 
     def save_trade(self, trade: Trade, *, position_id: str, trade_id: str, execution_model_version: str) -> None:
-        self._conn.execute(
-            "INSERT INTO trades (trade_id, position_id, symbol, execution_model_version, data_json, created_at) VALUES (?,?,?,?,?,?)",
-            (trade_id, position_id, trade.symbol, execution_model_version, trade.model_dump_json(), _now()),
-        )
+        """Raises DuplicateTradeForPositionError if the DB-level
+        UNIQUE(position_id) index (see
+        _migrate_trades_unique_position_id_index, G14) is active and a
+        trade for this position_id was already saved -- mirroring
+        predictions/store.py's own save_prediction/DuplicatePredictionError
+        pattern. If the constraint is not active (a pre-existing database
+        with unresolved historical duplicates), this still succeeds,
+        matching the prior behavior exactly."""
+        try:
+            self._conn.execute(
+                "INSERT INTO trades (trade_id, position_id, symbol, execution_model_version, data_json, created_at) VALUES (?,?,?,?,?,?)",
+                (trade_id, position_id, trade.symbol, execution_model_version, trade.model_dump_json(), _now()),
+            )
+        except sqlite3.IntegrityError as exc:
+            if "UNIQUE constraint failed" not in str(exc):
+                raise
+            raise DuplicateTradeForPositionError(position_id=position_id) from exc
 
     def list_trades(self) -> list[Trade]:
         rows = self._conn.execute("SELECT data_json FROM trades ORDER BY created_at").fetchall()

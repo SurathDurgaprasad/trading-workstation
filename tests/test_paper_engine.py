@@ -96,6 +96,110 @@ def test_submit_signal_is_idempotent_under_real_concurrent_contention(tmp_path):
     verify_store.close()
 
 
+# --- G9: dashboard/CLI dual-writer risk (continuous red-team, 2026-09-23) --
+#
+# G9 (docs/MASTER_KNOWN_ISSUES.md): the dashboard's single-symbol workstation
+# pages and a separate `paper-live` CLI session (no --runtime-dir) share the
+# SAME default data/live_sim_trading.db -- a documented, supported use case
+# (see live/workstation.py's own module docstring). Each is a SEPARATE
+# PaperTradingEngine instance, in a separate OS process; before this fix,
+# `self.account` was loaded once at construction and never refreshed, so one
+# process's committed account changes were invisible to the other's risk
+# decisions/mutations for its entire lifetime.
+
+
+def test_submit_signal_sees_a_second_processs_committed_account_changes(tmp_path):
+    """G9 core fix: PaperTradingEngine._refresh_account(), called inside
+    submit_signal's own transaction. Simulates the real scenario: engine_a
+    is constructed first (like a dashboard singleton, long-lived); a
+    SEPARATE process (engine_b, its own connection) then drives the
+    account into a real, persisted consecutive-loss circuit-breaker state.
+    engine_a's own submit_signal call, made AFTER that -- with no bar ever
+    processed by engine_a itself -- must still see and honor it, not the
+    healthy snapshot it was constructed with."""
+    db_path = tmp_path / "g9_stale_account.db"
+    store_a = PaperStore(db_path)
+    engine_a = PaperTradingEngine(store_a, initial_capital=100_000.0)
+    assert engine_a.account.consecutive_losses == 0  # healthy at construction time
+
+    # A second, independent connection/engine -- the faithful simulation of
+    # a separate OS process (e.g. the `paper-live` CLI actually driving
+    # bars) -- persists a real circuit-breaker-tripped account state.
+    store_b = PaperStore(db_path)
+    tripped_account = store_b.get_account()
+    tripped_account.consecutive_losses = RiskConfig().consecutive_loss_hard_limit
+    store_b.save_account(tripped_account)
+    store_b.close()
+
+    # engine_a's own in-memory copy is still the healthy one it was
+    # constructed with -- unchanged so far, proving this isn't a fluke of
+    # construction order.
+    assert engine_a.account.consecutive_losses == 0
+
+    journal = engine_a.submit_signal(_signal())
+    assert journal.outcome == JournalOutcome.REJECTED, (
+        "a stale cached account would have wrongly approved this signal -- "
+        "the circuit breaker tripped by the OTHER process must be honored"
+    )
+    assert engine_a.account.consecutive_losses == RiskConfig().consecutive_loss_hard_limit
+
+    store_a.close()
+
+
+def test_two_engine_instances_racing_different_signals_for_the_same_symbol_never_both_open_an_order(tmp_path):
+    """G9 concurrency fix: PaperStore.transaction() now uses BEGIN
+    IMMEDIATE, not the SQLite-default DEFERRED BEGIN. Two DIFFERENT
+    signals (distinct stable_id()s -- cycle 15's same-signal idempotency
+    fix does not apply here) for the SAME symbol, submitted by two
+    separate engine instances (separate connections) on the same db file
+    at the same synchronized moment: the "already_active" check
+    (get_pending_order/get_open_position) that gates order creation must
+    never let both callers see "nothing active yet" -- exactly one side
+    may create the PENDING order; the loser must see the winner's
+    already-committed order and skip."""
+    import threading
+
+    db_path = tmp_path / "g9_same_symbol_race.db"
+    PaperStore(db_path).close()  # create the schema before threads race on it
+
+    signal_a = _signal(generated_at=datetime(2026, 1, 1, 9, 15), reference_price=100.0)
+    signal_b = _signal(generated_at=datetime(2026, 1, 1, 9, 16), reference_price=101.0)
+    assert signal_a.stable_id() != signal_b.stable_id()
+
+    results: dict[str, str] = {}
+    barrier = threading.Barrier(2)
+
+    def _attempt(key: str, signal: Signal) -> None:
+        store = PaperStore(db_path)
+        engine_instance = PaperTradingEngine(store, initial_capital=100_000.0)
+        try:
+            barrier.wait()
+            journal = engine_instance.submit_signal(signal)
+            results[key] = journal.outcome.value
+        finally:
+            store.close()
+
+    t1 = threading.Thread(target=_attempt, args=("a", signal_a))
+    t2 = threading.Thread(target=_attempt, args=("b", signal_b))
+    t1.start()
+    t2.start()
+    t1.join(timeout=15)
+    t2.join(timeout=15)
+
+    assert set(results.keys()) == {"a", "b"}, f"one side crashed/hung instead of resolving cleanly: {results}"
+    outcomes = {results["a"], results["b"]}
+    assert outcomes == {JournalOutcome.APPROVED_PENDING.value, JournalOutcome.SKIPPED_ALREADY_ACTIVE.value}, (
+        f"exactly one side must win the symbol's single PENDING-order slot, never both/neither: {results}"
+    )
+
+    verify_store = PaperStore(db_path)
+    pending = verify_store.get_pending_order("TEST")
+    assert pending is not None
+    all_orders_for_symbol = [o for o in verify_store.list_pending_orders() if o.symbol == "TEST"]
+    assert len(all_orders_for_symbol) == 1, "at most one PENDING order may ever exist for a symbol"
+    verify_store.close()
+
+
 # --- decision_id correlation (LIVE SYSTEM HARDENING mission, Issue 3) -------
 
 

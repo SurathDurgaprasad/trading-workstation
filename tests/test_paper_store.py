@@ -299,3 +299,131 @@ def test_a_malformed_row_in_a_list_query_also_raises_the_clear_error():
 
     with pytest.raises(MalformedRowError):
         store.list_positions()
+
+
+# --- G14: DB-level UNIQUE(position_id) on trades (continuous red-team, 2026-09-23) --
+
+
+def _close_a_real_position(engine: PaperTradingEngine):
+    """Drives one real signal through submission, fill, and a stop-hit
+    close -- the SAME real path PaperTradingEngine._close_position uses in
+    production -- rather than hand-constructing a Trade with its many
+    required fields. Reused bar values from
+    tests/test_paper_engine.py::test_stop_hit_closes_the_position_at_the_stop_price,
+    a test already proven to reliably fill then stop out."""
+    engine.submit_signal(_signal(stop_price=95.0, target_price=110.0))
+    engine.process_bar("TEST", Bar(timestamp=datetime(2026, 1, 2), open=101.0, high=101.5, low=100.5, close=101.0))
+    engine.process_bar("TEST", Bar(timestamp=datetime(2026, 1, 3), open=101.0, high=102.0, low=90.0, close=93.0))
+    trade = engine.store.list_trades()[0]
+    closed_position = next(p for p in engine.store.list_positions() if p.status.value == "CLOSED")
+    return trade, closed_position.position_id
+
+
+def test_new_paper_store_has_trade_position_uniqueness_enforced_at_db_level():
+    store = PaperStore(":memory:")
+    assert store.trade_position_uniqueness_enforced_at_db_level is True
+    store.close()
+
+
+def test_saving_a_second_trade_for_the_same_position_raises():
+    """The real gap this migration closes (G14): durability that a
+    position closes at most once previously relied ENTIRELY on
+    application discipline (a single call site plus store.transaction()'s
+    own atomicity), with no schema-level backstop -- unlike every OTHER
+    terminal-state transition in this project (Position/PaperOrder both
+    raise a typed error at the store level). Proves the DB-level
+    UNIQUE(position_id) constraint itself now rejects a second trade for
+    an already-closed position, independent of any application-level
+    check."""
+    from paper.errors import DuplicateTradeForPositionError
+
+    engine = PaperTradingEngine(PaperStore(":memory:"), initial_capital=100_000.0)
+    trade, position_id = _close_a_real_position(engine)
+
+    with pytest.raises(DuplicateTradeForPositionError):
+        engine.store.save_trade(trade, position_id=position_id, trade_id="a-second-trade-id", execution_model_version="1.0")
+
+    assert len(engine.store.list_trades()) == 1  # the duplicate was never inserted
+
+
+def test_two_connections_racing_to_save_a_trade_for_the_same_position_never_both_succeed(tmp_path):
+    """Concurrent-write regression (Part 2/4): the SAME real cross-process
+    shape as the G9 tests in tests/test_paper_engine.py -- two SEPARATE
+    connections to the same db file (the faithful simulation of two
+    independent processes), racing to save a trade for the IDENTICAL
+    position_id at the same synchronized moment. Exactly one must
+    succeed; the DB-level constraint, not application ordering, is what
+    guarantees this under real contention."""
+    import threading
+
+    db_path = tmp_path / "g14_race.db"
+    engine = PaperTradingEngine(PaperStore(db_path), initial_capital=100_000.0)
+    trade, position_id = _close_a_real_position(engine)
+    engine.store.close()  # release this connection; only the two racing ones below touch the file
+
+    results: dict[str, str] = {}
+    barrier = threading.Barrier(2)
+
+    def _attempt(key: str, trade_id: str) -> None:
+        from paper.errors import DuplicateTradeForPositionError
+
+        store = PaperStore(db_path)
+        try:
+            barrier.wait()
+            try:
+                store.save_trade(trade, position_id=position_id, trade_id=trade_id, execution_model_version="1.0")
+                results[key] = "SAVED"
+            except DuplicateTradeForPositionError:
+                results[key] = "REJECTED"
+        finally:
+            store.close()
+
+    # position_id already has ONE real trade from _close_a_real_position;
+    # both threads attempt a SECOND, distinct trade_id for it -- both must
+    # be rejected, since a trade for this position already exists.
+    t1 = threading.Thread(target=_attempt, args=("a", "race-trade-a"))
+    t2 = threading.Thread(target=_attempt, args=("b", "race-trade-b"))
+    t1.start()
+    t2.start()
+    t1.join(timeout=15)
+    t2.join(timeout=15)
+
+    assert set(results.keys()) == {"a", "b"}, f"one side crashed/hung instead of resolving cleanly: {results}"
+    assert results["a"] == "REJECTED" and results["b"] == "REJECTED"
+
+    verify_store = PaperStore(db_path)
+    assert len(verify_store.list_trades()) == 1  # still only the original trade -- never a duplicate
+    verify_store.close()
+
+
+def test_migration_disables_the_unique_index_gracefully_when_preexisting_duplicate_trades_exist(tmp_path):
+    """The scenario core.sqlite_util.try_create_unique_index exists for: a
+    real database that, under the OLD app-level-only discipline, already
+    accumulated two trade rows for the same position_id BEFORE this
+    migration ever ran against it. The migration must not crash startup
+    or delete data -- it reports the constraint as inactive instead.
+    Simulated with raw sqlite3, deliberately never going through
+    PaperStore first (that would already create, and thereby enforce,
+    the index)."""
+    import sqlite3
+
+    db_path = tmp_path / "g14_preexisting_dupes.db"
+    raw = sqlite3.connect(str(db_path))
+    raw.execute(
+        "CREATE TABLE trades (trade_id TEXT PRIMARY KEY, position_id TEXT NOT NULL, symbol TEXT NOT NULL, "
+        "execution_model_version TEXT NOT NULL, data_json TEXT NOT NULL, created_at TEXT NOT NULL)"
+    )
+    for trade_id in ("t1", "t2-legacy-dup"):
+        raw.execute(
+            "INSERT INTO trades (trade_id, position_id, symbol, execution_model_version, data_json, created_at) VALUES (?,?,?,?,?,?)",
+            (trade_id, "shared-position-id", "TEST", "1.0", "{}", "2026-01-01T00:00:00+00:00"),
+        )
+    raw.commit()
+    raw.close()
+
+    store = PaperStore(db_path)
+
+    assert store.trade_position_uniqueness_enforced_at_db_level is False
+    rows = store._conn.execute("SELECT trade_id FROM trades WHERE position_id = 'shared-position-id'").fetchall()
+    assert len(rows) == 2  # neither pre-existing row was deleted
+    store.close()

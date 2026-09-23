@@ -142,8 +142,19 @@ def test_account_state_changes_after_approval_triggers_second_risk_rejection(tmp
     # Simulate the account being pushed into a drawdown breach BETWEEN the
     # first risk check (already passed, hence pending) and the human's
     # decision -- the account is the SAME live object the engine holds.
+    # G9 follow-up (2026-09-23, docs/MASTER_KNOWN_ISSUES.md): also
+    # persisted, not just mutated in memory -- PaperTradingEngine.
+    # refresh_account() now re-reads the account from the store at the
+    # top of submit_signal's own transaction (which approve_pending below
+    # reaches), exactly matching what every REAL account mutation already
+    # does before any other call could observe it. This is in fact a
+    # STRONGER proof of this test's own claim: the real production
+    # mechanism a genuinely concurrent second risk check would rely on
+    # (a fresh read from the store) is the exact same mechanism this
+    # persist-then-approve sequence now exercises.
     engine.account.peak_equity = 100_000.0
     engine.account.cash = 50_000.0  # ~50% drawdown -- exceeds the 10% default MAX_DRAWDOWN
+    store.save_account(engine.account)
 
     action = pipeline.approve_pending(result.signal.stable_id())
     assert action.outcome == ApprovalActionOutcome.REJECTED

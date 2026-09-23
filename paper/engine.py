@@ -144,6 +144,50 @@ class PaperTradingEngine:
             store.save_account(account)
         self.account = account
 
+    def refresh_account(self) -> None:
+        """Continuous red-team follow-up, 2026-09-23 (G9): `self.account` is
+        loaded once in `__init__` and otherwise only ever mutated/saved by
+        THIS engine instance's own methods -- correct in isolation, but a
+        second `PaperTradingEngine` instance in a SEPARATE process (the
+        documented, supported "dashboard alongside a `paper-live` CLI
+        session" use case, both pointed at the same default
+        `data/live_sim_trading.db`) has its OWN, never-refreshed in-memory
+        copy. Without this, `submit_signal`'s RiskEngine evaluation could
+        approve a signal against stale drawdown/loss-limit/open-position
+        state, and `process_bar`'s own account mutations could silently
+        overwrite a concurrently-running second process's committed
+        changes (a lost update -- see docs/MASTER_KNOWN_ISSUES.md G9).
+        Called at the top of every transactional method, INSIDE the
+        `store.transaction()` block (now `BEGIN IMMEDIATE`, see
+        `PaperStore.transaction()`), so the re-read there is guaranteed to
+        see the latest committed state and no other writer can interleave
+        between that read and the transaction's own commit. Raises
+        loudly rather than silently falling back to the old copy if the
+        account row is ever missing (it never legitimately is, once
+        `__init__` has run) -- masking that would silently reintroduce
+        the exact staleness this exists to close.
+
+        Public (not `_refresh_account`): also called OUTSIDE a
+        transaction by live/workstation.py's own read-only display
+        functions (get_account_state/get_risk_state/get_live_sim_status/
+        get_risk_halt_reasons/get_risk_decision_for_pending) -- see
+        docs/MASTER_KNOWN_ISSUES.md G9-DISPLAY. A single `SELECT` outside
+        a transaction is already a complete, atomic read in this store's
+        WAL + autocommit configuration (core.sqlite_util.connect), so no
+        transaction/lock is needed for this display-only use -- the
+        original G9 finding was specifically about the WRITE-path risk
+        decision; this closes the analogous, lower-severity READ-path
+        staleness (stale P&L/positions/risk state shown on a dashboard
+        GET request that happens not to follow an approve/reject
+        action)."""
+        account = self.store.get_account()
+        if account is None:
+            raise RuntimeError(
+                f"Account row vanished from {self.store.db_path!r} -- it is created once in "
+                "PaperTradingEngine.__init__ and never deleted, so this should be unreachable."
+            )
+        self.account = account
+
     # -- signal submission -----------------------------------------------------
 
     def submit_signal(self, signal: Signal, *, strategy_version: str = "1.0") -> JournalEntry:
@@ -186,6 +230,7 @@ class PaperTradingEngine:
 
     def _submit_signal_transaction(self, signal: Signal, signal_id: str, strategy_version: str) -> JournalEntry:
         with self.store.transaction():
+            self.refresh_account()
             self.store.save_signal(signal, strategy_version=strategy_version)
 
             decision = self.risk_engine.evaluate(signal, self.account)
@@ -316,6 +361,7 @@ class PaperTradingEngine:
         incoming_ts = _naive(bar.timestamp)
 
         with self.store.transaction():
+            self.refresh_account()
             last_ts = self.store.get_last_bar_timestamp(symbol)
             if last_ts is not None:
                 if incoming_ts == last_ts:
@@ -372,6 +418,7 @@ class PaperTradingEngine:
         still open when historical replay data runs out is closed at the
         last bar's close, reason END_OF_DATA."""
         with self.store.transaction():
+            self.refresh_account()
             open_position = self.store.get_open_position(symbol)
             if open_position is None:
                 return
