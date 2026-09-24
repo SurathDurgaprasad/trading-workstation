@@ -253,6 +253,16 @@ service (`gh api repos/SurathDurgaprasad/trading-workstation/secret-scanning/ale
 which runs automatically against public repositories and checks against known token
 formats from major credential providers. **Result: `[]` — zero alerts.**
 
+## 10b. Final CI confirmation (post-publication, post-expansion)
+
+Run `35972652800` (commit `4df5a18`, the final commit of this release pass): **`success`**.
+`2656 passed, 123 skipped, 0 failed` (337.51s) for the full suite, and
+**`46 passed`** (24.48s) for the now-5-file dedicated safety-test step — the exact same
+46-test safety surface verified locally throughout this pass, now independently
+reproduced on a fresh, public, GitHub-hosted `windows-latest` checkout. This is the
+terminal state of this release: no further changes were pending at the time this
+section was written.
+
 ## 11. Known remaining limitations of this release
 
 - Cross-platform (Linux/macOS) support is a reasoned code-level claim, not an
