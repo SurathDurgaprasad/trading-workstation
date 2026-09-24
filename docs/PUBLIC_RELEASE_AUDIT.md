@@ -18,7 +18,13 @@ be edited to contain, any secret value.
 | Owner | `SurathDurgaprasad` |
 | Visibility | **PUBLIC** (changed from PRIVATE this pass, after every gate below passed) |
 
-## Repository structure (top-level, after this pass)
+## Repository structure (top-level, at the time this document was originally written)
+
+**Note**: the layout below reflects this document's own original pass. A dedicated
+follow-up forensic cleanup pass relocated most of the `FINAL_*`/`AUDIT_*`/`TRADING_*`
+files into `docs/`/`docs/research/` and removed `.cursor/`/`.cursorignore` — see
+[`docs/PUBLIC_REPOSITORY_CLEANUP_AUDIT.md`](PUBLIC_REPOSITORY_CLEANUP_AUDIT.md) for the
+current, authoritative top-level layout.
 
 ```
 README.md, LICENSE, SECURITY.md, CONTRIBUTING.md, CHANGELOG.md, ARCHITECTURE.md
@@ -99,17 +105,18 @@ addresses were found anywhere in the tracked tree.
 
 ### A note on other root-level historical reports
 
-Several dated audit/report files (`FINAL_ADVERSARIAL_ENGINEERING_AUDIT.md`,
-`FINAL_FAILURE_MODE_ANALYSIS.md`, `FINAL_PRODUCT_*.md`, `TRADING_*.{md,json}`,
-`AUDIT_BASELINE.json`) remain at the repository root rather than being relocated into
-`docs/`. This was a deliberate choice, not an oversight: several of them (notably
-`FINAL_FAILURE_MODE_ANALYSIS.md`, referenced from 23 other files, and
-`PHASE_1_IMPLEMENTATION_SPEC.md`, referenced from 11) are heavily cross-linked from
-elsewhere in the repository, and moving them would have required updating every one of
-those references under real time pressure — a real risk of introducing a broken
-portfolio link, which would look worse than the root directory having more files in it
-than a minimal template. Each of these files was individually confirmed, this pass, to
-contain no credential and no private data (§1, §3).
+**Superseded by the follow-up forensic cleanup pass** (see
+[`docs/PUBLIC_REPOSITORY_CLEANUP_AUDIT.md`](PUBLIC_REPOSITORY_CLEANUP_AUDIT.md)): at the
+time this section was originally written, several dated audit/report files
+(`FINAL_ADVERSARIAL_ENGINEERING_AUDIT.md`, `FINAL_FAILURE_MODE_ANALYSIS.md`,
+`FINAL_PRODUCT_*.md`, `TRADING_*.{md,json}`, `AUDIT_BASELINE.json`) had been
+deliberately left at the repository root rather than relocated into `docs/`, due to
+real time pressure and the risk of an unreviewed broken link. A dedicated follow-up
+pass completed that work properly: all of the above except `FINAL_FAILURE_MODE_ANALYSIS.md`
+and `PROJECT_GOAL_AND_ROADMAP.md` (kept at root — see the cleanup audit for why) were
+moved into `docs/` or `docs/research/`, with every one of their inbound references
+traced and fixed. This paragraph is left in place, corrected rather than deleted, so the
+reasoning trail stays honest about what changed and why.
 
 ## 4. Credential architecture
 
