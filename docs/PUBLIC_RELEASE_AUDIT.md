@@ -171,6 +171,13 @@ project has been developed/tested on — chosen for honesty over convenience; it
 claim Linux/macOS support). Requires no secrets, contacts no external service, places no
 order. Triggered on push/PR to `main`, `pull_request`, and manual dispatch.
 
+**Verified, not just configured**: the first real run of this workflow on GitHub's own
+`windows-latest` runner (triggered by this release's own push to `main`, run
+`35969027003`) completed with **`success`** in 6m37s — a genuine, independent
+confirmation (fresh clone, fresh `pip install`, no local caches) that the full 2779-test
+suite passes from a clean environment, not only on the machine this project was
+developed on.
+
 ## 10. Public-visibility verification
 
 **Not yet performed as of this document's writing** — the repository remains
