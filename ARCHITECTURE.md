@@ -3,7 +3,121 @@
 A reference map of the system as it exists today. For the history of
 how it got here, see `docs/PHASE_HISTORY.md`. For day-to-day usage,
 see `USER_GUIDE.md`. For running it unattended, see
-`OPERATIONS_GUIDE.md`.
+`OPERATIONS_GUIDE.md`. For the research methodology behind the offline
+research layer described below, see `docs/RESEARCH_METHODOLOGY.md`.
+
+## Six categories, one mental model
+
+Every component in this repository falls into exactly one of six
+categories. Keeping them distinct is what makes the safety guarantees
+in `docs/SAFETY.md` possible to state precisely:
+
+| Category | What lives here | Can it place a real order? | Can it place a paper order? |
+|---|---|---|---|
+| **DATA** | `market/`, `market_data/`, `live/dhan/` (market-data side only) | No | No — supplies data, never decides |
+| **RESEARCH** | `backtesting/`, `quant_research/`, `strategy/hypothesis_registry.py`, `ml_research/`, `audit/` | No | No — offline-only, never imported by the live path |
+| **DECISION** | `strategy/baseline.py`, `market_intelligence/`, `research/`, `decision_engine/`, `agents/`, `graph.py`, `llm/`, `rag/` | No | No — produces a signal/label/narrative, never submits one |
+| **RISK** | `risk/`, `critic/` | No | Can veto, never submit |
+| **EXECUTION** | `paper/`, `live/pipeline.py`, `live/dhan/broker_adapter.py` | **Structurally impossible** (`DisabledDhanOrderExecutor` — see `docs/SAFETY.md`) | Yes — the only category that writes an order/trade row |
+| **OBSERVABILITY** | `dashboard/`, `mcp_server/`, `core/health.py`, `live/heartbeat.py` | No | No — read-only, plus 4 approve/reject/kill-switch routes that call into EXECUTION's own approval path, never a new path of their own |
+
+## Advisory LLM layer (DECISION category, never EXECUTION)
+
+`agents/`, `graph.py`, `state.py`, `llm/`, and `rag/` implement an optional,
+LLM-backed advisory layer — narration, explanation, and adversarial review of an
+already-computed decision. It is architecturally part of DECISION, never EXECUTION:
+
+- `graph.py` builds a LangGraph pipeline (`agents/technical_agent.py`,
+  `agents/risk_agent.py`, `agents/critic_agent.py`, `agents/debate_agent.py`,
+  `agents/supervisor_agent.py`) that backs the original `analyze` command — narrative
+  only, never imported by `paper/` or a broker adapter.
+- `agents/signal_explainer.py`, `agents/decision_reviewer.py`, and
+  `decision_engine/engine.py::narrate_decision` narrate an already-fixed
+  signal/decision; every LLM-output schema (`SignalExplanation`, `DecisionNarrative`,
+  `DecisionReview`, `ResearchSummary`) has no field that could carry a quantity, price,
+  stop, target, or approval — enforced at the type level, proven by
+  `tests/test_ai_output_cannot_carry_trading_authority.py`, not merely a prompt
+  instruction.
+- `rag/` (`build_vector_db.py`, `rag/vector_store.py`, `rag/retriever.py`) is a
+  ChromaDB-backed retrieval layer feeding the original `analyze` pipeline only — not
+  wired into `decision_engine/`, `market_intelligence/`, or any Phase-18-onward
+  command (a disclosed architectural boundary, not a defect).
+- `llm/provider.py` selects between a local Ollama provider (default, free) and an
+  opt-in OpenAI provider, both rate-limited and budget-gated (`llm/budget.py`); every
+  call reads its API key from the environment only at the moment of a real call, never
+  logs it (`tests/test_llm_provider_openai.py`).
+- **This layer failing (Ollama down, OpenAI unreachable) never blocks the deterministic
+  DATA → DECISION → RISK → EXECUTION path** — every AI call is wrapped to degrade to a
+  `narrative_unavailable_reason` field rather than raising.
+
+## Research layer (offline, never imported by the live/paper path)
+
+`backtesting/` (the core single-symbol backtest engine, cost model, walk-forward
+splitting, regime classification, Monte Carlo robustness), `quant_research/` (cross-
+sectional ranking, mean-reversion portfolio construction, event studies, point-in-time
+universe), `strategy/hypothesis_registry.py` (the 69-entry structured research ledger),
+and `ml_research/` (the ML Phase 1 triple-barrier baseline) together form the offline
+research layer. **None of these packages are imported by `main.py`'s live/paper
+command paths, `live/`, or `paper/`** — a hypothesis being tested here can never affect
+a running paper-trading session. See `docs/RESEARCH_METHODOLOGY.md` for how a
+hypothesis moves through this layer, and `docs/RESEARCH_RESULTS.md` for what came out
+of it (69 tested, 0 promoted).
+
+## Pipeline diagram
+
+```mermaid
+flowchart TD
+    subgraph DATA
+        MD[Market Data<br/>Yahoo / mock / Dhan feed]
+    end
+
+    subgraph RESEARCH["RESEARCH (offline only)"]
+        BT[backtesting/ + quant_research/<br/>69 hypotheses tested, 0 promoted]
+    end
+
+    subgraph DECISION
+        STRAT[strategy/baseline.py]
+        MI[market_intelligence/ → research/ → decision_engine/]
+        LLM["Advisory LLM layer (agents/, llm/)<br/>narration only"]
+    end
+
+    subgraph RISK
+        RE[RiskEngine]
+        CG[CriticGate — 13 checks]
+    end
+
+    subgraph EXECUTION
+        HA[Human approval]
+        PE["PaperTradingEngine<br/>(the ONLY thing that writes an order)"]
+        DIS["DisabledDhanOrderExecutor<br/>raises unconditionally — no real order path exists"]
+    end
+
+    subgraph OBSERVABILITY
+        DASH[Dashboard]
+        MCP[MCP server]
+        HEALTH[health / heartbeat]
+    end
+
+    MD --> STRAT
+    MD --> MI
+    MD -. informs, never fed back .-> BT
+    STRAT --> RE --> CG --> HA --> PE
+    MI -. "--paper-execute (opt-in bridge)" .-> CG
+    STRAT -.narrate only.-> LLM
+    MI -.narrate only.-> LLM
+    PE -. never .-> DIS
+    PE --> DASH
+    PE --> MCP
+    PE --> HEALTH
+
+    style DIS fill:#3a1414,stroke:#c0392b,color:#eee
+    style PE fill:#14301a,stroke:#2ecc71,color:#eee
+```
+
+The dotted line into `DisabledDhanOrderExecutor` reads "never" deliberately: nothing in
+EXECUTION calls it in production; it exists only to be exercised by
+`tests/test_dhan_no_real_orders.py`. See `docs/SAFETY.md` for the full explanation of
+why this is a structural guarantee, not a configuration default.
 
 ## Two pipelines, one shared foundation
 

@@ -1,182 +1,167 @@
 # Trading Workstation
 
-A single-user, local-first paper-trading research workstation: deterministic strategy and risk logic, a simulated (and, as of Phase 15, real-market-data-capable) intraday pipeline, a human-approval workflow, a local CLI and dashboard, and an optional AI advisory layer (a local Ollama model, or a paid OpenAI model — see "AI provider" below) that can narrate/explain a decision but never make, size, or execute one.
+[![tests](https://github.com/SurathDurgaprasad/trading-workstation/actions/workflows/tests.yml/badge.svg)](https://github.com/SurathDurgaprasad/trading-workstation/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-As of Phase 18–27, the project also has a second, complementary pipeline for market intelligence and evidence-backed recommendations, entirely separate from — and never touching — the paper-trading execution path above: scan a watchlist, gather real news/sector evidence, produce a deterministic BUY/WATCH/AVOID/EXIT/NO_ACTION label with recorded evidence, preview position sizing against your own (never-hardcoded) capital, record shadow predictions, evaluate them against real subsequent market data, and get a read-only performance report — all chainable in one pass via `shadow-run`. No command in this pipeline can place an order, real or paper.
+An end-to-end, single-user, local-first quantitative trading **research** system for
+Indian (NSE/BSE) and select US equities: real market-data ingestion, a deterministic
+strategy/risk/paper-execution pipeline, a rigorous offline hypothesis-testing framework,
+and real live-market validation against a real broker feed — with real orders
+**structurally impossible** to place.
 
-**Execution is paper-only.** There is no real broker connection, no real credentials configured, and no code path anywhere in this repository capable of placing a real order — order-mutating methods raise unconditionally rather than being merely unimplemented (see `live/dhan/broker_adapter.py`).
+**The headline result is a negative one, and that is the point of this repository:**
+across 69 preregistered hypotheses spanning technical indicators, machine learning,
+mean reversion, momentum, market-context conditioning, calendar/seasonal effects,
+derivatives (futures/options), and corporate-event studies, **zero were promoted.** No
+demonstrated, statistically and economically defensible trading edge exists with the
+information sources tested. The research program is closed; the evidence for that
+conclusion is preserved in full, not summarized away. See
+[`docs/RESEARCH_RESULTS.md`](docs/RESEARCH_RESULTS.md).
 
-**Real market data: verified live on NSE, most recently 2026-09-22.** `live/dhan/` implements a real DhanHQ v2 WebSocket market-data feed. Live connectivity was first proven in Phase 16 (real REST/WebSocket/OHLCV flowing into strategy invocation); since then it has been exercised in several real market-hours sessions — 2026-09-15 (322 real bars, a real ~15-minute feed gap correctly detected and suppressed rather than traded on — see [`docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-15.md`](docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-15.md)), 2026-09-16, 2026-09-17, and most recently a full 15-symbol, ~6h22m session on 2026-09-22 (5,355 real bars, 99.7% fresh, zero worker crashes — see [`docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-22.md`](docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-22.md)). **What has still not been observed:** a naturally-occurring trading signal from a real live session reaching the risk engine, human-approval gate, and paper execution end to end — every real session run so far has honestly produced zero signals (the frozen strategy did not fire), not a fabricated or forced one. **BSE (via the same Dhan integration) is implemented and unit-tested but has never been exercised against a real live BSE feed** — do not treat BSE as equivalent to the NSE evidence above (see [`FINAL_ADVERSARIAL_ENGINEERING_AUDIT.md`](FINAL_ADVERSARIAL_ENGINEERING_AUDIT.md)).
+This project exists to demonstrate the engineering and research discipline of building
+and adversarially testing a real trading system end to end — not to sell a strategy.
+Nothing here is investment advice.
 
-**The trading strategy is unproven, and that verdict is now frozen.** An extensive, multi-year, multi-hypothesis research campaign (walk-forward validation, regime analysis, Monte Carlo execution-robustness, cross-sectional and calendar/context studies, a persistent experiment registry with a promotion gate, and explicit Bonferroni correction for testing dozens of hypotheses) found **NO DEMONSTRATED EDGE** — see [`TRADING_STRATEGY_READINESS.md`](TRADING_STRATEGY_READINESS.md) and [`docs/STRATEGY_EDGE_DISCOVERY_FINAL_OUTPUT.md`](docs/STRATEGY_EDGE_DISCOVERY_FINAL_OUTPUT.md) for the full evidence. This verdict is deliberately treated as frozen — it is not re-derived, re-tuned, or revisited by ordinary engineering work on this repository. Nothing here should be read as investment advice, and nothing here should be represented as profitable.
+## What this is
 
-## What exists today
+| | |
+|---|---|
+| **What** | A complete trading-system pipeline: market data → strategy → risk engine → (optional human approval) → paper execution, plus a separate offline research framework and a market-intelligence/decision-support pipeline. Real Dhan broker integration for live market data and read-only account state; zero real-order capability anywhere. |
+| **Why** | To find out, honestly, whether a disciplined, adversarially-tested, cost-aware research process on real Indian-market data produces a defensible trading edge — and to build the full engineering scaffolding (risk controls, safety architecture, live-data validation) that any serious answer to that question requires, regardless of what the answer turns out to be. |
+| **Result** | No demonstrated edge. 69 hypotheses tested, 0 promoted. See [`docs/RESEARCH_RESULTS.md`](docs/RESEARCH_RESULTS.md). |
+| **Safety** | Real order execution is structurally impossible — not a disabled feature flag, but code that doesn't exist. See [`docs/SAFETY.md`](docs/SAFETY.md). |
 
+## Architecture
+
+```mermaid
+flowchart LR
+    DATA[DATA<br/>Yahoo / mock / real Dhan feed] --> DECISION
+    DATA --> RESEARCH["RESEARCH<br/>(offline, 69 hypotheses, 0 promoted)"]
+    DECISION[DECISION<br/>strategy + market intelligence<br/>+ optional LLM narration] --> RISK[RISK<br/>RiskEngine + CriticGate]
+    RISK --> EXECUTION["EXECUTION<br/>paper-only — real orders<br/>structurally impossible"]
+    EXECUTION --> OBS[OBSERVABILITY<br/>dashboard + MCP + health]
 ```
-Market Data
-      |
-Intraday simulation
-      |
-   Strategy
-      |
- Risk Engine
-      |
-AI explanation (optional)
-      |
-Human approval
-      |
-Risk check again
-      |
-Paper execution
-      |
-Position monitoring
-      |
-   Journal
-```
 
-- Historical + simulated intraday market data (1m / 5m / 15m), with explicit LIVE/DELAYED/HISTORICAL/SIMULATED/DHAN labeling and freshness/duplicate/out-of-order protection
-- A real DhanHQ v2 WebSocket market-data adapter (`live/dhan/`) implementing the same `MarketDataSource` interface the simulated feed uses — code-complete, unit/integration-tested, and **verified against the live DhanHQ v2 service** (Phase 16): real REST account calls, a real WebSocket connection, real market packets and OHLCV bars reaching the unmodified pipeline
-- A deterministic, rule-based strategy engine and a fail-closed `RiskEngine` (unchanged by the Dhan work — the adapter only supplies market data, it does not touch strategy or risk logic)
-- Paper trading with SQLite persistence, restart recovery, and reconciliation
-- A human-approval workflow with a *second*, independent risk check at the moment of approval
-- A persistent local kill switch
-- A mock broker adapter (`BrokerAdapter` protocol) for execution, and a read-only real-Dhan-account reader (funds/positions/holdings) kept structurally incapable of placing, modifying, or cancelling a real order
-- A local CLI (`paper-live`, with a `--source dhan` flag for the real feed — paper execution either way) and a minimal local dashboard
-- MCP tools for observing paper-live and real Dhan account state (read-only), plus unmistakably-named paper-only approval-action tools — no order-placement tool exists anywhere
-- Optional AI explanation via a local Ollama model — narration only; it cannot resize a position, change a price level, or approve a trade. Nothing else in this project requires Ollama; every other feature works with it absent
-- `market_data/` (Phase 18): a unifying snapshot interface over the existing Yahoo/mock/Dhan sources — `InstrumentSnapshot`/`MarketSnapshot` state models, a source-agnostic freshness/health model, and a configurable (watchlist-mode) instrument universe. Foundation only: no recommendations, no trading logic. See [`docs/phases/phase-18-market-data-foundation.html`](docs/phases/phase-18-market-data-foundation.html) and [`PROJECT_GOAL_AND_ROADMAP.md`](PROJECT_GOAL_AND_ROADMAP.md) for the long-term direction this serves
-- `market_intelligence/` (Phase 19): a market scanner (`python main.py scan`) that ranks a configured watchlist by trend/momentum/breakout/relative-strength/sector-strength, with every score traced to a plain-language explanation and every scan persisted to SQLite. Screening gates (liquidity/price/volume/volatility) default to no-ops until given real, evidence-based thresholds. Still no AI, no buy/sell/recommendation logic — see [`docs/phases/phase-19-market-scanner.html`](docs/phases/phase-19-market-scanner.html)
-- `research/` (Phase 20): real Yahoo Finance news + sector classification for a symbol (`python main.py research --symbol X`), plus an optional, never-blocking AI summary (narration only — confidence and stated unknowns, no recommendation, same "cannot mutate a decision" type-level guarantee as the existing AI explanation feature). The unrelated Phase 10/11 quant-research package was renamed `quant_research/` to free this name. Still no buy/sell/recommendation logic — see [`docs/phases/phase-20-research-intelligence.html`](docs/phases/phase-20-research-intelligence.html)
-- `decision_engine/` (Phase 21): combines the latest scanner + research evidence into a BUY/WATCH/AVOID/EXIT/NO_ACTION label (`python main.py decide --symbol X`) — a deterministic rule (no fabricated score threshold), every recommendation structurally required to carry recorded evidence, plus an optional AI narrative that can only explain the label, never choose it. **A label only — no order is placed, and the package never imports `paper/` or a broker adapter.** See [`docs/phases/phase-21-decision-intelligence.html`](docs/phases/phase-21-decision-intelligence.html)
-- `risk/sizing.py` (Phase 22): previews how the existing, unmodified `RiskEngine` would size a Phase 21 BUY decision against your current (never-hardcoded) capital (`python main.py size --symbol X --initial-capital N`) — reuses `strategy/baseline.py`'s own ATR-based stop/target convention, adds no new risk methodology. **A preview only — no order is placed.** See [`docs/phases/phase-22-risk-position-sizing.html`](docs/phases/phase-22-risk-position-sizing.html)
-- `predictions/` (Phase 23): records a BUY decision's entry/stop/target as an immutable shadow prediction (`python main.py predict --symbol X`) and later checks real market data against it (`python main.py evaluate`) — TARGET_HIT/STOP_HIT/EXPIRED/ACTIVE, plus a win-rate/return/profit-factor summary. The system keeps score whether or not you actually trade. Outcomes are always appended as new rows, never rewriting a prediction. **No order is placed.** See [`docs/phases/phase-23-shadow-prediction.html`](docs/phases/phase-23-shadow-prediction.html)
-- `learning/` (Phase 24): a read-only report over prediction history (`python main.py learn`) — strategy comparison by decision config version, market-regime performance, a composite-score calibration check, and signal-quality stats. Writes to no configuration, ever. Completes the roadmap's core intelligence pipeline (Phases 18–24: market data → scanner → research → decision → sizing → prediction → learning). See [`docs/phases/phase-24-performance-learning.html`](docs/phases/phase-24-performance-learning.html)
-- `agents/decision_reviewer.py` (Phase 25): an independent, adversarial AI second opinion on the latest decision for a symbol (`python main.py review --symbol X`) — five of the roadmap's six suggested research agents turned out to already exist (the original `analyze` pipeline, `research/summarizer.py`); this is the one genuine gap. **Review only — cannot change the label, no order is placed.** See [`docs/phases/phase-25-ai-multi-agent-research.html`](docs/phases/phase-25-ai-multi-agent-research.html)
-- `/intelligence` dashboard page (Phase 26): a new read-only view on the existing `python main.py dashboard` app — the latest scan's ranked candidates with their decision labels, plus prediction performance. No market-data fetch, LLM call, or write happens on page load. See [`docs/phases/phase-26-live-dashboard.html`](docs/phases/phase-26-live-dashboard.html)
-- `shadow-run` (Phase 27): one command chaining scan → research → decide → predict → evaluate → learn over a watchlist (`python main.py shadow-run --symbols X,Y,Z`) — pure orchestration over already-tested functions, one symbol's failure never aborts the rest. **This is infrastructure for validation, not validation itself** — the roadmap's own "run for sufficient time" criterion requires real elapsed operating time and is honestly reported as not yet met. See [`docs/phases/phase-27-shadow-trading-validation.html`](docs/phases/phase-27-shadow-trading-validation.html)
-- `scheduler/` (Phase 28): makes `shadow-run`/`evaluate`/`learn` safe to trigger unattended (`python main.py schedule tick|loop|status`) — a configurable pre-market/market-open/intraday/pre-close/post-market schedule (YAML-overridable), market-session/weekend/holiday awareness, an on-disk lock (atomic under real concurrent contention) that prevents overlapping runs and survives a crashed process on restart, and an explicit, never-default continuous loop mode. Calls the exact same, unchanged `shadow-run`/`evaluate`/`learn` command functions — no new business logic. See [`docs/phases/phase-28-operational-scheduling.html`](docs/phases/phase-28-operational-scheduling.html)
-- Production market universe (Phase 29): symbol validation, NSE/BSE exchange derivation, and best-effort Dhan broker-instrument-ID enrichment for any watchlist (`python main.py universe --symbols X,Y,Z [--with-dhan-ids]`), plus a small, honestly-labeled starter watchlist (`market_data/watchlists/starter_nse.yaml` — explicitly NOT a claimed NIFTY 50/100/500 constituent list; see the phase report for why index-membership modes remain deliberately unimplemented). See [`docs/phases/phase-29-production-market-universe.html`](docs/phases/phase-29-production-market-universe.html)
-- Provider resilience (Phase 30): `market_data/resilience.py` wraps any market-data provider with a timeout, retry with exponential backoff + jitter, a circuit breaker, an optional rate limiter, and metrics — opt-in via `--resilient` on `scan`/`shadow-run`/`evaluate`/`learn`/`schedule tick`/`schedule loop` (default off, so existing behavior is unchanged unless requested). See [`docs/phases/phase-30-provider-resilience.html`](docs/phases/phase-30-provider-resilience.html)
-- Multi-source market data (Phase 31): `MarketContext` now labels its own data source/status/freshness (reusing the existing `DataSource`/`DataStatus` enums), and `get_market_context` accepts an optional live-snapshot overlay — wired to a real, credential-gated `--live-source dhan` flag on `size`/`predict`, reusing Phase 18's `market_data/` router/adapter architecture (built then, never consumed by anything downstream until now). See [`docs/phases/phase-31-multi-source-market-data.html`](docs/phases/phase-31-multi-source-market-data.html)
-- Live intraday intelligence (Phase 32): the live-overlay mechanism now covers a whole watchlist (`shadow-run`/`schedule --live-source dhan`, one adapter for the whole run), `shadow-run` prints market session + live-overlay status, and the `/intelligence` dashboard shows each decision's data source/status honestly (or "n/a" when absent — never fabricated). See [`docs/phases/phase-32-live-intraday-intelligence.html`](docs/phases/phase-32-live-intraday-intelligence.html)
-- Market regime & breadth (Phase 33): `market_intelligence/regime.py` turns an already-computed scan into market breadth (free — pure aggregation) and a benchmark's own trend + volatility regime (`python main.py regime`), plus optional sector strength — every number an explainable aggregate or existing indicator, never an opaque AI score. Found and fixed a deep, project-wide bug along the way: `market.data_provider._to_timestamp` never actually stripped tzinfo from real data (a dead code branch, since `pd.Timestamp` is a `datetime` subclass). See [`docs/phases/phase-33-market-regime-breadth.html`](docs/phases/phase-33-market-regime-breadth.html)
-- Decision confidence & calibration (Phase 34): every `Decision` now carries a real, deterministic `confidence` score (fraction of independent scanner factors agreeing with its direction — never LLM-derived), shown in `decide`'s output and the `/intelligence` dashboard, plus a genuine calibration report in `learn` (fixed LOW/MEDIUM/HIGH bands against real outcomes, alongside the prior composite-score-median proxy, now labeled "legacy"). See [`docs/phases/phase-34-decision-confidence-calibration.html`](docs/phases/phase-34-decision-confidence-calibration.html)
-- Complete operator dashboard (Phase 35): a new `/intelligence/<symbol>` page shows the full picture for one symbol — decision history with confidence/rationale, scanner evidence, research evidence (news/sector/AI summary), and prediction history (entry/stop/target/outcome/return) — read-only, no fetch or LLM call on page load. See [`docs/phases/phase-35-complete-operator-dashboard.html`](docs/phases/phase-35-complete-operator-dashboard.html)
-- Prediction quality & outcome hardening (Phase 36): an audit of the Phase 23 prediction pipeline found and fixed three real gaps — `PredictionRecord` now structurally rejects a degenerate stop/entry/target price ordering; `predict`/`shadow-run` now refuse to double-record a prediction for the same entry bar; and `evaluate_prediction` now detects an implausible single-bar price move (consistent with an unadjusted stock split, which this project has no adjustment source for) and reports it honestly as insufficient data rather than a fabricated stop-hit. See [`docs/phases/phase-36-prediction-quality-hardening.html`](docs/phases/phase-36-prediction-quality-hardening.html)
-- Experiment tracking (Phase 37): a new `experiments/` package registers named experiments over the existing, unmodified `DecisionConfig`/`ScannerConfig`/`RiskConfig` version IDs (`python main.py experiment start|end|list|compare`) — comparison isolates each experiment to its OWN dataset/time boundary (not a lifetime aggregate), reusing `learning.analysis`'s existing win-rate/return formula unchanged. See [`docs/phases/phase-37-experiment-tracking.html`](docs/phases/phase-37-experiment-tracking.html)
-- Controlled adaptive learning (Phase 38): a new `learning/adaptation.py` compares two Phase 37 experiments and returns an explainable, advisory-only `PromotionRecommendation` (`python main.py experiment recommend --baseline-id ... --candidate-id ...`) gated by two fixed, stated evidence thresholds — 30+ resolved predictions on both sides, and a 10-percentage-point win-rate improvement margin. It never edits any config and never promotes anything automatically; promotion remains a manual step. See [`docs/phases/phase-38-controlled-adaptive-learning.html`](docs/phases/phase-38-controlled-adaptive-learning.html)
-- Long-run operations & recovery (Phase 39): fixed a real gap where an unexpected tick-level exception (outside `run_tick`'s own per-slot error handling) could kill an entire unattended `schedule loop` process — it now logs, prints, and continues to the next tick, while Ctrl+C still stops it cleanly. Adds optional `--log-file` (rotating, size-bounded) for persistent unattended logging and `schedule status --check-integrity` (read-only `PRAGMA integrity_check` + DB file size). Verified across 10 simulated trading days and a simulated mid-run crash/recovery. See [`docs/phases/phase-39-long-run-operations-recovery.html`](docs/phases/phase-39-long-run-operations-recovery.html)
-- End-to-end system validation (Phase 40): found and fixed a real gap where an unexpected failure evaluating one prediction (in `evaluate` or shadow-run's own evaluate phase) could abort evaluation of every other pending prediction in the batch — now isolated per-prediction, matching the decide stage's existing per-symbol isolation. New `tests/test_end_to_end_pipeline.py` validates the full Market Data → ... → Dashboard chain as one flow: evaluate-stage failure injection, a genuine restart-across-process-boundary test, and a full-stack check that the dashboard renders exactly what a real shadow-run persisted. See [`docs/phases/phase-40-end-to-end-system-validation.html`](docs/phases/phase-40-end-to-end-system-validation.html)
-- Profitability evidence framework (Phase 41): this project makes NO profitability claim — new `learning/profitability.py` computes win rate (with a 95% Wilson CI), expectancy, profit factor, max drawdown, return volatility, and a 95% CI for the mean per-trade return, keyed to an honest verdict (`INSUFFICIENT_DATA` / `STATISTICALLY_MEANINGLESS` / `POSITIVE_PERFORMANCE` / `NEGATIVE_PERFORMANCE`) based on whether that CI excludes zero, plus sector performance grouping. A self-audit caught and fixed a real expectancy-formula bug (breakeven trades were silently misattributed). Surfaced in `learn`'s CLI output and the `/intelligence` dashboard. See [`docs/phases/phase-41-profitability-evidence-framework.html`](docs/phases/phase-41-profitability-evidence-framework.html)
-- Final production benchmark audit (Phase 42): a whole-system adversarial re-read, not a feature build. Reconfirmed the safety invariants intact (no live order path anywhere, no credential logging, no SQL injection surface, the append-only invariant holds on every historical store, dashboard HTML-escaping is consistent). Found and fixed one real bug: a naive/UTC-aware `datetime` mix across predictions recorded with and without `--live-source dhan` could crash `learning.profitability`'s chronological sort — the same bug class already found twice in Phase 33 and once in Phase 37, fixed the same way. See [`docs/phases/phase-42-final-production-benchmark-audit.html`](docs/phases/phase-42-final-production-benchmark-audit.html)
-- Autonomous operational validation (post-Phase-42): `--initial-capital` was silently hardcoded to 100000 for `paper`/`live-sim`/`paper-live` despite the underlying `Account`/`PaperTradingEngine` always being configurable — fixed, and surfaced in `paper status` and the dashboard's ACCOUNT section (Initial Capital, Realized P&L). Added a market-data source capability matrix (see [`docs/MARKET_DATA_SOURCES.md`](docs/MARKET_DATA_SOURCES.md)), confirming Yahoo/Dhan are already correctly source-separated with no component using the wrong one. Closed a real auditability gap: `predict`/`shadow-run` can now OPTIONALLY size against real capital/risk config at prediction time (same `--initial-capital` and risk flags `size` already has) and persist the full trade plan (`risk.contracts.RiskDecision` — quantity, capital, risk amount, approved/veto reasons) alongside the prediction itself, not just print it to stdout and lose it — fully backward compatible (`risk_decision` defaults to `None`), surfaced in the CLI output and the `/intelligence/<symbol>` prediction-history table. Also confirmed, by reading the actual code, that NIFTY50/100/200/500 universe modes and several prediction-outcome states (`INVALIDATED`/`PARTIAL_SUCCESS`/`CANCELLED`) are deliberate, already-documented deferrals (no evidence-based rule exists yet for either), not gaps — and identified a genuine, undocumented-until-now architectural finding at the time: `decision_engine` (scan/research/decide/shadow-run) and the paper-trading engine (`paper`/`live-sim`/`paper-live`, driven by `strategy.baseline`) were still two independent, unbridged pipelines. **This is no longer true** — see the next bullet.
-- Deterministic BUY→paper-execution bridge, order fill lifecycle, and independent critic (post-Phase-42, continued): `decision_engine`'s BUY decisions and the paper-trading engine are now bridged, deliberately opt-in and never on by default. `shadow-run --paper-execute` (and `schedule tick|loop --paper-execute`) submits a real, idempotent `PaperTradingEngine` PENDING order for a risk-approved BUY, reusing the same `submit_signal` mechanism `paper`/`paper-live` already use — never a second execution path. `paper/advance.py` is the fill/exit half: it feeds each PENDING order (and each OPEN position) bars strictly newer than a per-symbol safe baseline (never the signal-generating bar itself — the core no-look-ahead-bias guarantee), letting it fill, hold, or close for real against genuinely later market data. A new opt-in `--max-holding-bars` force-closes a position after N bars with neither stop nor target hit (`ExitReason.EXPIRED`) — closing a real gap where a position could otherwise stay open forever in continuous unattended operation. A new `critic/` package sits between the decision and risk sizing: a pure, deterministic (no LLM, no I/O) re-examination of a proposed BUY across 13 named checks — kill switch, data freshness/future-timestamp, trade structure, duplicate exposure, evidence completeness, volume confirmation, an independent MACD-vs-scanner-momentum contradiction check, benchmark regime conflict, risk/reward, and confidence-score integrity — returning APPROVE/REJECT/DOWNGRADE/INSUFFICIENT_EVIDENCE with every check's result persisted. A REJECT or INSUFFICIENT_EVIDENCE verdict has real authority: it prevents `--paper-execute` from submitting a paper order for that symbol this run, while the shadow prediction itself is still recorded (predictions stay independent of trades, same as a risk-rejected signal already was). `--skip-critic` preserves prior behavior exactly. The `/intelligence` dashboard gained a PAPER EXECUTION section (account, pending orders, open/closed positions, journal — real-validated against the live ₹20,000 account) and a Critic column on the per-symbol prediction-history table (verdict + reasons, synthetic-fixture-tested so far — real-market critic validation is pending NSE reopening). Several real bugs found via self-audit along the way, each fixed with regression coverage: `paper/advance.py` under-reporting how many bars it actually processed on a mid-loop failure (an audit-trail accuracy defect, not a safety one); the critic's own verdict-priority order that could mask a genuine HARD failure (e.g. an active kill switch) behind a vaguer INSUFFICIENT_EVIDENCE verdict; and the shadow-run footer never aggregating critic verdicts even though every per-symbol row already printed one. See [`docs/PHASE_HISTORY.md`](docs/PHASE_HISTORY.md) for the itemized commit history of this work.
+Full component map, persistence model, safety invariants, and the complete diagram:
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-**Since the numbered-phase reports (post-Phase-42):** development continued under a series of top-level, self-contained missions, each with its own report rather than a numbered phase file:
+## Research: methodology and result
 
-- **Strategy edge-discovery research campaign** — dozens of pre-registered hypotheses (entry filters, exit rules, calendar/context effects, cross-sectional ranking, regime conditioning) tested with walk-forward validation, Monte Carlo execution-robustness, and explicit Bonferroni correction for multiple testing. Result: **NO DEMONSTRATED EDGE**, now a frozen verdict — see [`docs/STRATEGY_EDGE_DISCOVERY_FINAL_OUTPUT.md`](docs/STRATEGY_EDGE_DISCOVERY_FINAL_OUTPUT.md) and [`TRADING_STRATEGY_READINESS.md`](TRADING_STRATEGY_READINESS.md).
-- **A real-time live market data source, `live/critic_gate.py`** (a deterministic, symbol-bound re-check wired directly into the `paper-live` real-time loop, distinct from the `critic/` package described above which sits in the `shadow-run` path), a real NSE `india_nse_intraday_2026` cost model, and prediction recording/auto-resolution wired into `paper-live` itself (`--record-predictions`) — bridging the live path to the same outcome-tracking engine the `predict`/`evaluate` commands use. See [`FINAL_FAILURE_MODE_ANALYSIS.md`](FINAL_FAILURE_MODE_ANALYSIS.md) entries #40–#48.
-- **Real live-market validation sessions** on NSE against the real Dhan feed — 2026-09-07 and a full-day session on 2026-09-15 (322 real bars, one real ~15-minute feed gap correctly detected rather than traded on, zero natural signals — an honest null result). See [`docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-15.md`](docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-15.md).
-- **Multi-symbol fleet hardening** — because the live critic gate is symbol-bound (one instance per symbol), running several symbols at once uses N independent `paper-live` processes rather than a single multi-symbol process. `live/runtime_layout.py` gives each symbol its own isolated `runtime/{SYMBOL}/{paper.db,state.db,predictions.db,logs/}` tree with a startup guard against cross-symbol contamination; `live/gap_monitor.py` distinguishes a delayed feed from a disconnected one; and two new CLI commands, `fleet-supervise` (launches and supervises the whole fleet, with bounded per-symbol restarts) and `fleet-summary` (a read-only consolidated report), orchestrate the fleet without ever modifying `live/pipeline.py` itself. See [`FINAL_FAILURE_MODE_ANALYSIS.md`](FINAL_FAILURE_MODE_ANALYSIS.md) entries #49–#52.
-- **A final adversarial engineering audit** — an independent, fresh re-verification of the system's own prior claims (real Dhan connectivity, a dependency vulnerability scan, LLM decision-boundary type-safety, a real mutation test against the kill-switch approval race, secrets/SQL-injection review). Verdict: **PASS WITH RISKS** — see [`FINAL_ADVERSARIAL_ENGINEERING_AUDIT.md`](FINAL_ADVERSARIAL_ENGINEERING_AUDIT.md) for the full findings, including honestly-labeled UNVERIFIED items (BSE live connectivity, multi-hour fleet-scale resource behavior).
-- **A real 15-symbol live NSE paper session, an OpenAI advisory provider, and worker/supervisor liveness observability (2026-09-16)** — the fleet's own committed 15-symbol starter watchlist ran continuously against the real Dhan feed for 4h37m (4,185 real 1-minute bars, 100% fresh, zero corruption) before the host machine itself rebooted (root-caused via Windows Event Log forensics, not a code defect); the fleet naturally produced **zero live signals**, root-caused precisely to `volume_trend` conditions, not merely "no candidate." Added `llm/provider.py` support for `AI_PROVIDER=openai` (a real, budget-limited, rate-gated OpenAI provider alongside the existing Ollama default — see "AI provider" below), and `live/heartbeat.py` (per-worker and per-supervisor liveness files distinguishing a graceful shutdown from a crash/reboot, closing the exact observability gap the reboot incident exposed). Also proved the full pipeline mechanism — real historical candidate → `CriticGate` → `RiskEngine` → `PredictionRecord` → `PaperTradingEngine` fill/exit → prediction resolution — end to end against real historical data (a real loss trade, not cherry-picked). See [`docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-16.md`](docs/LIVE_MARKET_VALIDATION_REPORT_2026-09-16.md), [`docs/POST_WARMUP_INTELLIGENCE_VALIDATION_2026-09-16.md`](docs/POST_WARMUP_INTELLIGENCE_VALIDATION_2026-09-16.md), and [`docs/CONTINUOUS_VALIDATION_STATUS_2026-09-16.md`](docs/CONTINUOUS_VALIDATION_STATUS_2026-09-16.md).
-- **Two full-system adversarial red-team passes and an open-issues remediation pass (2026-09-22 to 2026-09-23)** — the continuous-loop pass found and closed a critical second-order data-corruption defect in `CandleBuilder` within the same session it was introduced (see `docs/CONTINUOUS_FULL_SYSTEM_RED_TEAM_FINAL_2026-09-22.md`); the 2026-09-23 remediation pass then closed the single highest-severity item left open, **G9**: a real dashboard/CLI dual-writer risk where the dashboard's single-symbol workstation pages could evaluate a trading decision against a stale, process-lifetime-cached account snapshot instead of the current one — fixed via `PaperTradingEngine.refresh_account()` (a fresh read before every risk decision and every display) plus `PaperStore.transaction()` switching to SQLite's `BEGIN IMMEDIATE` (closing a related cross-process order-creation race), both proven with real multi-connection concurrency tests, not just reasoning. Also closed: a missing dashboard exception handler, a stale docstring, `CandleBuilder`'s dormant cross-thread reads (added a lock, still unwired/dormant), and a missing `UNIQUE(position_id)` DB constraint on `trades` (with a real migration test). All four remaining research-methodology questions from the continuous-loop pass were investigated and classified — none required reopening a verdict. See [`docs/MASTER_KNOWN_ISSUES.md`](docs/MASTER_KNOWN_ISSUES.md) for the full, current, structured inventory and [`docs/FINAL_OPEN_ISSUES_REMEDIATION_2026-09-23.md`](docs/FINAL_OPEN_ISSUES_REMEDIATION_2026-09-23.md) for the full report.
+Every hypothesis is preregistered (signal definition, costs, success/failure criteria)
+**before** its result is inspected, tested across chronological development/validation/
+out-of-sample splits, cost-adjusted against a realistic NSE cost model, and checked for
+leakage, survivorship bias, and multiple-testing inflation. Negative results are kept,
+not discarded — the registry (`strategy/hypothesis_registry.py`) is a plain, honest
+ledger of everything tried.
+
+- **Methodology**: [`docs/RESEARCH_METHODOLOGY.md`](docs/RESEARCH_METHODOLOGY.md)
+- **Results, by research program**: [`docs/RESEARCH_RESULTS.md`](docs/RESEARCH_RESULTS.md)
+- **Terminal report**: [`docs/EDGE_DISCOVERY_FINAL_REPORT.md`](docs/EDGE_DISCOVERY_FINAL_REPORT.md)
+
+## Live market validation
+
+Six real sessions against the live Dhan NSE feed (2026-09-07 through 2026-09-23)
+validated the *engineering* — connectivity, candle construction, fleet supervision,
+dashboard correctness, reconnect/staleness handling — never trading profitability, and
+never placed a real order. [`docs/LIVE_VALIDATION.md`](docs/LIVE_VALIDATION.md).
+
+## Safety
+
+Real-money execution is not a disabled default — it is **code that was never written**.
+`live/dhan/broker_adapter.py::DisabledDhanOrderExecutor` raises unconditionally from
+every order-mutating method; a repository-wide search finds zero `POST`/`PUT`/`DELETE`
+calls to any Dhan endpoint anywhere in this codebase; a dedicated regression test
+(`tests/test_dhan_no_real_orders.py`) proves it on every change. Full detail, including
+why no configuration change can bypass this: [`docs/SAFETY.md`](docs/SAFETY.md). General
+security posture (credentials, dependency audit, application-layer findings):
+[`SECURITY.md`](SECURITY.md).
 
 ## Running it
 
 ```bash
 python -m venv venv
-venv\Scripts\activate        # Windows
+venv\Scripts\activate        # Windows (developed/tested platform — see docs/OPERATIONS.md)
 pip install -r requirements.txt
-
-python main.py backtest --symbol AAPL
-python main.py paper-live --symbol AAPL --interval 1d --period 1y
-python main.py dashboard
+pytest                       # full suite, no credentials required
 ```
-
-The market-intelligence/recommendation pipeline (Phase 18–27, no order ever placed) in one pass:
 
 ```bash
-python main.py shadow-run --symbols AAPL,MSFT,RELIANCE.NS
+python main.py backtest --symbol RELIANCE.NS          # offline research
+python main.py paper-live --symbol RELIANCE.NS --interval 1d --period 1y  # offline paper trading
+python main.py dashboard                                # local web UI
 ```
 
-...or one stage at a time, each persisting its own SQLite history the next stage reads:
-
-```bash
-python main.py scan --symbols AAPL,MSFT,RELIANCE.NS
-python main.py research --symbol AAPL
-python main.py decide --symbol AAPL
-python main.py size --symbol AAPL --initial-capital 100000
-python main.py predict --symbol AAPL
-python main.py evaluate
-python main.py learn
-```
-
-To run that pipeline unattended (Phase 28), on a configurable schedule, with overlap prevention and crash recovery:
-
-```bash
-python main.py schedule tick --symbols AAPL,MSFT,RELIANCE.NS   # one check-and-maybe-run cycle, safe from cron
-python main.py schedule loop --symbols AAPL,MSFT,RELIANCE.NS   # explicit continuous mode, Ctrl+C to stop
-python main.py schedule status                                  # read-only run-history audit
-```
-
-To try the real Dhan market-data feed instead of the mock replay (still paper execution — see the two caveats above), copy `.env.example` to `.env`, fill in `DHAN_CLIENT_ID`/`DHAN_ACCESS_TOKEN` (never commit that file — it's already gitignored), and:
+Real Dhan market data (still paper execution only — copy `.env.example` to `.env` first):
 
 ```bash
 python main.py paper-live --symbol RELIANCE.NS --source dhan
 ```
 
-To run several symbols at once against the real Dhan feed (N independent, isolated `paper-live` processes — see "Since the numbered-phase reports" above for why), supervised and reported on as one fleet:
+Full walkthrough (credential setup, readiness checks, fleet operation, shutdown,
+troubleshooting): [`docs/OPERATIONS.md`](docs/OPERATIONS.md). Step-by-step install:
+[`INSTALLATION.md`](INSTALLATION.md). Command reference:
+[`USER_GUIDE.md`](USER_GUIDE.md). Full capability-by-capability breakdown, including
+which commands need credentials or consume paid API usage:
+[`docs/CAPABILITIES.md`](docs/CAPABILITIES.md).
 
-```bash
-python main.py fleet-supervise --watchlist-file market_data/watchlists/starter_nse.yaml --runtime-dir runtime --source dhan
-python main.py fleet-summary --watchlist-file market_data/watchlists/starter_nse.yaml --runtime-dir runtime
-```
+## Limitations
 
-`fleet-supervise`/`paper-live --source dhan` self-correct if launched under the wrong Python: they detect a non-venv interpreter and transparently re-exec themselves under this project's own `venv` (or fail closed with a clear error if no venv exists at all) — see `live/environment_guard.py`. A real incident where a multi-hour session ran under the system Python before this guard existed is documented in commit `8e4c999`; this class of incident is now closed at the code level regardless of how the command was typed or scheduled.
-
-**AI provider (required only for `analyze` and `review`; optional for `research`'s AI summary, `decide`'s AI narrative, and live signal explanation):** every other command (`backtest`, `paper`, `paper-live`, `dashboard`, `scan`, `research --no-ai-summary`, `decide --no-narrative`, `size`, `predict`, `evaluate`, `learn`, and the entire `fleet-supervise`/live trading path) works with no LLM provider configured at all — the live paper-trading path never imports the LLM layer, at all, period (see [`ARCHITECTURE.md`](ARCHITECTURE.md)). `research`/`decide` without their `--no-*` flags still return their real evidence and deterministic label even if the provider is unreachable — the AI step never blocks. `review`'s entire purpose is the AI critique, so it fails clearly (no silent fallback) if the provider is unreachable, the same posture as `analyze`.
-
-Two providers exist behind one abstraction (`llm/provider.py`), selected by `core.config.Settings.llm_provider` / the `AI_PROVIDER` env var:
-
-- **Ollama (default, local, free)** — install [Ollama](https://ollama.com), start it (`ollama serve`), and pull the two models this project uses by default (see `core/config.py`'s `Settings` for the exact names if you've changed them):
-  ```bash
-  ollama pull qwen2.5-coder:7b
-  ollama pull nomic-embed-text
-  ```
-  Without Ollama running, `analyze` and any AI-explanation step fail with a clear, one-line error (`Ollama is not reachable at http://localhost:11434...`) — never a crash or a silent hang.
-- **OpenAI (paid, opt-in)** — set `AI_PROVIDER=openai`, `OPENAI_API_KEY`, and `OPENAI_ENABLED=true` in `.env` (see `.env.example`), then verify configuration without spending a completion:
-  ```bash
-  python main.py ai-health              # free connectivity/auth check (models.retrieve, no completion cost)
-  python main.py ai-health --smoke-test # + one real minimal completion, budget-gated
-  ```
-  Every real OpenAI call passes through `llm/budget.py`'s rate limiter (hourly cap, per-session cap, minimum interval, max input size) and is recorded to a local audit ledger (`data/ai_call_ledger.db`, never committed) the dashboard's System tab reads from. The OpenAI API key is read from the environment only at the moment of a real call — never stored in `Settings`, never logged (see `tests/test_llm_provider_openai.py`'s explicit secret-never-logged test).
-
-In both cases the LLM is structurally advisory-only: every LLM-output schema (`SignalExplanation`, `DecisionNarrative`, `DecisionReview`, `ResearchSummary`) has no field that could carry a quantity, price, stop, target, approval, or order — proven by field-set inspection and an injected-poison-field test (`tests/test_ai_output_cannot_carry_trading_authority.py`), not just a prompt instruction.
-
-Full test suite (no LLM provider required — the suite runs standalone by design):
-
-```bash
-pytest
-```
-
-Some tests use cached historical market data (`data/market/`) or a downloaded Dhan instrument master (`data/dhan/`) that are intentionally not committed to this repository (redistributing bulk third-party market data publicly is outside the scope of what this project wants to do). Those tests skip cleanly when the cache is absent; the caching layer will re-fetch on demand where the code path calls for it. No test requires real Dhan credentials or a live connection.
+No demonstrated edge; no validated live profitability; no real order path; a single
+retail-grade data/broker provider with no fallback; several real, disclosed data gaps
+(market microstructure untestable, point-in-time universe correction applied to only
+one hypothesis, no NSE earnings-date coverage). Full, candid list:
+[`docs/LIMITATIONS.md`](docs/LIMITATIONS.md).
 
 ## Documentation
 
-- [`INSTALLATION.md`](INSTALLATION.md) — clone to running system, step by step
-- [`USER_GUIDE.md`](USER_GUIDE.md) — task-oriented command reference
-- [`OPERATIONS_GUIDE.md`](OPERATIONS_GUIDE.md) — unattended/scheduled operation, monitoring, backup, restart, running a multi-symbol fleet
-- [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — symptom → cause → recovery for common failure scenarios
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — component map, persistence, datetime/data-quality policy, safety invariants
-- [`SECURITY.md`](SECURITY.md) — credential handling, live-order-blocking evidence, dependency audit
-- [`FINAL_PRODUCT_READINESS_REPORT.md`](FINAL_PRODUCT_READINESS_REPORT.md) / [`FINAL_PRODUCT_CAPABILITY_MATRIX.md`](FINAL_PRODUCT_CAPABILITY_MATRIX.md) — current, authoritative capability-by-capability status (implemented / tested / live-verified / unverified)
-- [`FINAL_FAILURE_MODE_ANALYSIS.md`](FINAL_FAILURE_MODE_ANALYSIS.md) — every FAILURE → DETECTION → SAFE RESPONSE → RECOVERY scenario considered, evidence-labeled, 53 entries
-- [`FINAL_ADVERSARIAL_ENGINEERING_AUDIT.md`](FINAL_ADVERSARIAL_ENGINEERING_AUDIT.md) — the most recent independent engineering audit (verdict: PASS WITH RISKS)
-- [`TRADING_STRATEGY_READINESS.md`](TRADING_STRATEGY_READINESS.md) / [`docs/STRATEGY_EDGE_DISCOVERY_FINAL_OUTPUT.md`](docs/STRATEGY_EDGE_DISCOVERY_FINAL_OUTPUT.md) — the frozen strategy-edge research verdict and its full evidence
+**Start here:**
+[`ARCHITECTURE.md`](ARCHITECTURE.md) ·
+[`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) ·
+[`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) ·
+[`docs/SAFETY.md`](docs/SAFETY.md) ·
+[`SECURITY.md`](SECURITY.md) ·
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md)
 
-## Project status
+**Research:**
+[`docs/RESEARCH_METHODOLOGY.md`](docs/RESEARCH_METHODOLOGY.md) ·
+[`docs/RESEARCH_RESULTS.md`](docs/RESEARCH_RESULTS.md) ·
+[`docs/EDGE_DISCOVERY_FINAL_REPORT.md`](docs/EDGE_DISCOVERY_FINAL_REPORT.md) ·
+[`docs/LIVE_VALIDATION.md`](docs/LIVE_VALIDATION.md) ·
+`docs/research/` (per-hypothesis preregistrations) ·
+`docs/LIVE_MARKET_VALIDATION_REPORT*.md` (per-session live reports)
 
-Development proceeded first in 42 numbered phases, each with its own forensic audit and report (see [`docs/PHASE_HISTORY.md`](docs/PHASE_HISTORY.md) for the full index and `docs/phases/` for the original reports), then in a series of top-level, self-contained missions summarized under "Since the numbered-phase reports" above. **2,779 tests pass** (full regression, 0 failed, most recently re-confirmed 2026-09-23 — see `docs/FINAL_OPEN_ISSUES_REMEDIATION_2026-09-23.md` for the exact run) — the full suite has no external-service dependency; some tests use locally-cached market data or a downloaded Dhan instrument master and skip cleanly when that cache is absent, but no test requires real credentials or a live connection. The human-operated workstation (CLI, dashboard, MCP, approval workflow, kill switch, reconciliation), the real Dhan market-data adapter, and the multi-symbol fleet supervisor are all code-complete, tested, and verified against the live Dhan service on NSE — most recently a real 15-symbol, 4h37m, 4,185-bar session on 2026-09-16 (see the bullet above). See [`FINAL_PRODUCT_READINESS_REPORT.md`](FINAL_PRODUCT_READINESS_REPORT.md) and [`FINAL_ADVERSARIAL_ENGINEERING_AUDIT.md`](FINAL_ADVERSARIAL_ENGINEERING_AUDIT.md) for the current, complete, evidence-labeled status — including what remains **unverified** (BSE live connectivity, multi-hour fleet-scale resource behavior) and **not supported** (no real order-placement path exists anywhere in this repository; no container/Docker packaging is currently provided).
+**Usage:**
+[`INSTALLATION.md`](INSTALLATION.md) ·
+[`USER_GUIDE.md`](USER_GUIDE.md) ·
+[`OPERATIONS_GUIDE.md`](OPERATIONS_GUIDE.md) (unattended operation, fleet supervision,
+backup) ·
+[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
 
-What remains before real trading could even be considered: a naturally-occurring real trading signal traced end-to-end through the risk engine, human approval, and paper execution **on a live session** (not yet observed — real market data has flowed all the way through strategy invocation in multiple real live sessions, honestly producing zero signals each time, so the risk/approval/execution stages remain exercised only by the deterministic test suite and by real-historical-data replay, not by a genuine live signal; the full mechanism — critic, risk, prediction, paper fill/exit, resolution — has now been proven correct end-to-end against real historical data, see the 2026-09-16 bullet above, which is a stronger form of mechanism verification than before but is still not the same claim as "observed live"), a real order-placement adapter (does not exist anywhere in this repository — only a structurally-disabled stub does, confirmed by the most recent independent audit), and, independently of any of that, actual evidence the strategy has an edge (it doesn't — this verdict is frozen, not merely "as of the last study"; a fresh, reproducible 456-trade pooled backtest run on 2026-09-16 reconfirmed it, not contradicted it).
+**Project history and prior audits** (each a dated, point-in-time snapshot — where a
+later document disagrees with an earlier one, the later document and the `docs/`
+directory's dated reports are authoritative):
+[`PROJECT_GOAL_AND_ROADMAP.md`](PROJECT_GOAL_AND_ROADMAP.md) ·
+[`CHANGELOG.md`](CHANGELOG.md) ·
+[`docs/PHASE_HISTORY.md`](docs/PHASE_HISTORY.md) (42 numbered phases, `docs/phases/`) ·
+[`FINAL_PRODUCT_READINESS_REPORT.md`](FINAL_PRODUCT_READINESS_REPORT.md) /
+[`FINAL_PRODUCT_CAPABILITY_MATRIX.md`](FINAL_PRODUCT_CAPABILITY_MATRIX.md) ·
+[`FINAL_FAILURE_MODE_ANALYSIS.md`](FINAL_FAILURE_MODE_ANALYSIS.md) (53 evidence-labeled
+failure scenarios) ·
+[`FINAL_ADVERSARIAL_ENGINEERING_AUDIT.md`](FINAL_ADVERSARIAL_ENGINEERING_AUDIT.md) ·
+[`TRADING_STRATEGY_READINESS.md`](TRADING_STRATEGY_READINESS.md) ·
+[`docs/MASTER_KNOWN_ISSUES.md`](docs/MASTER_KNOWN_ISSUES.md) (current open items) ·
+[`docs/PUBLIC_RELEASE_AUDIT.md`](docs/PUBLIC_RELEASE_AUDIT.md) (this public release's own
+security/reproducibility audit)
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) — a personal project, not a maintained
+product, but genuine contributions are welcome within the ground rules there
+(never weaken the safety architecture, never commit a credential, preregister new
+research).
+
+## License
+
+[MIT](LICENSE), with an additional explicit disclaimer: this is research software, not
+investment advice, and has no demonstrated trading edge. See the LICENSE file for the
+full text.
