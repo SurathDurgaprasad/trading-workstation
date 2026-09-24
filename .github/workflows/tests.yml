@@ -1,0 +1,45 @@
+name: tests
+
+# Runs the full offline test suite on every push/PR. No secrets are used or
+# required — this repository has no real broker/API credentials configured
+# anywhere, and none are needed: the full suite runs standalone (see
+# docs/OPERATIONS.md and SECURITY.md). This workflow never runs a live-data
+# command, never contacts Dhan, and never places an order (no such code
+# path exists in this repository at all — see docs/SAFETY.md).
+#
+# Runs on windows-latest because that is the only platform this project has
+# actually been developed and verified on (see docs/OPERATIONS.md's own
+# "developed and tested on Windows" note) — this workflow is not evidence
+# of Linux/macOS support, and does not claim it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run test suite (offline, no credentials required)
+        run: pytest -q
+
+      - name: Verify real-order execution remains structurally disabled
+        run: pytest -q tests/test_dhan_no_real_orders.py tests/test_dhan_credential_security.py
