@@ -68,7 +68,7 @@ python main.py fleet-supervise --watchlist-file market_data/watchlists/starter_n
 python main.py fleet-summary --watchlist-file market_data/watchlists/starter_nse.yaml --runtime-dir runtime
 ```
 
-**No command in this repository can place a real order — see [`SAFETY.md`](../docs/SAFETY.md).**
+**No command in this repository can place a real order — see [`SAFETY.md`](SAFETY.md).**
 `--source dhan` only changes where market data comes from; execution is always paper.
 
 **Never run these with real trading intent** — the strategy has no demonstrated edge
