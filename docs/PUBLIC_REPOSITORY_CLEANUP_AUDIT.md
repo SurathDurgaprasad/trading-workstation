@@ -160,13 +160,18 @@ Re-scanned after every material change in this pass:
 
 ## Tests
 
-Full suite re-run after this cleanup: **2779 tests, 0 failed** (this cleanup pass
-touched no source or test file — only documentation/config files were moved or
-removed — so no test count change was expected or occurred). The dedicated
-real-order-safety test suite (`test_dhan_no_real_orders.py`,
-`test_dhan_credential_security.py`, `test_ai_output_cannot_carry_trading_authority.py`,
-`test_approval_security.py`, `test_mcp_live_workstation.py`) continues to pass in
-full.
+Full suite re-run after this cleanup, both locally and on GitHub's own public CI:
+
+- **Local**: `2779 passed, 0 failed` (this cleanup pass touched no source or test
+  file — only documentation/config files were moved or removed — so no test count
+  change was expected or occurred).
+- **CI** (run `35976444458`, commit `b68dac8`, the commit this cleanup pass is
+  itself part of): **`success`** — `2656 passed, 123 skipped, 0 failed` (409.81s) for
+  the full suite, and `46 passed` (31.12s) for the dedicated safety-test step
+  (`test_dhan_no_real_orders.py`, `test_dhan_credential_security.py`,
+  `test_ai_output_cannot_carry_trading_authority.py`, `test_approval_security.py`,
+  `test_mcp_live_workstation.py`). `2656 + 123 = 2779`, matching the local total; the
+  123 skips are the same expected, already-documented local-cache-dependent tests.
 
 ## Documentation updated
 
