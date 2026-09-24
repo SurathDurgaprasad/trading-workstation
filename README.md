@@ -67,7 +67,10 @@ never placed a real order. [`docs/LIVE_VALIDATION.md`](docs/LIVE_VALIDATION.md).
 
 ## Safety
 
-Real-money execution is not a disabled default — it is **code that was never written**.
+No executable real-order implementation exists anywhere in this codebase — the
+deliberate safety boundary in its place is `DisabledDhanOrderExecutor`, and no
+configuration change can enable real-money execution, because there is no real
+executor for any configuration to select.
 `live/dhan/broker_adapter.py::DisabledDhanOrderExecutor` raises unconditionally from
 every order-mutating method; a repository-wide search finds zero `POST`/`PUT`/`DELETE`
 calls to any Dhan endpoint anywhere in this codebase; a dedicated regression test
