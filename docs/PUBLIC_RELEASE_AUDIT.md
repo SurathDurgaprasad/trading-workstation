@@ -137,11 +137,23 @@ nothing of this kind was ever committed.
   warnings (a benign Windows-temp-file `PermissionError` during one test's own thread
   cleanup, and a third-party `chromadb` deprecation warning — neither affects
   pass/fail status).
-- **Dedicated safety/credential tests** (run explicitly, separately, this pass):
+- **Dedicated safety/credential tests** (run explicitly, separately, this pass, expanded
+  to cover the full safety-relevant surface — real-order execution, credential handling,
+  AI output authority, the human-approval race conditions, and the MCP tool boundary):
   `tests/test_dhan_no_real_orders.py`, `tests/test_dhan_credential_security.py`,
-  `tests/test_ai_output_cannot_carry_trading_authority.py` — **26/26 passed**.
+  `tests/test_ai_output_cannot_carry_trading_authority.py`,
+  `tests/test_approval_security.py`, `tests/test_mcp_live_workstation.py` —
+  **46/46 passed** (13.72s).
 - No test in the suite requires a live connection or a real credential; the suite runs
   standalone by design.
+- **Final pre-publication re-scan** (immediately before visibility was changed): current
+  tracked tree re-scanned with `detect-secrets` (3 findings, all confirmed false
+  positives — 2 real git-commit SHAs in `AUDIT_BASELINE.json`, 1 deliberately-fake test
+  fixture in `tests/test_llm_provider_openai.py`, and this document's own prose
+  *describing* the search patterns used, which trips the same detector's heuristics
+  without containing an actual key) and the full git history re-scanned with a 16-pattern
+  regex sweep across every added/removed line in all 325+ commits — **zero real
+  credentials found**, consistent with every earlier pass.
 
 ## 7. Documentation audit
 
