@@ -46,7 +46,7 @@
       "date": "2026-09-01T21:47:58+05:30",
       "message": "Initial commit: human-operated paper-trading workstation (Phase 0-13)"
     },
-    "contributors": ["SurathDurgaprasad <durgaprasadsurath@gmail.com>"],
+    "contributors": ["SurathDurgaprasad"],
     "tags": [],
     "branch_count_note": "150+ local/remote branches exist (one per phase and per feature/fix, e.g. phase-16-dhan-connectivity, feature-deterministic-critic-core, fix-stale-pending-order-bypasses-risk-halt), almost none deleted after merge -- see technical_debt entry 'stale-branch-accumulation'."
   },

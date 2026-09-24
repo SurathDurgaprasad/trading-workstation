@@ -16,7 +16,7 @@ logic, concurrency cap, or capital allocation.
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(r"C:\Users\durgaprasad.surath\OneDrive - Ideabytes\Documents\Working With AI\ai_trade\TradingAgents")
+REPO_ROOT = Path(__file__).resolve().parents[3]  # audit/<family>/scripts/this_file.py -> repo root
 sys.path.insert(0, str(REPO_ROOT))
 
 import pandas as pd
